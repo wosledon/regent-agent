@@ -15,6 +15,7 @@ public static class DbInitializer
     {
         if (await db.Tenants.AnyAsync(x => x.Id == TenantId, cancellationToken))
         {
+            await EnsureOrganizationSeedAsync(db, cancellationToken);
             return;
         }
 
@@ -139,6 +140,56 @@ public static class DbInitializer
             PayloadJson = "{}", CreatedAt = Now
         });
 
+        await db.SaveChangesAsync(cancellationToken);
+        await EnsureOrganizationSeedAsync(db, cancellationToken);
+    }
+
+    private static async Task EnsureOrganizationSeedAsync(RegentDbContext db, CancellationToken cancellationToken)
+    {
+        if (!await db.Charters.AnyAsync(x => x.TenantId == TenantId, cancellationToken))
+        {
+            db.Charters.Add(new CharterRecord
+            {
+                TenantId = TenantId, Mission = "Build useful software products autonomously.",
+                ConstraintsJson = JsonSerializer.Serialize(new[] { "Keep tenant data isolated", "Require evidence for completion" }),
+                MonthlyBudgetMinor = 8_000_000, Currency = "CNY",
+                GovernanceJson = JsonSerializer.Serialize(new Dictionary<string, string>
+                {
+                    ["approval"] = "boss.final",
+                    ["work_schedule"] = "24x7.configurable"
+                }),
+                Version = 1, UpdatedAt = Now
+            });
+        }
+
+        if (!await db.Positions.AnyAsync(x => x.TenantId == TenantId, cancellationToken))
+        {
+            var controller = new PositionRecord
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, Name = "Controller",
+                Responsibilities = "Plan the organization and coordinate delivery.",
+                CapabilitiesJson = JsonSerializer.Serialize(new[] { "org.design", "project.decide", "task.assign" }),
+                BudgetMinor = 1_000_000, Status = "Filled"
+            };
+            db.Positions.Add(controller);
+            db.Positions.AddRange(
+                new PositionRecord { Id = Guid.NewGuid(), TenantId = TenantId, Name = "Engineering", ParentPositionId = controller.Id, Responsibilities = "Implement and verify product changes.", CapabilitiesJson = "[\"code.implement\",\"test.execute\"]", BudgetMinor = 2_000_000, Status = "Filled" },
+                new PositionRecord { Id = Guid.NewGuid(), TenantId = TenantId, Name = "Quality", ParentPositionId = controller.Id, Responsibilities = "Independently verify delivery evidence.", CapabilitiesJson = "[\"acceptance.review\",\"test.execute\"]", BudgetMinor = 1_000_000, Status = "Filled" },
+                new PositionRecord { Id = Guid.NewGuid(), TenantId = TenantId, Name = "Research", ParentPositionId = controller.Id, Responsibilities = "Research opportunities and preserve evidence.", CapabilitiesJson = "[\"research.execute\",\"product.define\"]", BudgetMinor = 1_000_000, Status = "Filled" });
+            await db.SaveChangesAsync(cancellationToken);
+        }
+
+        var positions = await db.Positions.AsNoTracking().Where(x => x.TenantId == TenantId).ToDictionaryAsync(x => x.Name, cancellationToken);
+        var employees = await db.Employees.Where(x => x.TenantId == TenantId).ToListAsync(cancellationToken);
+        foreach (var employee in employees.Where(x => positions.ContainsKey(x.Position)))
+        {
+            if (await db.EmploymentPeriods.AnyAsync(x => x.TenantId == TenantId && x.EmployeeId == employee.Id && x.EndedAt == null, cancellationToken)) continue;
+            db.EmploymentPeriods.Add(new EmploymentPeriodRecord
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, EmployeeId = employee.Id,
+                PositionId = positions[employee.Position].Id, Kind = "Primary", StartedAt = Now
+            });
+        }
         await db.SaveChangesAsync(cancellationToken);
     }
 }

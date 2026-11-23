@@ -25,6 +25,68 @@ public sealed class MembershipRecord
     public string Role { get; set; } = "Owner";
 }
 
+public sealed class CharterRecord
+{
+    public Guid TenantId { get; set; }
+    public string Mission { get; set; } = string.Empty;
+    public string ConstraintsJson { get; set; } = "[]";
+    public long MonthlyBudgetMinor { get; set; }
+    public string Currency { get; set; } = "CNY";
+    public string GovernanceJson { get; set; } = "{}";
+    public int Version { get; set; } = 1;
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public sealed class PositionRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Responsibilities { get; set; } = string.Empty;
+    public string CapabilitiesJson { get; set; } = "[]";
+    public long BudgetMinor { get; set; }
+    public Guid? ParentPositionId { get; set; }
+    public string Status { get; set; } = "Open";
+    public int Version { get; set; } = 1;
+}
+
+public sealed class EmploymentPeriodRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public Guid PositionId { get; set; }
+    public string Kind { get; set; } = "Primary";
+    public DateTimeOffset StartedAt { get; set; }
+    public DateTimeOffset? EndedAt { get; set; }
+}
+
+public sealed class OrgDelegationRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid DelegatorEmployeeId { get; set; }
+    public Guid DelegateEmployeeId { get; set; }
+    public Guid SubtreePositionId { get; set; }
+    public string ActionsJson { get; set; } = "[]";
+    public long BudgetLimitMinor { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public string Status { get; set; } = "Active";
+}
+
+public sealed class CandidateRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid PositionId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public string ModelVersion { get; set; } = string.Empty;
+    public string Status { get; set; } = "Screening";
+    public string AssessmentJson { get; set; } = "{}";
+    public string FairnessJson { get; set; } = "{}";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
 public sealed class EmployeeRecord
 {
     public Guid Id { get; set; }

@@ -44,6 +44,8 @@ builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<ApprovalService>();
 builder.Services.AddScoped<ArtifactService>();
 builder.Services.AddScoped<TaskExecutionService>();
+builder.Services.AddScoped<TenantService>();
+builder.Services.AddScoped<OrganizationService>();
 builder.Services.AddSingleton(sp => new WorkflowService(
     new JsonDocumentStore<WorkflowDefinition>("data/modules/workflows.json"),
     new JsonDocumentStore<WorkflowRun>("data/modules/workflow-runs.json")));
@@ -123,6 +125,7 @@ if (app.Environment.IsDevelopment())
     await using var scope = app.Services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<RegentDbContext>();
     await db.Database.EnsureCreatedAsync();
+    await LocalSchemaUpgrade.ApplyAsync(db, CancellationToken.None);
     await DbInitializer.InitializeAsync(db, CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<WorkflowService>().SeedAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<MemoryService>().SeedAsync(CancellationToken.None);
@@ -153,24 +156,19 @@ app.MapPost("/auth/dev-login", async (DevLoginRequest request, RegentDbContext d
     }
 
     var email = request.Email.Trim().ToLowerInvariant();
-    var membership = await db.Memberships.AsNoTracking()
-        .Join(db.Users.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new { m.TenantId, u.Id, u.Email, u.DisplayName })
-        .SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+    var memberships = await db.Memberships.AsNoTracking()
+        .Join(db.Users.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new { m.TenantId, m.Role, u.Id, u.Email, u.DisplayName })
+        .Where(x => x.Email == email)
+        .ToListAsync(cancellationToken);
+    var membership = memberships.FirstOrDefault(x => request.TenantId is null || x.TenantId == request.TenantId)
+        ?? memberships.FirstOrDefault();
     if (membership is null)
     {
         return ApiResults.Problem(RegentAgent.Contracts.Results.Error.Unauthorized("Unknown development user."), context.TraceIdentifier);
     }
 
-    var claims = new[]
-    {
-        new Claim(ClaimTypes.NameIdentifier, membership.Id.ToString()),
-        new Claim("tenant_id", membership.TenantId.ToString()),
-        new Claim(ClaimTypes.Name, membership.DisplayName),
-        new Claim(ClaimTypes.Role, "Owner")
-    };
-    await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
-        new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)));
-    return Results.Ok(new { email = membership.Email, display_name = membership.DisplayName });
+    await SignInTenantAsync(context, membership.Id, membership.TenantId, membership.DisplayName, membership.Role);
+    return Results.Ok(new { email = membership.Email, display_name = membership.DisplayName, tenant_id = membership.TenantId });
 }).AllowAnonymous();
 
 app.MapPost("/auth/logout", async (HttpContext context) =>
@@ -179,7 +177,65 @@ app.MapPost("/auth/logout", async (HttpContext context) =>
     return Results.NoContent();
 }).RequireAuthorization();
 
+app.MapPost("/auth/switch-tenant", async (SwitchTenantRequest request, RegentDbContext db,
+    HttpContext context, CancellationToken cancellationToken) =>
+{
+    var userId = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+    var membership = await db.Memberships.AsNoTracking()
+        .Join(db.Users.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new { m.TenantId, m.Role, u.Id, u.DisplayName })
+        .SingleOrDefaultAsync(x => x.TenantId == request.TenantId && x.Id == userId, cancellationToken);
+    if (membership is null) return Results.NotFound();
+    await SignInTenantAsync(context, userId, membership.TenantId, membership.DisplayName, membership.Role);
+    return Results.Ok(new { tenant_id = membership.TenantId });
+}).RequireAuthorization();
+
 var api = app.MapGroup("/v1").RequireAuthorization();
+
+api.MapGet("/tenants", async (TenantService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ListForUserAsync(cancellationToken))).Produces<IReadOnlyList<TenantDto>>().WithTags("Tenancy");
+api.MapPost("/tenants", async (CreateTenantRequest request, TenantService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CreateAsync(request.Name, request.CompanyName, cancellationToken)))
+    .Produces<TenantDto>().WithTags("Tenancy");
+api.MapGet("/charter", async (OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetCharterAsync(cancellationToken))).Produces<CharterDto>().WithTags("Organization");
+api.MapPut("/charter", async (CharterDto charter, OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.UpdateCharterAsync(charter, cancellationToken))).Produces<CharterDto>().WithTags("Organization");
+api.MapPost("/company/start", async (OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.StartCompanyAsync(cancellationToken))).Produces<EmployeeSummary>().WithTags("Organization");
+api.MapGet("/positions", async (OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ListPositionsAsync(cancellationToken))).Produces<IReadOnlyList<PositionDto>>().WithTags("Organization");
+api.MapPost("/positions", async (PositionDto position, OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CreatePositionAsync(position, cancellationToken))).Produces<PositionDto>().WithTags("Organization");
+api.MapPost("/employees/{employeeId:guid}/assignments", async (Guid employeeId, AssignPositionRequest request,
+    OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AssignAsync(employeeId, request.PositionId, cancellationToken)))
+    .Produces<EmploymentPeriodDto>().WithTags("Organization");
+api.MapPost("/delegations", async (CreateDelegationRequest request, OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.DelegateAsync(request.DelegateEmployeeId, request.SubtreePositionId,
+        request.Actions, request.BudgetLimitMinor, request.Minutes, cancellationToken)))
+    .Produces<OrgDelegationDto>().WithTags("Organization");
+api.MapDelete("/delegations/{id:guid}", async (Guid id, OrganizationService service, CancellationToken cancellationToken) =>
+{
+    await service.RevokeDelegationAsync(id, cancellationToken);
+    return Results.NoContent();
+}).WithTags("Organization");
+api.MapPost("/employees/{employeeId:guid}/offboard", async (Guid employeeId, OffboardRequest request,
+    OrganizationService service, CancellationToken cancellationToken) =>
+{
+    await service.OffboardAsync(employeeId, request.ApprovalId, cancellationToken);
+    return Results.NoContent();
+}).WithTags("Organization");
+api.MapPost("/candidates", async (CreateCandidateRequest request, OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CreateCandidateAsync(request.PositionId, request.DisplayName, request.ModelVersion, cancellationToken)))
+    .Produces<CandidateDto>().WithTags("Recruitment");
+api.MapPost("/candidates/{candidateId:guid}/assessment", async (Guid candidateId, CandidateAssessmentDto assessment,
+    OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AssessCandidateAsync(candidateId, assessment, cancellationToken)))
+    .Produces<CandidateDto>().WithTags("Recruitment");
+api.MapPost("/candidates/{candidateId:guid}/hire", async (Guid candidateId, HireCandidateRequest request,
+    OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.HireCandidateAsync(candidateId, request.ApprovalId, cancellationToken)))
+    .Produces<EmployeeSummary>().WithTags("Recruitment");
 
 api.MapGet("/dashboard/summary", async (DashboardService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetAsync(cancellationToken)))
@@ -384,7 +440,27 @@ static string CurrentTenant(HttpContext context) =>
 
 static string CurrentUser(HttpContext context) => context.User.FindFirstValue(ClaimTypes.Name) ?? "Unknown";
 
-public sealed record DevLoginRequest(string Email);
+static async Task SignInTenantAsync(HttpContext context, Guid userId, Guid tenantId, string displayName, string role)
+{
+    var claims = new[]
+    {
+        new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+        new Claim("tenant_id", tenantId.ToString()),
+        new Claim(ClaimTypes.Name, displayName),
+        new Claim(ClaimTypes.Role, role)
+    };
+    await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
+        new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)));
+}
+
+public sealed record DevLoginRequest(string Email, Guid? TenantId = null);
+public sealed record SwitchTenantRequest(Guid TenantId);
+public sealed record CreateTenantRequest(string Name, string CompanyName);
+public sealed record AssignPositionRequest(Guid PositionId);
+public sealed record CreateDelegationRequest(Guid DelegateEmployeeId, Guid SubtreePositionId, IReadOnlyList<string> Actions, long BudgetLimitMinor, int Minutes);
+public sealed record OffboardRequest(string ApprovalId);
+public sealed record CreateCandidateRequest(Guid PositionId, string DisplayName, string ModelVersion);
+public sealed record HireCandidateRequest(string ApprovalId);
 public sealed record CorrectMemoryRequest(string Content, string Reason);
 public sealed record CreateReviewRequest(string EmployeeId, string Conclusion, string EvidenceJson);
 public sealed record SendMessageRequest(string Body, string Priority);
