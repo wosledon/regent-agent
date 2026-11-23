@@ -1128,11 +1128,28 @@ api.MapPost("/memory/corrections", async (MemoryCorrectionRequest request, HttpC
     return Results.Ok(task);
 }).Produces<CorrectionTask>().RequireAuthorization("MemoryGovernor").WithTags("Memory");
 api.MapPost("/memory/corrections/{id}/approve", async (string id, MemoryCorrectionApprovalRequest request,
-    HttpContext context, MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
+    HttpContext context, MemorySafetyService safety, MemoryEventService events, GovernanceService governance,
+    CancellationToken cancellationToken) =>
 {
+    var tenantId = Guid.Parse(CurrentTenant(context));
     var corrected = await safety.ApproveCorrectionAsync(id, CurrentTenant(context), request, cancellationToken);
-    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
-        "memory.correction.published", new { correction_id = id, old_claim_id = corrected.SupersedesId, new_claim_id = corrected.Id, reviewer_id = request.ReviewerId },
+    var externalImpacts = corrected.SupersedesId is { } oldClaimId
+        ? (await safety.GetImpactAsync(oldClaimId, CurrentTenant(context), cancellationToken))
+            .Where(x => x.TargetType == "ExternalAction").ToArray() : [];
+    Guid? incidentId = null;
+    if (externalImpacts.Length > 0)
+    {
+        var incident = await governance.CreateIncidentAsync(tenantId, new SecurityIncident
+        {
+            Severity = "SEV2", Title = "Memory correction affected an external action",
+            Commander = CurrentUser(context), Status = "Open",
+            EvidenceRefs = externalImpacts.Select(x => $"memory-impact:{x.Id}").ToArray(),
+            ContainmentActions = ["Pause affected external action pending independent review"]
+        }, cancellationToken);
+        incidentId = incident.Id;
+    }
+    await events.RecordAsync(tenantId, CurrentUserId(context), CurrentUser(context),
+        "memory.correction.published", new { correction_id = id, old_claim_id = corrected.SupersedesId, new_claim_id = corrected.Id, reviewer_id = request.ReviewerId, incident_id = incidentId },
         "Memory correction published and recall index updated", "Medium", cancellationToken);
     return Results.Ok(corrected);
 }).Produces<MemoryClaim>().RequireAuthorization("MemoryGovernor").WithTags("Memory");
