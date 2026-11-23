@@ -27,6 +27,7 @@ using RegentAgent.Contracts.Enums;
 using RegentAgent.Contracts.Evaluation;
 using RegentAgent.Contracts.Governance;
 using RegentAgent.Contracts.Identity;
+using RegentAgent.Contracts.Memory;
 using RegentAgent.Contracts.Models;
 using RegentAgent.Contracts.Operations;
 using RegentAgent.Contracts.Organization;
@@ -73,6 +74,9 @@ builder.Services.AddSingleton(sp => new WorkflowService(
 builder.Services.AddSingleton(sp => new MemoryService(
     new JsonDocumentStore<MemoryClaim>("data/modules/memory.json"),
     new JsonDocumentStore<CorrectionTask>("data/modules/corrections.json")));
+builder.Services.AddSingleton(sp => new MemoryGraphService(
+    new JsonDocumentStore<MemoryGraphNode>("data/modules/memory-graph-nodes.json"),
+    new JsonDocumentStore<MemoryGraphEdge>("data/modules/memory-graph-edges.json")));
 builder.Services.AddSingleton(sp => new PerformanceService(
     new JsonDocumentStore<KpiSnapshot>("data/modules/kpis.json"),
     new JsonDocumentStore<PerformanceReview>("data/modules/reviews.json")));
@@ -948,6 +952,16 @@ api.MapDelete("/memories/{id}", async (string id, HttpContext context, MemorySer
     await service.DeleteAsync(id, CurrentTenant(context), cancellationToken);
     return Results.NoContent();
 }).WithTags("Memory");
+api.MapPost("/memory-graph/nodes", async (MemoryGraphNode node, HttpContext context, MemoryGraphService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.AddNodeAsync(node with { TenantId = CurrentTenant(context) }, cancellationToken)))
+    .Produces<MemoryGraphNode>().WithTags("Memory");
+api.MapPost("/memory-graph/edges", async (MemoryGraphEdge edge, HttpContext context, MemoryGraphService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.AddEdgeAsync(edge with { TenantId = CurrentTenant(context) }, cancellationToken)))
+    .Produces<MemoryGraphEdge>().WithTags("Memory");
+api.MapGet("/memory-graph/query", async (string startClaimId, int maxDepth, int maxNodes, HttpContext context,
+    MemoryGraphService service, CancellationToken cancellationToken) => Results.Ok(await service.QueryAsync(
+        CurrentTenant(context), startClaimId, maxDepth, maxNodes, cancellationToken)))
+    .Produces<MemoryGraphQueryResult>().WithTags("Memory");
 api.MapPost("/memories/decay", async (HttpContext context, MemoryService service,
     CancellationToken cancellationToken) =>
 {
