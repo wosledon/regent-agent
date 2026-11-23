@@ -184,6 +184,18 @@ public sealed class AuditRecord
     public string EventType { get; set; } = string.Empty;
     public string Actor { get; set; } = string.Empty;
     public string PayloadJson { get; set; } = "{}";
+    public string PreviousHash { get; set; } = string.Empty;
+    public string Hash { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class AuditCheckpointRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public long ThroughSeq { get; set; }
+    public string MerkleRoot { get; set; } = string.Empty;
+    public string Profile { get; set; } = "standard";
     public DateTimeOffset CreatedAt { get; set; }
 }
 

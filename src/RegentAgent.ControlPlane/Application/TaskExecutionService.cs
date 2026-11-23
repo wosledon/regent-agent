@@ -7,7 +7,7 @@ using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class TaskExecutionService(RegentDbContext db, IObjectStore objects, TimeProvider clock)
+public sealed class TaskExecutionService(RegentDbContext db, IObjectStore objects, TimeProvider clock, AuditIntegrityService audit)
 {
     public async Task<TaskClaim?> ClaimAsync(string runnerId, Guid tenantId, CancellationToken cancellationToken)
     {
@@ -96,13 +96,8 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
             Length = stored.Length, UploadState = "Ready", CreatedAt = clock.GetUtcNow()
         });
 
-        var seq = (await db.AuditRecords.Where(x => x.TenantId == tenantId).MaxAsync(x => (long?)x.Seq, cancellationToken) ?? 0) + 1;
-        db.AuditRecords.Add(new AuditRecord
-        {
-            TenantId = tenantId, Seq = seq, EventType = "task.completed", Actor = employeeName,
-            PayloadJson = JsonSerializer.Serialize(new { task_id = task.Id, status = task.Status, artifact_id = artifactId, project = project.Name }),
-            CreatedAt = clock.GetUtcNow()
-        });
+        await audit.AppendAsync(tenantId, "task.completed", employeeName,
+            new { task_id = task.Id, status = task.Status, artifact_id = artifactId, project = project.Name }, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         return true;

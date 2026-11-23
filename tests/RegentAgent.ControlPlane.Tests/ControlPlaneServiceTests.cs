@@ -40,7 +40,9 @@ public sealed class ControlPlaneServiceTests
         await using var db = CreateDb();
         await DbInitializer.InitializeAsync(db, CancellationToken.None);
         var approval = await db.Approvals.FirstAsync();
-        var service = new ApprovalService(db, new TestTenantContext(), new FixedTimeProvider());
+        var audit = new AuditIntegrityService(db, new FixedTimeProvider());
+        await audit.BackfillAsync(CancellationToken.None);
+        var service = new ApprovalService(db, new TestTenantContext(), new FixedTimeProvider(), audit);
 
         var result = await service.DecideAsync(new ApprovalId(approval.Id), new ApprovalDecision("approve", "Verified"), CancellationToken.None);
 

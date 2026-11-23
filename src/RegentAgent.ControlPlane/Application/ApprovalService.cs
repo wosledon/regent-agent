@@ -9,7 +9,7 @@ using RegentAgent.ControlPlane.Identity;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class ApprovalService(RegentDbContext db, ITenantContext tenant, TimeProvider clock)
+public sealed class ApprovalService(RegentDbContext db, ITenantContext tenant, TimeProvider clock, AuditIntegrityService audit)
 {
     public async Task<ApprovalDto?> GetAsync(ApprovalId id, CancellationToken cancellationToken)
     {
@@ -51,16 +51,8 @@ public sealed class ApprovalService(RegentDbContext db, ITenantContext tenant, T
             : null;
 
         approval.State = normalized == "approve" ? ApprovalState.Approved : ApprovalState.Rejected;
-        var seq = (await db.AuditRecords.Where(x => x.TenantId == tenantId).MaxAsync(x => (long?)x.Seq, cancellationToken) ?? 0) + 1;
-        db.AuditRecords.Add(new AuditRecord
-        {
-            TenantId = tenantId,
-            Seq = seq,
-            EventType = "approval.decided",
-            Actor = tenant.DisplayName,
-            PayloadJson = JsonSerializer.Serialize(new { approval_id = approval.Id, decision = normalized, reason = decision.Reason }),
-            CreatedAt = clock.GetUtcNow()
-        });
+        await audit.AppendAsync(tenantId, "approval.decided", tenant.DisplayName,
+            new { approval_id = approval.Id, decision = normalized, reason = decision.Reason }, cancellationToken);
         db.Notifications.Add(new NotificationRecord
         {
             Id = Guid.NewGuid(),

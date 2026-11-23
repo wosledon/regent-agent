@@ -47,8 +47,13 @@ builder.Services.AddScoped<ArtifactService>();
 builder.Services.AddScoped<TaskExecutionService>();
 builder.Services.AddScoped<TenantService>();
 builder.Services.AddScoped<OrganizationService>();
+builder.Services.AddScoped<AuditIntegrityService>();
 builder.Services.AddSingleton(sp => new DeliveryService(
     new JsonDocumentStore<ProjectDeliveryState>("data/modules/project-delivery.json"), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton(sp => new LocalArtifactSigner("data/security/tool-signing-key.pem"));
+builder.Services.AddSingleton(sp => new GovernanceService(
+    new JsonDocumentStore<GovernanceState>("data/modules/governance.json"),
+    sp.GetRequiredService<LocalArtifactSigner>(), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new WorkflowService(
     new JsonDocumentStore<WorkflowDefinition>("data/modules/workflows.json"),
     new JsonDocumentStore<WorkflowRun>("data/modules/workflow-runs.json")));
@@ -123,6 +128,20 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
+{
+    var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    var (status, code, message) = exception switch
+    {
+        KeyNotFoundException => (StatusCodes.Status404NotFound, "NOT_FOUND", "Resource not found."),
+        UnauthorizedAccessException => (StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied."),
+        InvalidOperationException => (StatusCodes.Status409Conflict, "INVALID_STATE", exception.Message),
+        _ => (StatusCodes.Status500InternalServerError, "INTERNAL_ERROR", "An unexpected error occurred.")
+    };
+    context.Response.StatusCode = status;
+    await context.Response.WriteAsJsonAsync(new { error = new { code, message }, trace_id = context.TraceIdentifier });
+}));
+
 if (app.Environment.IsDevelopment())
 {
     await using var scope = app.Services.CreateAsyncScope();
@@ -130,6 +149,7 @@ if (app.Environment.IsDevelopment())
     await db.Database.EnsureCreatedAsync();
     await LocalSchemaUpgrade.ApplyAsync(db, CancellationToken.None);
     await DbInitializer.InitializeAsync(db, CancellationToken.None);
+    await scope.ServiceProvider.GetRequiredService<AuditIntegrityService>().BackfillAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<WorkflowService>().SeedAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<MemoryService>().SeedAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<PerformanceService>().SeedAsync(CancellationToken.None);
@@ -335,6 +355,81 @@ delivery.MapPost("/retrospectives", async (Guid projectId, Retrospective retrosp
     Results.Ok(await service.AddRetrospectiveAsync(Guid.Parse(CurrentTenant(context)), projectId, retrospective, cancellationToken)))
     .Produces<Retrospective>().WithTags("Delivery");
 
+var governance = api.MapGroup("/governance");
+governance.MapGet("", async (HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<GovernanceState>().WithTags("Governance");
+governance.MapPost("/tools", async (ToolManifest tool, HttpContext context, GovernanceService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.RegisterToolAsync(Guid.Parse(CurrentTenant(context)), tool, cancellationToken)))
+    .Produces<ToolManifest>().WithTags("Governance");
+governance.MapPost("/tools/{toolId:guid}/admit", async (Guid toolId, AdmitToolRequest request,
+    HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AdmitToolAsync(Guid.Parse(CurrentTenant(context)), toolId, request.Reviewer, cancellationToken)))
+    .Produces<ToolAdmissionReview>().WithTags("Governance");
+governance.MapDelete("/tools/{toolId:guid}", async (Guid toolId, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RevokeToolAsync(Guid.Parse(CurrentTenant(context)), toolId, cancellationToken)))
+    .Produces<ToolManifest>().WithTags("Governance");
+governance.MapPost("/tool-calls/authorize", async (ToolAuthorizationRequest request, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AuthorizeToolCallAsync(Guid.Parse(CurrentTenant(context)), request, cancellationToken)))
+    .Produces<ToolAuthorizationResult>().WithTags("Governance");
+governance.MapPost("/injections/scan", async (ScanContentRequest request, GovernanceService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ScanInjectionAsync(request.Content, cancellationToken)))
+    .Produces<InjectionScanResult>().WithTags("Governance");
+governance.MapPost("/dlp/redact", async (RedactContentRequest request, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RedactAsync(Guid.Parse(CurrentTenant(context)), request.Content, cancellationToken)))
+    .Produces<DlpRedactionResult>().WithTags("Governance");
+governance.MapPost("/content-safety/review", async (ReviewContentRequest request, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ReviewContentAsync(Guid.Parse(CurrentTenant(context)), request.ContentRef, request.Content, cancellationToken)))
+    .Produces<ContentSafetyFinding>().WithTags("Governance");
+governance.MapPost("/content-safety/appeals", async (ContentAppealRequest request, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AppealAsync(Guid.Parse(CurrentTenant(context)), request, cancellationToken)))
+    .Produces<ContentSafetyFinding>().WithTags("Governance");
+governance.MapPost("/content-safety/findings/{findingId:guid}/resolve", async (Guid findingId, bool upheld,
+    HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ResolveAppealAsync(Guid.Parse(CurrentTenant(context)), findingId, upheld, cancellationToken)))
+    .Produces<ContentSafetyFinding>().WithTags("Governance");
+governance.MapGet("/incidents", async (HttpContext context, GovernanceService service,
+    CancellationToken cancellationToken) => Results.Ok((await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)).Incidents))
+    .Produces<IReadOnlyList<SecurityIncident>>().WithTags("Governance");
+governance.MapPost("/incidents", async (SecurityIncident incident, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CreateIncidentAsync(Guid.Parse(CurrentTenant(context)), incident, cancellationToken)))
+    .Produces<SecurityIncident>().WithTags("Governance");
+governance.MapPost("/incidents/{incidentId:guid}/contain", async (Guid incidentId, ContainIncidentRequest request,
+    HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ContainIncidentAsync(Guid.Parse(CurrentTenant(context)), incidentId, request.Action, cancellationToken)))
+    .Produces<SecurityIncident>().WithTags("Governance");
+governance.MapPost("/incidents/{incidentId:guid}/recover", async (Guid incidentId, RecoverIncidentRequest request,
+    HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RecoverIncidentAsync(Guid.Parse(CurrentTenant(context)), incidentId, request.Summary, cancellationToken)))
+    .Produces<SecurityIncident>().WithTags("Governance");
+governance.MapPost("/incidents/{incidentId:guid}/close", async (Guid incidentId, CloseIncidentRequest request,
+    HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CloseIncidentAsync(Guid.Parse(CurrentTenant(context)), incidentId, request.Retrospective, cancellationToken)))
+    .Produces<SecurityIncident>().WithTags("Governance");
+governance.MapGet("/approval-delegations", async (HttpContext context, GovernanceService service,
+    CancellationToken cancellationToken) => Results.Ok((await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)).ApprovalDelegations))
+    .Produces<IReadOnlyList<ApprovalDelegation>>().WithTags("Governance");
+governance.MapPost("/approval-delegations", async (ApprovalDelegation delegation, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CreateApprovalDelegationAsync(Guid.Parse(CurrentTenant(context)), delegation, cancellationToken)))
+    .Produces<ApprovalDelegation>().WithTags("Governance");
+governance.MapDelete("/approval-delegations/{id:guid}", async (Guid id, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) =>
+    {
+        await service.RevokeApprovalDelegationAsync(Guid.Parse(CurrentTenant(context)), id, cancellationToken);
+        return Results.NoContent();
+    }).WithTags("Governance");
+governance.MapGet("/approval-delegations/resolve", async (string primary, string action, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(new { approver = await service.ResolveApproverAsync(Guid.Parse(CurrentTenant(context)), primary, action, cancellationToken) }))
+    .Produces<ApprovalResolutionDto>().WithTags("Governance");
+
 api.MapGet("/employees", async (EmployeeService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(cancellationToken)))
     .Produces<IReadOnlyList<EmployeeSummary>>(StatusCodes.Status200OK).WithTags("Organization");
@@ -344,6 +439,14 @@ api.MapGet("/employees/{id:guid}/timeline", async (Guid id, EmployeeService serv
     var timeline = await service.GetTimelineAsync(new EmployeeId(id), cancellationToken);
     return timeline is null ? Results.NotFound() : Results.Ok(timeline);
 }).Produces<EmployeeTimeline>(StatusCodes.Status200OK).Produces(StatusCodes.Status404NotFound).WithTags("Organization");
+
+api.MapGet("/audit/verify", async (HttpContext context, AuditIntegrityService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.VerifyAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<AuditVerificationDto>().WithTags("Audit");
+api.MapPost("/audit/checkpoints", async (AuditCheckpointRequest request, HttpContext context,
+    AuditIntegrityService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CheckpointAsync(Guid.Parse(CurrentTenant(context)), request.Profile, cancellationToken)))
+    .Produces<AuditCheckpointDto>().WithTags("Audit");
 
 api.MapGet("/approvals/{id:guid}", async (Guid id, ApprovalService service, CancellationToken cancellationToken) =>
 {
@@ -552,6 +655,14 @@ public sealed record SubmitTaskRequest(string Author);
 public sealed record RetestDefectRequest(bool Passed, string Retester);
 public sealed record ReleaseRequest(string Version, string ArtifactRef);
 public sealed record RollbackRequest(string TargetVersion);
+public sealed record AuditCheckpointRequest(string Profile);
+public sealed record AdmitToolRequest(string Reviewer);
+public sealed record ScanContentRequest(string Content);
+public sealed record RedactContentRequest(string Content);
+public sealed record ReviewContentRequest(string ContentRef, string Content);
+public sealed record ContainIncidentRequest(string Action);
+public sealed record RecoverIncidentRequest(string Summary);
+public sealed record CloseIncidentRequest(string Retrospective);
 public sealed record CorrectMemoryRequest(string Content, string Reason);
 public sealed record CreateReviewRequest(string EmployeeId, string Conclusion, string EvidenceJson);
 public sealed record SendMessageRequest(string Body, string Priority);

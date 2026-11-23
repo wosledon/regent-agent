@@ -19,7 +19,9 @@ public sealed class TaskExecutionServiceTests
             await using var db = new RegentDbContext(new DbContextOptionsBuilder<RegentDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
             await DbInitializer.InitializeAsync(db, CancellationToken.None);
-            var service = new TaskExecutionService(db, new LocalFileObjectStore(root), TimeProvider.System);
+            var audit = new AuditIntegrityService(db, TimeProvider.System);
+            await audit.BackfillAsync(CancellationToken.None);
+            var service = new TaskExecutionService(db, new LocalFileObjectStore(root), TimeProvider.System, audit);
             var tenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
             var claim = await service.ClaimAsync("runner-test", tenantId, CancellationToken.None);

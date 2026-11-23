@@ -44,7 +44,19 @@ public static class LocalSchemaUpgrade
                 AssessmentJson TEXT NOT NULL, FairnessJson TEXT NOT NULL, CreatedAt TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS IX_Candidates_TenantId_PositionId_Status ON Candidates (TenantId, PositionId, Status);
+            CREATE TABLE IF NOT EXISTS AuditCheckpoints (
+                Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL,
+                ThroughSeq INTEGER NOT NULL, MerkleRoot TEXT NOT NULL,
+                Profile TEXT NOT NULL, CreatedAt TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_AuditCheckpoints_TenantId_ThroughSeq ON AuditCheckpoints (TenantId, ThroughSeq);
             """;
         await db.Database.ExecuteSqlRawAsync(schema, cancellationToken);
+        var columns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('AuditRecords')").ToListAsync(cancellationToken);
+        if (!columns.Contains("PreviousHash"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE AuditRecords ADD COLUMN PreviousHash TEXT NOT NULL DEFAULT '';", cancellationToken);
+        if (!columns.Contains("Hash"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE AuditRecords ADD COLUMN Hash TEXT NOT NULL DEFAULT '';", cancellationToken);
     }
 }

@@ -20,6 +20,7 @@ public sealed class RegentDbContext(DbContextOptions<RegentDbContext> options) :
     public DbSet<WorkEntryRecord> WorkEntries => Set<WorkEntryRecord>();
     public DbSet<ApprovalRecord> Approvals => Set<ApprovalRecord>();
     public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
+    public DbSet<AuditCheckpointRecord> AuditCheckpoints => Set<AuditCheckpointRecord>();
     public DbSet<ArtifactRecord> Artifacts => Set<ArtifactRecord>();
     public DbSet<NotificationRecord> Notifications => Set<NotificationRecord>();
 
@@ -86,6 +87,11 @@ public sealed class RegentDbContext(DbContextOptions<RegentDbContext> options) :
         modelBuilder.Entity<AuditRecord>(entity =>
         {
             entity.HasIndex(x => new { x.TenantId, x.Seq }).IsUnique();
+        });
+
+        modelBuilder.Entity<AuditCheckpointRecord>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.ThroughSeq }).IsUnique();
         });
 
         modelBuilder.Entity<ArtifactRecord>(entity =>
