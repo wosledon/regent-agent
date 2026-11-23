@@ -54,6 +54,8 @@ builder.Services.AddSingleton(sp => new LocalArtifactSigner("data/security/tool-
 builder.Services.AddSingleton(sp => new GovernanceService(
     new JsonDocumentStore<GovernanceState>("data/modules/governance.json"),
     sp.GetRequiredService<LocalArtifactSigner>(), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton(new JsonDocumentStore<DataLifecycleState>("data/modules/lifecycle.json"));
+builder.Services.AddScoped<DataLifecycleService>();
 builder.Services.AddSingleton(sp => new WorkflowService(
     new JsonDocumentStore<WorkflowDefinition>("data/modules/workflows.json"),
     new JsonDocumentStore<WorkflowRun>("data/modules/workflow-runs.json")));
@@ -430,6 +432,68 @@ governance.MapGet("/approval-delegations/resolve", async (string primary, string
     Results.Ok(new { approver = await service.ResolveApproverAsync(Guid.Parse(CurrentTenant(context)), primary, action, cancellationToken) }))
     .Produces<ApprovalResolutionDto>().WithTags("Governance");
 
+var lifecycle = api.MapGroup("/lifecycle");
+lifecycle.MapGet("", async (HttpContext context, DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<DataLifecycleState>().WithTags("Lifecycle");
+lifecycle.MapPost("/deletions", async (SoftDeleteRequest request, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.SoftDeleteAsync(Guid.Parse(CurrentTenant(context)), request.ResourceType,
+        request.ResourceId, request.Reason, cancellationToken))).Produces<DeletionRequestRecord>().WithTags("Lifecycle");
+lifecycle.MapPost("/deletions/{requestId:guid}/restore", async (Guid requestId, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RestoreAsync(Guid.Parse(CurrentTenant(context)), requestId, cancellationToken)))
+    .Produces<DeletionRequestRecord>().WithTags("Lifecycle");
+lifecycle.MapPost("/deletions/{requestId:guid}/purge", async (Guid requestId, PurgeRequest request,
+    HttpContext context, DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.PurgeAsync(Guid.Parse(CurrentTenant(context)), requestId, request.Confirmation, cancellationToken)))
+    .Produces<DeletionProof>().WithTags("Lifecycle");
+lifecycle.MapGet("/legal-holds", async (HttpContext context, DataLifecycleService service,
+    CancellationToken cancellationToken) => Results.Ok((await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)).LegalHolds))
+    .Produces<IReadOnlyList<LegalHoldRecord>>().WithTags("Lifecycle");
+lifecycle.MapPost("/legal-holds", async (LegalHoldRecord hold, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CreateLegalHoldAsync(Guid.Parse(CurrentTenant(context)), hold, cancellationToken)))
+    .Produces<LegalHoldRecord>().WithTags("Lifecycle");
+lifecycle.MapPost("/legal-holds/{holdId:guid}/release", async (Guid holdId, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ReleaseLegalHoldAsync(Guid.Parse(CurrentTenant(context)), holdId, cancellationToken)))
+    .Produces<LegalHoldRecord>().WithTags("Lifecycle");
+lifecycle.MapGet("/retention-policies", async (HttpContext context, DataLifecycleService service,
+    CancellationToken cancellationToken) => Results.Ok((await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)).RetentionPolicies))
+    .Produces<IReadOnlyList<RetentionPolicyRecord>>().WithTags("Lifecycle");
+lifecycle.MapPost("/retention-policies", async (RetentionPolicyRecord policy, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CreateRetentionPolicyAsync(Guid.Parse(CurrentTenant(context)), policy, cancellationToken)))
+    .Produces<RetentionPolicyRecord>().WithTags("Lifecycle");
+lifecycle.MapPost("/archives", async (ArchiveRequest request, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ArchiveAsync(Guid.Parse(CurrentTenant(context)), request.Period, request.Tier,
+        request.RecordCount, cancellationToken))).Produces<ArchiveManifest>().WithTags("Lifecycle");
+lifecycle.MapPost("/archives/{archiveId:guid}/restore", async (Guid archiveId, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RestoreArchiveAsync(Guid.Parse(CurrentTenant(context)), archiveId, cancellationToken)))
+    .Produces<ArchiveManifest>().WithTags("Lifecycle");
+lifecycle.MapPost("/backups", async (BackupRequest request, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.BackupAsync(Guid.Parse(CurrentTenant(context)), request.Profile,
+        request.RpoMinutes, request.RtoMinutes, cancellationToken))).Produces<BackupRunRecord>().WithTags("Lifecycle");
+lifecycle.MapPost("/backups/{backupId:guid}/verify-restore", async (Guid backupId, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.VerifyRestoreAsync(Guid.Parse(CurrentTenant(context)), backupId, cancellationToken)))
+    .Produces<BackupRunRecord>().WithTags("Lifecycle");
+lifecycle.MapPost("/rights", async (RightsRecord rights, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RecordRightsAsync(Guid.Parse(CurrentTenant(context)), rights, cancellationToken)))
+    .Produces<RightsRecord>().WithTags("Lifecycle");
+lifecycle.MapPost("/licenses", async (LicenseRecord license, HttpContext context,
+    DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RecordLicenseAsync(Guid.Parse(CurrentTenant(context)), license, cancellationToken)))
+    .Produces<LicenseRecord>().WithTags("Lifecycle");
+lifecycle.MapGet("/evaluation", async (HttpContext context, DataLifecycleService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.EvaluateAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<LifecycleEvaluation>().WithTags("Lifecycle");
+
 api.MapGet("/employees", async (EmployeeService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(cancellationToken)))
     .Produces<IReadOnlyList<EmployeeSummary>>(StatusCodes.Status200OK).WithTags("Organization");
@@ -663,6 +727,10 @@ public sealed record ReviewContentRequest(string ContentRef, string Content);
 public sealed record ContainIncidentRequest(string Action);
 public sealed record RecoverIncidentRequest(string Summary);
 public sealed record CloseIncidentRequest(string Retrospective);
+public sealed record SoftDeleteRequest(string ResourceType, string ResourceId, string Reason);
+public sealed record PurgeRequest(string Confirmation);
+public sealed record ArchiveRequest(string Period, string Tier, int RecordCount);
+public sealed record BackupRequest(string Profile, int RpoMinutes, int RtoMinutes);
 public sealed record CorrectMemoryRequest(string Content, string Reason);
 public sealed record CreateReviewRequest(string EmployeeId, string Conclusion, string EvidenceJson);
 public sealed record SendMessageRequest(string Body, string Priority);
