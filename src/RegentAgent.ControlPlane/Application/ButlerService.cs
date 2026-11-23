@@ -10,7 +10,7 @@ namespace RegentAgent.ControlPlane.Application;
 public sealed class ButlerService(RegentDbContext db,
     JsonDocumentStore<ButlerReport> reports,
     JsonDocumentStore<ReportSchedule> schedules,
-    TimeProvider clock)
+    TimeProvider clock, GovernanceService? governance = null)
 {
     public async Task<ButlerAnswer> AskAsync(Guid tenantId, string question, CancellationToken cancellationToken)
     {
@@ -137,11 +137,13 @@ public sealed class ButlerService(RegentDbContext db,
     {
         var projects = await db.Projects.AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken);
         var employees = await db.Employees.AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken);
+        var openIncidents = governance is null ? 0 : (await governance.GetAsync(tenantId, cancellationToken)).Incidents
+            .Count(x => x.Status is "Open" or "Contained");
         return new ButlerSnapshot(
             projects.Count, employees.Count,
             await db.Approvals.CountAsync(x => x.TenantId == tenantId && x.State == ApprovalState.Pending, cancellationToken),
             await db.Candidates.CountAsync(x => x.TenantId == tenantId && x.Status != "Hired", cancellationToken),
-            0,
+            openIncidents,
             projects.Select(x => new ButlerProjectSnapshot(x.Name, x.Stage.ToString(), x.Health.ToString(), x.SpentMinor, x.BudgetMinor, x.Currency)).ToArray(),
             employees.GroupBy(x => x.State).ToDictionary(x => x.Key.ToString(), x => x.Count()));
     }

@@ -6417,6 +6417,112 @@
         }
       }
     },
+    "/v1/models/catalog": {
+      "post": {
+        "tags": [
+          "Models"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelCatalogEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalogEntry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models/catalog/{provider}/{modelId}/rotate": {
+      "put": {
+        "tags": [
+          "Models"
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "modelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RotateModelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalogEntry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models/catalog/{provider}/{modelId}": {
+      "delete": {
+        "tags": [
+          "Models"
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "modelId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/v1/models/snapshots/refresh": {
       "post": {
         "tags": [
@@ -13734,6 +13840,21 @@
         "type": "object",
         "properties": {
           "targetVersion": {
+            "type": "string"
+          }
+        }
+      },
+      "RotateModelRequest": {
+        "required": [
+          "version",
+          "protocol"
+        ],
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "protocol": {
             "type": "string"
           }
         }

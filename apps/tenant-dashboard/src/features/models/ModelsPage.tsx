@@ -20,6 +20,8 @@ export function ModelsPage() {
   const [protocol, setProtocol] = useState('Local');
   const [reasoning, setReasoning] = useState('medium');
   const [testResult, setTestResult] = useState<Awaited<ReturnType<typeof api.testModel>> | null>(null);
+  const [catalogModelId, setCatalogModelId] = useState('custom-model');
+  const [catalogVersion, setCatalogVersion] = useState('1');
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['model-pool'] });
   const setPrice = useMutation({
     mutationFn: () => api.setManualPrice({
@@ -34,6 +36,21 @@ export function ModelsPage() {
     }), onSuccess: async () => { setEmployeeId(''); await invalidate(); }
   });
   const test = useMutation({ mutationFn: () => api.testModel(provider, modelId), onSuccess: setTestResult });
+  const addModel = useMutation({
+    mutationFn: () => api.addModel({
+      provider, modelId: catalogModelId, version: catalogVersion, protocol,
+      priceState: 'Unpriced', inputPricePerMillion: null, outputPricePerMillion: null,
+      currency, tier: 'Unassigned', source: 'manual-catalog'
+    }), onSuccess: invalidate
+  });
+  const rotateModel = useMutation({
+    mutationFn: ({ provider: modelProvider, modelId: id }: { provider: string; modelId: string }) =>
+      api.rotateModel(modelProvider, id, catalogVersion, protocol), onSuccess: invalidate
+  });
+  const deleteModel = useMutation({
+    mutationFn: ({ provider: modelProvider, modelId: id }: { provider: string; modelId: string }) =>
+      api.deleteModel(modelProvider, id), onSuccess: invalidate
+  });
 
   if (pool.isLoading) return <LoadingState />;
   if (pool.error) return <ErrorState message={pool.error.message} />;
@@ -50,8 +67,21 @@ export function ModelsPage() {
           { id: 'model', header: 'Model', render: row => row.modelId ?? '' },
           { id: 'protocol', header: 'Protocol', render: row => row.protocol ?? '' },
           { id: 'tier', header: 'Tier', render: row => <StatusChip label={row.tier ?? 'Unassigned'} tone="info" /> },
-          { id: 'price', header: 'Price state', render: row => `${row.priceState ?? 'Unknown'} ${row.currency ?? ''}` }
+          { id: 'price', header: 'Price state', render: row => `${row.priceState ?? 'Unknown'} ${row.currency ?? ''}` },
+          { id: 'actions', header: 'Actions', render: row => <Stack direction="row" wrap>
+            <Button tone="secondary" onClick={() => rotateModel.mutate({ provider: row.provider ?? '', modelId: row.modelId ?? '' })}>Rotate</Button>
+            <Button tone="danger" onClick={() => deleteModel.mutate({ provider: row.provider ?? '', modelId: row.modelId ?? '' })}>Delete</Button>
+          </Stack> }
         ]} />
+      </Card>
+      <Card title="Add catalog model">
+        <Stack spacing={2}>
+          <Select label="Provider" value={provider} onChange={setProvider} options={['Local', 'OpenAI', 'Anthropic'].map(value => ({ value, label: value }))} />
+          <FormField label="Model ID"><TextInput value={catalogModelId} onChange={setCatalogModelId} /></FormField>
+          <FormField label="Version"><TextInput value={catalogVersion} onChange={setCatalogVersion} /></FormField>
+          <Select label="Protocol" value={protocol} onChange={setProtocol} options={['Local', 'OpenAI', 'Anthropic'].map(value => ({ value, label: value }))} />
+          <Button onClick={() => addModel.mutate()} disabled={!catalogModelId || !catalogVersion} loading={addModel.isPending}>Add model</Button>
+        </Stack>
       </Card>
       <Grid columns={2}>
         <Card title="Price and tier">

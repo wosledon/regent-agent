@@ -233,6 +233,11 @@ export const api = {
   recordRights: (rights: Schema['RightsRecord']) => post<Schema['RightsRecord']>('/v1/lifecycle/rights', rights),
   recordLicense: (license: Schema['LicenseRecord']) => post<Schema['LicenseRecord']>('/v1/lifecycle/licenses', license),
   modelPool: () => request<Schema['ModelPoolState']>('/v1/models/pool'),
+  addModel: (entry: Schema['ModelCatalogEntry']) => post<Schema['ModelCatalogEntry']>('/v1/models/catalog', entry),
+  rotateModel: (provider: string, modelId: string, version: string, protocol: string) =>
+    put<Schema['ModelCatalogEntry']>(`/v1/models/catalog/${encodeURIComponent(provider)}/${encodeURIComponent(modelId)}/rotate`, { version, protocol }),
+  deleteModel: (provider: string, modelId: string) =>
+    request<void>(`/v1/models/catalog/${encodeURIComponent(provider)}/${encodeURIComponent(modelId)}`, { method: 'DELETE' }),
   setManualPrice: (price: Schema['ManualModelPrice']) => post<Schema['ManualModelPrice']>('/v1/models/prices', price),
   assignModelTier: (assignment: Schema['ModelTierAssignment']) => post<Schema['ModelTierAssignment']>('/v1/models/tiers', assignment),
   bindModel: (binding: Schema['EmployeeModelBinding']) => post<Schema['EmployeeModelBinding']>('/v1/models/bindings', binding),

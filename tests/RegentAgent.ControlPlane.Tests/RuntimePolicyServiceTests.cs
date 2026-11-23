@@ -45,6 +45,44 @@ public sealed class RuntimePolicyServiceTests
     }
 
     [Fact]
+    public async Task Model_catalog_supports_add_rotate_and_safe_delete()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"model-lifecycle-{Guid.NewGuid():N}.json");
+        try
+        {
+            var service = new ModelOperationsService(new JsonDocumentStore<ModelPoolState>(path), TimeProvider.System);
+            var tenantId = Guid.NewGuid();
+            await service.SeedAsync(tenantId, CancellationToken.None);
+            var added = await service.AddModelAsync(tenantId, new ModelCatalogEntry
+            {
+                Provider = "OpenAI", ModelId = "custom-model", Version = "1", Protocol = "OpenAI"
+            }, CancellationToken.None);
+            Assert.Equal("manual-catalog", added.Source);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.AddModelAsync(tenantId, added, CancellationToken.None));
+            var employeeId = Guid.NewGuid();
+            await service.BindEmployeeAsync(tenantId, new EmployeeModelBinding
+            {
+                EmployeeId = employeeId, Provider = "OpenAI", ModelId = "custom-model", Version = "1", Protocol = "OpenAI"
+            }, CancellationToken.None);
+            await service.RotateModelAsync(tenantId, "OpenAI", "custom-model", "2", "OpenAI", CancellationToken.None);
+            Assert.Equal("RestoreRequired", (await service.GetAsync(tenantId, CancellationToken.None)).Bindings.Single().Status);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.DeleteModelAsync(tenantId, "OpenAI", "custom-model", CancellationToken.None));
+
+            var temporary = await service.AddModelAsync(tenantId, new ModelCatalogEntry
+            {
+                Provider = "Anthropic", ModelId = "temporary", Version = "1", Protocol = "Anthropic"
+            }, CancellationToken.None);
+            await service.DeleteModelAsync(tenantId, temporary.Provider, temporary.ModelId, CancellationToken.None);
+            Assert.DoesNotContain((await service.GetAsync(tenantId, CancellationToken.None)).Catalog,
+                model => model.ModelId == "temporary");
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Costs_are_idempotent_currency_safe_and_schedule_aware()
     {
         var path = Path.Combine(Path.GetTempPath(), $"runtime-{Guid.NewGuid():N}.json");

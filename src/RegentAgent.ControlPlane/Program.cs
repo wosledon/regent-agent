@@ -808,6 +808,19 @@ lifecycle.MapGet("/evaluation", async (HttpContext context, DataLifecycleService
 var modelApi = api.MapGroup("/models");
 modelApi.MapGet("/pool", async (HttpContext context, ModelOperationsService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken))).Produces<ModelPoolState>().WithTags("Models");
+modelApi.MapPost("/catalog", async (ModelCatalogEntry entry, HttpContext context,
+    ModelOperationsService service, CancellationToken cancellationToken) => Results.Ok(await service.AddModelAsync(
+        Guid.Parse(CurrentTenant(context)), entry, cancellationToken))).Produces<ModelCatalogEntry>().WithTags("Models");
+modelApi.MapPut("/catalog/{provider}/{modelId}/rotate", async (string provider, string modelId, RotateModelRequest request,
+    HttpContext context, ModelOperationsService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RotateModelAsync(Guid.Parse(CurrentTenant(context)), provider, modelId,
+        request.Version, request.Protocol, cancellationToken))).Produces<ModelCatalogEntry>().WithTags("Models");
+modelApi.MapDelete("/catalog/{provider}/{modelId}", async (string provider, string modelId,
+    HttpContext context, ModelOperationsService service, CancellationToken cancellationToken) =>
+{
+    await service.DeleteModelAsync(Guid.Parse(CurrentTenant(context)), provider, modelId, cancellationToken);
+    return Results.NoContent();
+}).WithTags("Models");
 modelApi.MapPost("/snapshots/refresh", async (RefreshSnapshotRequest request, HttpContext context,
     ModelOperationsService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RefreshSnapshotAsync(Guid.Parse(CurrentTenant(context)), request.Date, cancellationToken)))
@@ -1585,6 +1598,7 @@ public sealed record PurgeRequest(string Confirmation);
 public sealed record ArchiveRequest(string Period, string Tier, int RecordCount);
 public sealed record BackupRequest(string Profile, int RpoMinutes, int RtoMinutes);
 public sealed record RefreshSnapshotRequest(DateOnly Date);
+public sealed record RotateModelRequest(string Version, string Protocol);
 public sealed record ModelUnavailableRequest(Guid EmployeeId, string Provider, string ModelId, int ConsecutiveFailures, int UnavailableMinutes);
 public sealed record TestModelRequest(string Provider, string ModelId);
 public sealed record CorrectCostRequest(decimal Delta, string Reason);

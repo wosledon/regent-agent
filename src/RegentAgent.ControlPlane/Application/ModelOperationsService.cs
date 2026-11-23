@@ -48,6 +48,44 @@ public sealed class ModelOperationsService(JsonDocumentStore<ModelPoolState> sto
         return (true, state);
     }, cancellationToken);
 
+    public Task<ModelCatalogEntry> AddModelAsync(Guid tenantId, ModelCatalogEntry entry,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        if (string.IsNullOrWhiteSpace(entry.Provider) || string.IsNullOrWhiteSpace(entry.ModelId)
+            || string.IsNullOrWhiteSpace(entry.Version) || entry.Protocol is not ("OpenAI" or "Anthropic" or "Local"))
+            throw new InvalidOperationException("Model identity, version and supported protocol are required.");
+        if (state.Catalog.Any(x => x.Provider == entry.Provider && x.ModelId == entry.ModelId))
+            throw new InvalidOperationException("Model already exists.");
+        entry.Source = "manual-catalog";
+        state.Catalog.Add(entry);
+        return (true, entry);
+    }, cancellationToken);
+
+    public Task<ModelCatalogEntry> RotateModelAsync(Guid tenantId, string provider, string modelId,
+        string version, string protocol, CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        var entry = FindModel(state, provider, modelId);
+        if (string.IsNullOrWhiteSpace(version) || protocol is not ("OpenAI" or "Anthropic" or "Local"))
+            throw new InvalidOperationException("Rotation version and supported protocol are required.");
+        entry.Version = version;
+        entry.Protocol = protocol;
+        foreach (var binding in state.Bindings.Where(x => x.Provider == provider && x.ModelId == modelId && x.Status == "Active"))
+            binding.Status = "RestoreRequired";
+        return (true, entry);
+    }, cancellationToken);
+
+    public Task DeleteModelAsync(Guid tenantId, string provider, string modelId,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        var entry = FindModel(state, provider, modelId);
+        if (state.Bindings.Any(x => x.Provider == provider && x.ModelId == modelId))
+            throw new InvalidOperationException("Cannot delete a model with employee bindings.");
+        state.Catalog.Remove(entry);
+        state.ManualPrices.RemoveAll(x => x.Provider == provider && x.ModelId == modelId);
+        state.TierAssignments.RemoveAll(x => x.Provider == provider && x.ModelId == modelId);
+        return (true, true);
+    }, cancellationToken);
+
     public Task<ManualModelPrice> SetManualPriceAsync(Guid tenantId, ManualModelPrice price, CancellationToken cancellationToken) =>
         MutateAsync(tenantId, state =>
         {
