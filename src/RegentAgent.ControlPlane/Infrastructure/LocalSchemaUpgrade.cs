@@ -61,6 +61,25 @@ public static class LocalSchemaUpgrade
                 Status TEXT NOT NULL, DetailsJson TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS IX_FairnessAudits_TenantId_PositionId_Period ON FairnessAudits (TenantId, PositionId, Period);
+            CREATE TABLE IF NOT EXISTS IdempotencyRecords (
+                Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL, Key TEXT NOT NULL,
+                Operation TEXT NOT NULL, ResponseJson TEXT NOT NULL, Status TEXT NOT NULL, CreatedAt TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_IdempotencyRecords_TenantId_Key_Operation ON IdempotencyRecords (TenantId, Key, Operation);
+            CREATE TABLE IF NOT EXISTS Outbox (
+                Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL, EventType TEXT NOT NULL,
+                PayloadJson TEXT NOT NULL, Status TEXT NOT NULL, Attempts INTEGER NOT NULL,
+                CreatedAt TEXT NOT NULL, ProcessedAt TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_Outbox_Status_CreatedAt ON Outbox (Status, CreatedAt);
+            CREATE TABLE IF NOT EXISTS Inbox (
+                Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL, MessageId TEXT NOT NULL,
+                EventType TEXT NOT NULL, PayloadJson TEXT NOT NULL, Status TEXT NOT NULL, CreatedAt TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS IX_Inbox_TenantId_MessageId ON Inbox (TenantId, MessageId);
+            CREATE TABLE IF NOT EXISTS SchemaVersions (
+                Version INTEGER NOT NULL PRIMARY KEY, Name TEXT NOT NULL, AppliedAt TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS AuditCheckpoints (
                 Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL,
                 ThroughSeq INTEGER NOT NULL, MerkleRoot TEXT NOT NULL,

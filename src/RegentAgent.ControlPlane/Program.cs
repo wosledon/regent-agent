@@ -164,6 +164,10 @@ RegisterTenantStore<ReportSchedule>(builder.Services);
 RegisterTenantStore<AgentEvolutionState>(builder.Services);
 RegisterTenantStore<TaskGovernanceState>(builder.Services);
 builder.Services.AddScoped<TenantPurgeService>();
+builder.Services.AddScoped<IdempotencyService>();
+builder.Services.AddScoped<OutboxService>();
+builder.Services.AddScoped<SchemaVersionService>();
+builder.Services.AddHostedService<OutboxWorker>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -220,6 +224,7 @@ if (app.Environment.IsDevelopment())
     var db = scope.ServiceProvider.GetRequiredService<RegentDbContext>();
     await db.Database.EnsureCreatedAsync();
     await LocalSchemaUpgrade.ApplyAsync(db, CancellationToken.None);
+    await scope.ServiceProvider.GetRequiredService<SchemaVersionService>().ValidateAsync(CancellationToken.None);
     await DbInitializer.InitializeAsync(db, CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<AuditIntegrityService>().BackfillAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<WorkflowService>().SeedAsync(CancellationToken.None);
@@ -811,6 +816,18 @@ api.MapGet("/employees/{id:guid}/timeline", async (Guid id, EmployeeService serv
     return timeline is null ? Results.NotFound() : Results.Ok(timeline);
 }).Produces<EmployeeTimeline>(StatusCodes.Status200OK).Produces(StatusCodes.Status404NotFound).WithTags("Organization");
 
+api.MapGet("/outbox", async (HttpContext context, OutboxService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<IReadOnlyList<OutboxRecord>>().WithTags("Messaging");
+api.MapPost("/outbox", async (PublishEventRequest request, HttpContext context,
+    OutboxService service, CancellationToken cancellationToken) => Results.Ok(await service.PublishAsync(
+        Guid.Parse(CurrentTenant(context)), request.EventType, request.Payload, cancellationToken)))
+    .Produces<OutboxRecord>().WithTags("Messaging");
+api.MapPost("/outbox/process", async (OutboxService service, CancellationToken cancellationToken) =>
+    Results.Ok(new { processed = await service.ProcessAsync(cancellationToken) })).WithTags("Messaging");
+api.MapGet("/schema/version", async (SchemaVersionService service, CancellationToken cancellationToken) =>
+    Results.Ok(new { version = SchemaVersionService.CurrentVersion })).WithTags("System");
+
 api.MapPost("/approvals", async (CreateApprovalDto input, ApprovalService service,
     CancellationToken cancellationToken) => Results.Ok(await service.CreateAsync(input, cancellationToken)))
     .Produces<ApprovalDto>().WithTags("Approvals");
@@ -839,7 +856,7 @@ api.MapPost("/approvals/{id:guid}/decision", async (Guid id, ApprovalDecision de
         return ApiResults.Problem(RegentAgent.Contracts.Results.Error.Validation("Idempotency-Key is required."), context.TraceIdentifier);
     }
 
-    var result = await service.DecideAsync(new ApprovalId(id), decision, cancellationToken);
+    var result = await service.DecideAsync(new ApprovalId(id), decision, cancellationToken, key.ToString());
     if (!result.IsSuccess)
     {
         return ApiResults.Problem(result.Error!, context.TraceIdentifier);
@@ -1199,6 +1216,7 @@ public sealed record RetestDefectRequest(bool Passed, string Retester);
 public sealed record ReleaseRequest(string Version, string ArtifactRef);
 public sealed record RollbackRequest(string TargetVersion);
 public sealed record AuditCheckpointRequest(string Profile);
+public sealed record PublishEventRequest(string EventType, object Payload);
 public sealed record AdmitToolRequest(string Reviewer);
 public sealed record ScanContentRequest(string Content);
 public sealed record RedactContentRequest(string Content);

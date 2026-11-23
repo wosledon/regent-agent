@@ -42,16 +42,18 @@ public sealed class ControlPlaneServiceTests
         var approval = await db.Approvals.FirstAsync();
         var audit = new AuditIntegrityService(db, new FixedTimeProvider());
         await audit.BackfillAsync(CancellationToken.None);
-        var service = new ApprovalService(db, new TestTenantContext(), new FixedTimeProvider(), audit);
+        var service = new ApprovalService(db, new TestTenantContext(), new FixedTimeProvider(), audit,
+            new IdempotencyService(db, new FixedTimeProvider()));
 
-        var result = await service.DecideAsync(new ApprovalId(approval.Id), new ApprovalDecision("approve", "Verified"), CancellationToken.None);
+        var result = await service.DecideAsync(new ApprovalId(approval.Id), new ApprovalDecision("approve", "Verified"), CancellationToken.None, "approval-key-1");
 
         Assert.True(result.IsSuccess);
         Assert.Equal(ApprovalState.Approved, result.Value!.State);
         Assert.Contains(await db.AuditRecords.ToListAsync(), item => item.EventType == "approval.decided" && item.Seq == 2);
-        var repeated = await service.DecideAsync(new ApprovalId(approval.Id), new ApprovalDecision("reject", "Changed mind"), CancellationToken.None);
-        Assert.False(repeated.IsSuccess);
-        Assert.Equal("INVALID_STATE", repeated.Error!.Code);
+        var repeated = await service.DecideAsync(new ApprovalId(approval.Id), new ApprovalDecision("reject", "Changed mind"), CancellationToken.None, "approval-key-1");
+        Assert.True(repeated.IsSuccess);
+        Assert.Equal(ApprovalState.Approved, repeated.Value!.State);
+        Assert.Single(await db.AuditRecords.Where(x => x.EventType == "approval.decided").ToListAsync());
     }
 
     private static RegentDbContext CreateDb() => new(

@@ -223,6 +223,47 @@ public sealed class AuditRecord
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public sealed class IdempotencyRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public string Key { get; set; } = string.Empty;
+    public string Operation { get; set; } = string.Empty;
+    public string ResponseJson { get; set; } = "null";
+    public string Status { get; set; } = "Completed";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class OutboxRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string PayloadJson { get; set; } = "{}";
+    public string Status { get; set; } = "Pending";
+    public int Attempts { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset? ProcessedAt { get; set; }
+}
+
+public sealed class InboxRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid MessageId { get; set; }
+    public string EventType { get; set; } = string.Empty;
+    public string PayloadJson { get; set; } = "{}";
+    public string Status { get; set; } = "Processed";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class SchemaVersionRecord
+{
+    public int Version { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public DateTimeOffset AppliedAt { get; set; }
+}
+
 public sealed class AuditCheckpointRecord
 {
     public Guid Id { get; set; }

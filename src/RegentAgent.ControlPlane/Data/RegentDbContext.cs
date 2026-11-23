@@ -24,6 +24,10 @@ public sealed class RegentDbContext(DbContextOptions<RegentDbContext> options) :
     public DbSet<ApprovalRecord> Approvals => Set<ApprovalRecord>();
     public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
     public DbSet<AuditCheckpointRecord> AuditCheckpoints => Set<AuditCheckpointRecord>();
+    public DbSet<IdempotencyRecord> IdempotencyRecords => Set<IdempotencyRecord>();
+    public DbSet<OutboxRecord> Outbox => Set<OutboxRecord>();
+    public DbSet<InboxRecord> Inbox => Set<InboxRecord>();
+    public DbSet<SchemaVersionRecord> SchemaVersions => Set<SchemaVersionRecord>();
     public DbSet<ArtifactRecord> Artifacts => Set<ArtifactRecord>();
     public DbSet<NotificationRecord> Notifications => Set<NotificationRecord>();
 
@@ -103,6 +107,23 @@ public sealed class RegentDbContext(DbContextOptions<RegentDbContext> options) :
         modelBuilder.Entity<AuditRecord>(entity =>
         {
             entity.HasIndex(x => new { x.TenantId, x.Seq }).IsUnique();
+        });
+
+        modelBuilder.Entity<SchemaVersionRecord>(entity =>
+        {
+            entity.HasKey(x => x.Version);
+        });
+        modelBuilder.Entity<IdempotencyRecord>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.Key, x.Operation }).IsUnique();
+        });
+        modelBuilder.Entity<OutboxRecord>(entity =>
+        {
+            entity.HasIndex(x => new { x.Status, x.CreatedAt });
+        });
+        modelBuilder.Entity<InboxRecord>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.MessageId }).IsUnique();
         });
 
         modelBuilder.Entity<AuditCheckpointRecord>(entity =>

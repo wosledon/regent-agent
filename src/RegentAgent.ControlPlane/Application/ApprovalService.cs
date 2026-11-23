@@ -9,7 +9,8 @@ using RegentAgent.ControlPlane.Identity;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class ApprovalService(RegentDbContext db, ITenantContext tenant, TimeProvider clock, AuditIntegrityService audit)
+public sealed class ApprovalService(RegentDbContext db, ITenantContext tenant, TimeProvider clock,
+    AuditIntegrityService audit, IdempotencyService idempotency)
 {
     public async Task<ApprovalDto> CreateAsync(CreateApprovalDto input, CancellationToken cancellationToken)
     {
@@ -42,9 +43,14 @@ public sealed class ApprovalService(RegentDbContext db, ITenantContext tenant, T
     }
 
     public async Task<Result<ApprovalDto>> DecideAsync(ApprovalId id, ApprovalDecision decision,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? idempotencyKey = null)
     {
         var tenantId = tenant.TenantId.Value;
+        if (!string.IsNullOrWhiteSpace(idempotencyKey))
+        {
+            var replay = await idempotency.GetCompletedAsync<ApprovalDto>(tenantId, idempotencyKey, $"approval:{id.Value}", cancellationToken);
+            if (replay is not null) return Result.Success(replay);
+        }
         var approval = await db.Approvals.SingleOrDefaultAsync(
             x => x.TenantId == tenantId && x.Id == id.Value, cancellationToken);
         if (approval is null)
@@ -90,6 +96,9 @@ public sealed class ApprovalService(RegentDbContext db, ITenantContext tenant, T
             await transaction.CommitAsync(cancellationToken);
         }
 
-        return Result.Success(Mappings.ToDto(approval));
+        var result = Mappings.ToDto(approval);
+        if (!string.IsNullOrWhiteSpace(idempotencyKey))
+            await idempotency.SaveCompletedAsync(tenantId, idempotencyKey, $"approval:{id.Value}", result, cancellationToken);
+        return Result.Success(result);
     }
 }
