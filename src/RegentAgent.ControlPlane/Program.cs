@@ -564,8 +564,15 @@ governance.MapDelete("/tools/{toolId:guid}", async (Guid toolId, HttpContext con
     .Produces<ToolManifest>().WithTags("Governance");
 governance.MapPost("/tool-calls/authorize", async (ToolAuthorizationRequest request, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.AuthorizeToolCallAsync(Guid.Parse(CurrentTenant(context)), request, cancellationToken)))
-    .Produces<ToolAuthorizationResult>().WithTags("Governance");
+{
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    var result = await service.AuthorizeToolCallAsync(tenantId, request, cancellationToken);
+    await service.RecordToolUsageAsync(tenantId, request, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<ToolAuthorizationResult>().WithTags("Governance");
+governance.MapGet("/tools/{toolId:guid}/impact", async (Guid toolId, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.GetToolImpactAsync(
+        Guid.Parse(CurrentTenant(context)), toolId, cancellationToken))).Produces<ToolRevocationImpact>().WithTags("Governance");
 governance.MapPost("/injections/scan", async (ScanContentRequest request, GovernanceService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ScanInjectionAsync(request.Content, cancellationToken)))
     .Produces<InjectionScanResult>().WithTags("Governance");
@@ -573,6 +580,12 @@ governance.MapPost("/dlp/redact", async (RedactContentRequest request, HttpConte
     GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RedactAsync(Guid.Parse(CurrentTenant(context)), request.Content, cancellationToken)))
     .Produces<DlpRedactionResult>().WithTags("Governance");
+governance.MapPost("/dlp/delete", async (DeleteDlpTokensRequest request, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) =>
+{
+    await service.DeleteDlpTokensAsync(Guid.Parse(CurrentTenant(context)), request.Tokens, cancellationToken);
+    return Results.NoContent();
+}).WithTags("Governance");
 governance.MapPost("/content-safety/review", async (ReviewContentRequest request, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReviewContentAsync(Guid.Parse(CurrentTenant(context)), request.ContentRef, request.Content, cancellationToken)))
@@ -600,6 +613,10 @@ governance.MapPost("/incidents/{incidentId:guid}/recover", async (Guid incidentI
     HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RecoverIncidentAsync(Guid.Parse(CurrentTenant(context)), incidentId, request.Summary, cancellationToken)))
     .Produces<SecurityIncident>().WithTags("Governance");
+governance.MapPost("/incidents/{incidentId:guid}/evidence", async (Guid incidentId, SealEvidenceRequest request,
+    HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.SealIncidentEvidenceAsync(Guid.Parse(CurrentTenant(context)), incidentId,
+        request.Evidence, cancellationToken))).Produces<SecurityIncident>().WithTags("Governance");
 governance.MapPost("/incidents/{incidentId:guid}/close", async (Guid incidentId, CloseIncidentRequest request,
     HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CloseIncidentAsync(Guid.Parse(CurrentTenant(context)), incidentId, request.Retrospective, cancellationToken)))
@@ -617,6 +634,9 @@ governance.MapDelete("/approval-delegations/{id:guid}", async (Guid id, HttpCont
         await service.RevokeApprovalDelegationAsync(Guid.Parse(CurrentTenant(context)), id, cancellationToken);
         return Results.NoContent();
     }).WithTags("Governance");
+governance.MapGet("/approval-delegations/chain", async (string primary, string action, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.ResolveApprovalChainAsync(
+        Guid.Parse(CurrentTenant(context)), primary, action, cancellationToken))).Produces<ApprovalChainDto>().WithTags("Governance");
 governance.MapGet("/approval-delegations/resolve", async (string primary, string action, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(new { approver = await service.ResolveApproverAsync(Guid.Parse(CurrentTenant(context)), primary, action, cancellationToken) }))
@@ -1132,6 +1152,8 @@ public sealed record ReviewContentRequest(string ContentRef, string Content);
 public sealed record ContainIncidentRequest(string Action);
 public sealed record RecoverIncidentRequest(string Summary);
 public sealed record CloseIncidentRequest(string Retrospective);
+public sealed record DeleteDlpTokensRequest(IReadOnlyList<string> Tokens);
+public sealed record SealEvidenceRequest(string Evidence);
 public sealed record SoftDeleteRequest(string ResourceType, string ResourceId, string Reason);
 public sealed record PurgeRequest(string Confirmation);
 public sealed record ArchiveRequest(string Period, string Tier, int RecordCount);

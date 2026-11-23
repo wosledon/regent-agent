@@ -89,11 +89,25 @@ public sealed class ApprovalDelegation
     public string Reason { get; set; } = string.Empty;
 }
 
+public sealed class ToolUsageRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid ToolId { get; set; }
+    public string Actor { get; set; } = string.Empty;
+    public string Capability { get; set; } = string.Empty;
+    public bool Allowed { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed record ToolRevocationImpact(int AffectedActors, int AffectedCapabilities, IReadOnlyList<string> Actors);
+public sealed record ApprovalChainDto(IReadOnlyList<string> Approvers);
+
 public sealed class GovernanceState
 {
     public Guid TenantId { get; set; }
     public List<ToolManifest> Tools { get; set; } = [];
     public List<ToolAdmissionReview> AdmissionReviews { get; set; } = [];
+    public List<ToolUsageRecord> ToolUsages { get; set; } = [];
     public List<DlpToken> DlpTokens { get; set; } = [];
     public List<ContentSafetyFinding> ContentFindings { get; set; } = [];
     public List<SecurityIncident> Incidents { get; set; } = [];

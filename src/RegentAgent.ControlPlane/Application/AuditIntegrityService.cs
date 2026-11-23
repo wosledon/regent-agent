@@ -91,7 +91,7 @@ public sealed class AuditIntegrityService(RegentDbContext db, TimeProvider clock
         };
         db.AuditCheckpoints.Add(checkpoint);
         await db.SaveChangesAsync(cancellationToken);
-        if (profile == "anchored")
+        if (profile is "worm" or "anchored")
         {
             var directory = Path.Combine("data", "audit-anchors");
             Directory.CreateDirectory(directory);

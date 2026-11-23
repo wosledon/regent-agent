@@ -199,6 +199,58 @@ public sealed class GovernanceService(JsonDocumentStore<GovernanceState> store,
             return (true, true);
         }, cancellationToken);
 
+    public Task RecordToolUsageAsync(Guid tenantId, ToolAuthorizationRequest request,
+        ToolAuthorizationResult result, CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        var tool = state.Tools.FirstOrDefault(x => x.Name == request.ToolName && x.Version == request.Version);
+        if (tool is null) return (false, true);
+        state.ToolUsages.Add(new ToolUsageRecord
+        {
+            ToolId = tool.Id, Actor = request.Actor, Capability = request.Capability,
+            Allowed = result.Allowed, CreatedAt = clock.GetUtcNow()
+        });
+        return (true, true);
+    }, cancellationToken);
+
+    public Task<ToolRevocationImpact> GetToolImpactAsync(Guid tenantId, Guid toolId,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        var usages = state.ToolUsages.Where(x => x.ToolId == toolId && x.Allowed).ToArray();
+        var actors = usages.Select(x => x.Actor).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        return (false, new ToolRevocationImpact(actors.Length,
+            usages.Select(x => x.Capability).Distinct(StringComparer.OrdinalIgnoreCase).Count(), actors));
+    }, cancellationToken);
+
+    public Task DeleteDlpTokensAsync(Guid tenantId, IReadOnlyList<string> tokens,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        state.DlpTokens.RemoveAll(x => tokens.Contains(x.Token, StringComparer.Ordinal));
+        return (true, true);
+    }, cancellationToken);
+
+    public Task<ApprovalChainDto> ResolveApprovalChainAsync(Guid tenantId, string primary, string action,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        var chain = new List<string> { primary };
+        var delegation = state.ApprovalDelegations.FirstOrDefault(x => x.Status == "Active"
+            && x.ExpiresAt > clock.GetUtcNow() && x.PrimaryApprover == primary
+            && (x.ActionScope == "*" || x.ActionScope == action));
+        if (delegation is not null) chain.Add(delegation.DelegateApprover);
+        chain.Add("Controller");
+        chain.Add("Boss");
+        return (false, new ApprovalChainDto(chain.Distinct(StringComparer.OrdinalIgnoreCase).ToArray()));
+    }, cancellationToken);
+
+    public Task<SecurityIncident> SealIncidentEvidenceAsync(Guid tenantId, Guid incidentId, string evidence,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        var incident = Find(state.Incidents, incidentId);
+        var hash = LocalArtifactSigner.ComputeDigest(evidence);
+        var signature = signer.Sign(hash);
+        incident.EvidenceRefs = [.. incident.EvidenceRefs, $"sha256:{hash}:sig:{signature}"];
+        return (true, incident);
+    }, cancellationToken);
+
     private async Task<T> MutateAsync<T>(Guid tenantId,
         Func<GovernanceState, (bool Changed, T Result)> mutation, CancellationToken cancellationToken)
     {
