@@ -131,6 +131,8 @@ export const api = {
     post<Schema['ResearchFinding']>(`/v1/projects/${projectId}/delivery/findings`, finding),
   createBrief: (projectId: string, brief: Schema['ProductBrief']) =>
     post<Schema['ProductBrief']>(`/v1/projects/${projectId}/delivery/briefs`, brief),
+  decideBrief: (projectId: string, briefId: string, decision: string, rationale: string, evidenceIds: string[], reround: number, decider: string) =>
+    post<Schema['GoNoGoDecision']>(`/v1/projects/${projectId}/delivery/briefs/${briefId}/decision`, { decision, rationale, evidenceIds, reround, decider }),
   createRequirement: (projectId: string, requirement: Schema['DeliveryRequirement']) =>
     post<Schema['DeliveryRequirement']>(`/v1/projects/${projectId}/delivery/requirements`, requirement),
   readyRequirement: (projectId: string, requirementId: string, totalWeight: number) =>

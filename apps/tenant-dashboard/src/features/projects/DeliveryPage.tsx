@@ -20,6 +20,16 @@ export function DeliveryPage() {
   const [scope, setScope] = useState('');
   const [criteria, setCriteria] = useState('');
   const [priority, setPriority] = useState('P1');
+  const [briefTitle, setBriefTitle] = useState('');
+  const [briefProblem, setBriefProblem] = useState('');
+  const [mvpScope, setMvpScope] = useState('');
+  const [successMetrics, setSuccessMetrics] = useState('success_rate>=95%');
+  const [findingIds, setFindingIds] = useState('');
+  const [briefId, setBriefId] = useState('');
+  const [decision, setDecision] = useState('Go');
+  const [rationale, setRationale] = useState('');
+  const [evidenceIds, setEvidenceIds] = useState('');
+  const [reround, setReround] = useState('0');
   const [defectTitle, setDefectTitle] = useState('');
   const [defectSteps, setDefectSteps] = useState('');
   const [defectSeverity, setDefectSeverity] = useState('P2');
@@ -41,6 +51,18 @@ export function DeliveryPage() {
       id: crypto.randomUUID(), title, problem, scope, priority, status: 'Draft',
       acceptanceCriteria: criteria.split('\n').map(value => value.trim()).filter(Boolean), version: 1, totalWeight: 0
     }), onSuccess: async () => { setTitle(''); setProblem(''); setScope(''); setCriteria(''); await invalidate(); }
+  });
+  const createBrief = useMutation({
+    mutationFn: () => api.createBrief(projectId, {
+      id: crypto.randomUUID(), title: briefTitle, problem: briefProblem,
+      mvpScope: mvpScope.split(',').map(value => value.trim()).filter(Boolean),
+      successMetrics: Object.fromEntries(successMetrics.split('\n').map(line => line.split('=')).filter(parts => parts.length === 2).map(parts => [parts[0].trim(), parts[1].trim()])),
+      findingIds: findingIds.split(',').map(value => value.trim()).filter(Boolean), version: 1
+    }), onSuccess: async () => { setBriefTitle(''); setBriefProblem(''); setMvpScope(''); await invalidate(); }
+  });
+  const decide = useMutation({
+    mutationFn: () => api.decideBrief(projectId, briefId, decision, rationale,
+      evidenceIds.split(',').map(value => value.trim()).filter(Boolean), Number(reround), 'Controller'), onSuccess: invalidate
   });
   const makeReady = useMutation({
     mutationFn: (requirementId: string) => api.readyRequirement(projectId, requirementId, 6), onSuccess: invalidate
@@ -98,6 +120,24 @@ export function DeliveryPage() {
           <FormField label="Acceptance criteria (one per line)"><TextInput value={criteria} onChange={setCriteria} multiline minRows={3} placeholder={'Owner can approve\nDuplicate decision is rejected'} /></FormField>
           <Select label="Priority" value={priority} onChange={setPriority} options={['P0', 'P1', 'P2'].map(value => ({ value, label: value }))} />
           <Button onClick={() => addRequirement.mutate()} disabled={!title || !problem || !scope || !criteria} loading={addRequirement.isPending}>Create requirement</Button>
+        </Card>
+      </Grid>
+      <Grid columns={2}>
+        <Card title="Product brief">
+          <FormField label="Brief title"><TextInput value={briefTitle} onChange={setBriefTitle} /></FormField>
+          <FormField label="Problem"><TextInput value={briefProblem} onChange={setBriefProblem} /></FormField>
+          <FormField label="MVP scope (comma separated)"><TextInput value={mvpScope} onChange={setMvpScope} /></FormField>
+          <FormField label="Success metrics (key=value per line)"><TextInput value={successMetrics} onChange={setSuccessMetrics} multiline minRows={2} /></FormField>
+          <FormField label="Finding IDs"><TextInput value={findingIds} onChange={setFindingIds} /></FormField>
+          <Button onClick={() => createBrief.mutate()} disabled={!briefTitle || !briefProblem || !mvpScope || !successMetrics} loading={createBrief.isPending}>Create brief</Button>
+        </Card>
+        <Card title="Go / No-Go decision">
+          <Select label="Brief" value={briefId} onChange={setBriefId} options={[{ value: '', label: 'Select brief' }, ...(state.briefs ?? []).map(brief => ({ value: brief.id ?? '', label: brief.title ?? '' }))]} />
+          <Select label="Decision" value={decision} onChange={setDecision} options={[{ value: 'Go', label: 'Go' }, { value: 'NoGo', label: 'No-Go' }]} />
+          <FormField label="Rationale"><TextInput value={rationale} onChange={setRationale} multiline minRows={2} /></FormField>
+          <FormField label="Evidence IDs"><TextInput value={evidenceIds} onChange={setEvidenceIds} /></FormField>
+          <FormField label="Reround"><TextInput value={reround} onChange={setReround} /></FormField>
+          <Button tone="secondary" onClick={() => decide.mutate()} disabled={!briefId || !rationale || !evidenceIds} loading={decide.isPending}>Record decision</Button>
         </Card>
       </Grid>
       <Card title="Research findings">

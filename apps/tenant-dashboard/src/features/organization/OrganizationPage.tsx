@@ -21,6 +21,7 @@ export function OrganizationPage() {
   const [candidateModel, setCandidateModel] = useState('local-cheap-v1');
   const [tenantName, setTenantName] = useState('');
   const [companyName, setCompanyName] = useState('');
+  const [charterDraft, setCharterDraft] = useState<Awaited<ReturnType<typeof api.charter>> | null>(null);
 
   const refresh = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['charter'] }),
@@ -29,6 +30,10 @@ export function OrganizationPage() {
     queryClient.invalidateQueries({ queryKey: ['tenants'] })
   ]);
   const start = useMutation({ mutationFn: api.startCompany, onSuccess: refresh });
+  const saveCharter = useMutation({
+    mutationFn: () => api.updateCharter(charterDraft ?? charter.data!),
+    onSuccess: async () => { setCharterDraft(null); await refresh(); }
+  });
   const createPosition = useMutation({
     mutationFn: () => api.createPosition({
       id: crypto.randomUUID(), name: positionName, responsibilities,
@@ -55,10 +60,11 @@ export function OrganizationPage() {
       <PageHeader title="Organization" description="Charter, positions, employees and tenant ownership." />
       <Grid columns={2}>
         <Card title="Company charter" action={<StatusChip label={`v${charter.data?.version ?? 1}`} tone="info" />}>
-          <Text variant="h3">{charter.data?.mission}</Text>
-          <Text>{charter.data?.currency} {Number(charter.data?.monthlyBudgetMinor ?? 0).toLocaleString()}</Text>
-          <Text variant="caption">{charter.data?.constraints.join(' · ')}</Text>
-          <Button onClick={() => start.mutate()} loading={start.isPending}>Start or verify company</Button>
+          <FormField label="Mission"><TextInput value={charterDraft?.mission ?? charter.data?.mission ?? ''} onChange={mission => setCharterDraft({ ...(charterDraft ?? charter.data!), mission })} multiline minRows={2} /></FormField>
+          <FormField label="Constraints (comma separated)"><TextInput value={(charterDraft?.constraints ?? charter.data?.constraints ?? []).join(', ')} onChange={value => setCharterDraft({ ...(charterDraft ?? charter.data!), constraints: value.split(',').map(item => item.trim()).filter(Boolean) })} /></FormField>
+          <FormField label="Monthly budget"><TextInput value={String(charterDraft?.monthlyBudgetMinor ?? charter.data?.monthlyBudgetMinor ?? 0)} onChange={value => setCharterDraft({ ...(charterDraft ?? charter.data!), monthlyBudgetMinor: Number(value) })} /></FormField>
+          <FormField label="Currency"><TextInput value={charterDraft?.currency ?? charter.data?.currency ?? 'CNY'} onChange={currency => setCharterDraft({ ...(charterDraft ?? charter.data!), currency })} /></FormField>
+          <Stack direction="row"><Button onClick={() => saveCharter.mutate()} loading={saveCharter.isPending}>Save charter</Button><Button tone="neutral" onClick={() => start.mutate()} loading={start.isPending}>Start or verify company</Button></Stack>
         </Card>
         <Card title="Create tenant">
           <FormField label="Tenant slug"><TextInput value={tenantName} onChange={setTenantName} placeholder="second-company" /></FormField>
