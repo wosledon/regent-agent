@@ -19,6 +19,22 @@ public sealed class ProjectService(RegentDbContext db, ITenantContext tenant, Ti
             .ToArray();
     }
 
+    public async Task<ProjectDetail> CreateAsync(CreateProjectDto input, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Owner) || input.TargetDays <= 0 || input.BudgetMinor < 0)
+            throw new InvalidOperationException("Project name, owner, target and budget are required.");
+        var record = new ProjectRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenant.TenantId.Value, Name = input.Name, Mission = input.Mission,
+            Owner = input.Owner, Stage = ProjectStage.BriefReady, Health = ProjectHealth.PendingAcceptance,
+            TargetAt = clock.GetUtcNow().AddDays(input.TargetDays), BudgetMinor = input.BudgetMinor,
+            Currency = input.Currency, UpdatedAt = clock.GetUtcNow()
+        };
+        db.Projects.Add(record);
+        await db.SaveChangesAsync(cancellationToken);
+        return Mappings.ToDetail(record, Freshness.Live);
+    }
+
     public Task<bool> ExistsAsync(ProjectId id, CancellationToken cancellationToken) =>
         db.Projects.AsNoTracking().AnyAsync(x => x.TenantId == tenant.TenantId.Value && x.Id == id.Value, cancellationToken);
 

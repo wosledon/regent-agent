@@ -485,6 +485,9 @@ api.MapGet("/dashboard/summary", async (DashboardService service, CancellationTo
     Results.Ok(await service.GetAsync(cancellationToken)))
     .Produces<DashboardSummary>(StatusCodes.Status200OK).WithTags("Dashboard");
 
+api.MapPost("/projects", async (CreateProjectDto input, ProjectService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.CreateAsync(input, cancellationToken)))
+    .Produces<ProjectDetail>().WithTags("Projects");
 api.MapGet("/projects", async (ProjectService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(cancellationToken)))
     .Produces<IReadOnlyList<ProjectSummary>>(StatusCodes.Status200OK).WithTags("Projects");

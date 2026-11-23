@@ -94,5 +94,9 @@ public static class LocalSchemaUpgrade
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE AuditRecords ADD COLUMN PreviousHash TEXT NOT NULL DEFAULT '';", cancellationToken);
         if (!columns.Contains("Hash"))
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE AuditRecords ADD COLUMN Hash TEXT NOT NULL DEFAULT '';", cancellationToken);
+        var projectColumns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('Projects')").ToListAsync(cancellationToken);
+        if (!projectColumns.Contains("Mission"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Projects ADD COLUMN Mission TEXT NOT NULL DEFAULT '';", cancellationToken);
     }
 }

@@ -83,6 +83,7 @@ export const api = {
   saveButlerSchedule: (kind: string, frequency: string, enabled: boolean) =>
     post<Schema['ReportSchedule']>('/v1/butler/schedules', { kind, frequency, enabled }),
   projects: () => request<Schema['ProjectSummary'][]>('/v1/projects'),
+  createProject: (body: Schema['CreateProjectDto']) => post<Schema['ProjectDetail']>('/v1/projects', body),
   project: (id: string) => request<Schema['ProjectDetail']>(`/v1/projects/${id}`),
   employees: () => request<Schema['EmployeeSummary'][]>('/v1/employees'),
   employeeTimeline: (id: string) => request<Schema['EmployeeTimeline']>(`/v1/employees/${id}/timeline`),

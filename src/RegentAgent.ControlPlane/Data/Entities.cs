@@ -137,6 +137,7 @@ public sealed class ProjectRecord
     public Guid Id { get; set; }
     public Guid TenantId { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string Mission { get; set; } = string.Empty;
     public string Owner { get; set; } = string.Empty;
     public ProjectStage Stage { get; set; }
     public ProjectHealth Health { get; set; }

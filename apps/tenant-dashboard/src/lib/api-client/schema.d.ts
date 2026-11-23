@@ -1792,7 +1792,30 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateProjectDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectDetail"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -7808,6 +7831,16 @@ export interface components {
             /** Format: int32 */
             expiresInHours: number | string;
             reason: string;
+        };
+        CreateProjectDto: {
+            name: string;
+            owner: string;
+            mission: string;
+            /** Format: int32 */
+            targetDays: number | string;
+            /** Format: int64 */
+            budgetMinor: number | string;
+            currency: string;
         };
         CreatePromptRequest: {
             name: string;
