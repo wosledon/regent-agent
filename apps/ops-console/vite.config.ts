@@ -16,7 +16,10 @@ export default defineConfig({
   },
   server: {
     port: 4173,
-    proxy: { '/ops': 'http://localhost:5082', '/auth': 'http://localhost:5082', '/health': 'http://localhost:5082' }
+    proxy: {
+      '/ops': 'http://localhost:5082', '/auth': 'http://localhost:5082',
+      '/health': 'http://localhost:5082', '/public-status': 'http://localhost:5082'
+    }
   },
   test: { environment: 'jsdom', setupFiles: ['./src/test/setup.ts'] }
 });

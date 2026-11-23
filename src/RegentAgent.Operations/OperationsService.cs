@@ -29,10 +29,31 @@ public sealed class OperationsService(
     public async Task<SupportGrantRecord> CreateGrantAsync(string tenantId, string operatorId, string scope, int minutes, CancellationToken cancellationToken)
     {
         var grant = new SupportGrantRecord(Guid.NewGuid().ToString("N"), tenantId, operatorId, scope,
-            DateTimeOffset.UtcNow.AddMinutes(minutes), "Active");
+            DateTimeOffset.UtcNow.AddMinutes(minutes), "Pending");
         await grants.PutAsync(grant.Id, grant, cancellationToken);
         await AuditAsync(operatorId, "support_grant.created", tenantId, cancellationToken);
         return grant;
+    }
+
+    public async Task<SupportGrantRecord> ApproveGrantAsync(string id, string operatorId, CancellationToken cancellationToken)
+    {
+        var grant = await grants.GetAsync(id, cancellationToken) ?? throw new KeyNotFoundException("Grant not found.");
+        if (grant.Status != "Pending") throw new InvalidOperationException("Only pending grants can be approved.");
+        grant = grant with { Status = "Active" };
+        await grants.PutAsync(id, grant, cancellationToken);
+        await AuditAsync(operatorId, "support_grant.approved", id, cancellationToken);
+        return grant;
+    }
+
+    public async Task<TenantAccount> SetTenantStatusAsync(string tenantId, string status, string operatorId,
+        CancellationToken cancellationToken)
+    {
+        if (status is not ("Active" or "Suspended")) throw new InvalidOperationException("Invalid tenant status.");
+        var tenant = await tenants.GetAsync(tenantId, cancellationToken) ?? throw new KeyNotFoundException("Tenant not found.");
+        tenant = tenant with { Status = status };
+        await tenants.PutAsync(tenantId, tenant, cancellationToken);
+        await AuditAsync(operatorId, "tenant.status_changed", tenantId, cancellationToken);
+        return tenant;
     }
 
     public async Task RevokeGrantAsync(string id, string operatorId, CancellationToken cancellationToken)

@@ -97,6 +97,10 @@ builder.Services.AddSingleton(new JsonDocumentStore<IdentityProviderRecord>("dat
 builder.Services.AddSingleton(new JsonDocumentStore<InvitationRecord>("data/modules/invitations.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<OwnershipDelegationRecord>("data/modules/ownership-delegations.json"));
 builder.Services.AddScoped<IdentityService>();
+builder.Services.AddSingleton(new JsonDocumentStore<ButlerReport>("data/modules/butler-reports.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<ReportSchedule>("data/modules/report-schedules.json"));
+builder.Services.AddScoped<ButlerService>();
+builder.Services.AddHostedService<ButlerReportWorker>();
 
 builder.Services.AddDbContext<RegentDbContext>(options =>
 {
@@ -297,6 +301,29 @@ app.MapPost("/auth/switch-tenant", async (SwitchTenantRequest request, RegentDbC
 }).RequireAuthorization();
 
 var api = app.MapGroup("/v1").RequireAuthorization();
+
+api.MapPost("/butler/ask", async (ButlerQuestionRequest request, HttpContext context,
+    ButlerService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AskAsync(Guid.Parse(CurrentTenant(context)), request.Question, cancellationToken)))
+    .Produces<ButlerAnswer>().WithTags("Butler");
+api.MapGet("/butler/reports", async (HttpContext context, ButlerService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ListReportsAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<IReadOnlyList<ButlerReport>>().WithTags("Butler");
+api.MapPost("/butler/reports", async (GenerateReportRequest request, HttpContext context,
+    ButlerService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GenerateReportAsync(Guid.Parse(CurrentTenant(context)), request.Kind, cancellationToken)))
+    .Produces<ButlerReport>().WithTags("Butler");
+api.MapPost("/butler/reports/{reportId:guid}/retry", async (Guid reportId, HttpContext context,
+    ButlerService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RetryReportAsync(Guid.Parse(CurrentTenant(context)), reportId, cancellationToken)))
+    .Produces<ButlerReport>().WithTags("Butler");
+api.MapGet("/butler/schedules", async (HttpContext context, ButlerService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ListSchedulesAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<IReadOnlyList<ReportSchedule>>().WithTags("Butler");
+api.MapPost("/butler/schedules", async (CreateReportScheduleRequest request, HttpContext context,
+    ButlerService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.SaveScheduleAsync(Guid.Parse(CurrentTenant(context)), request, cancellationToken)))
+    .Produces<ReportSchedule>().WithTags("Butler");
 
 api.MapGet("/profile/display-suffix", async (HttpContext context, IdentityService identity,
     CancellationToken cancellationToken) => Results.Ok(new DisplaySuffixDto(await identity.GetDisplaySuffixAsync(

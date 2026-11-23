@@ -580,6 +580,198 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/butler/ask": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ButlerQuestionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ButlerAnswer"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/butler/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ButlerReport"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["GenerateReportRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ButlerReport"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/butler/reports/{reportId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    reportId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ButlerReport"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/butler/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportSchedule"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateReportScheduleRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReportSchedule"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/profile/display-suffix": {
         parameters: {
             query?: never;
@@ -5578,6 +5770,30 @@ export interface components {
             currency?: string;
             carryForward?: boolean;
         };
+        ButlerAnswer: {
+            answer: string;
+            evidenceRefs: string[];
+            intent: string;
+        };
+        ButlerQuestionRequest: {
+            question: string;
+        };
+        ButlerReport: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            kind?: string;
+            title?: string;
+            summary?: string;
+            detailsJson?: string;
+            evidenceRefs?: string[];
+            status?: string;
+            /** Format: int32 */
+            attempts?: number | string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
         CalibrationReport: {
             /** Format: int32 */
             sampleCount?: number | string;
@@ -5772,6 +5988,11 @@ export interface components {
             /** Format: int32 */
             expiresInHours: number | string;
             reason: string;
+        };
+        CreateReportScheduleRequest: {
+            kind: string;
+            frequency: string;
+            enabled: boolean;
         };
         CreateReviewRequest: {
             employeeId: string;
@@ -6095,6 +6316,9 @@ export interface components {
         };
         /** @enum {unknown} */
         Freshness: "live" | "fresh" | "stale" | "unknown";
+        GenerateReportRequest: {
+            kind: string;
+        };
         GoNoGoDecision: {
             /** Format: uuid */
             id?: string;
@@ -6471,6 +6695,20 @@ export interface components {
         ReleaseRequest: {
             version: string;
             artifactRef: string;
+        };
+        ReportSchedule: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            kind?: string;
+            frequency?: string;
+            enabled?: boolean;
+            /** Format: date-time */
+            nextRunAt?: null | string;
+            /** Format: date-time */
+            lastRunAt?: null | string;
+            lastError?: null | string;
         };
         ResearchFinding: {
             /** Format: uuid */

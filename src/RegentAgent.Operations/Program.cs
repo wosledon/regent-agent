@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using RegentAgent.Contracts.Operations;
 using RegentAgent.Operations;
 using RegentAgent.Storage;
 
@@ -13,6 +14,11 @@ builder.Services.AddSingleton(sp => new OperationsService(
     new JsonDocumentStore<SupportGrantRecord>("data/ops/grants.json"),
     new JsonDocumentStore<BackupProfileRecord>("data/ops/backups.json"),
     new JsonDocumentStore<OpsAuditRecord>("data/ops/audit.json")));
+builder.Services.AddSingleton(new JsonDocumentStore<PlatformComponentStatus>("data/ops/status-components.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<PlatformIncident>("data/ops/status-incidents.json"));
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<PlatformStatusService>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
@@ -35,6 +41,8 @@ app.UseAuthorization();
 app.MapOpenApi("/openapi/{documentName}.json").AllowAnonymous();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" })).AllowAnonymous();
 app.MapGet("/health/ready", () => Results.Ok(new { status = "ready" })).AllowAnonymous();
+app.MapGet("/public-status", async (PlatformStatusService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetAsync(cancellationToken))).AllowAnonymous();
 app.MapPost("/auth/dev-login", async (HttpContext context) =>
 {
     if (!app.Environment.IsDevelopment()) return Results.NotFound();
@@ -55,6 +63,15 @@ app.MapPost("/auth/logout", async (HttpContext context) =>
 }).RequireAuthorization();
 
 var ops = app.MapGroup("/ops").RequireAuthorization();
+ops.MapPost("/status/refresh", async (PlatformStatusService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RefreshAsync(cancellationToken)));
+ops.MapPost("/status/incidents", async (PlatformIncident incident, PlatformStatusService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.CreateIncidentAsync(incident, cancellationToken)));
+ops.MapPost("/status/incidents/{id:guid}/resolve", async (Guid id, PlatformStatusService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ResolveIncidentAsync(id, cancellationToken)));
+ops.MapPut("/tenants/{id}/status", async (string id, TenantStatusRequest request, OperationsService service,
+    HttpContext context, CancellationToken cancellationToken) => Results.Ok(await service.SetTenantStatusAsync(
+        id, request.Status, context.User.FindFirstValue(ClaimTypes.NameIdentifier)!, cancellationToken)));
 ops.MapGet("/tenants", async (OperationsService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.TenantsAsync(cancellationToken)));
 ops.MapGet("/support-grants", async (OperationsService service, CancellationToken cancellationToken) =>
@@ -62,6 +79,9 @@ ops.MapGet("/support-grants", async (OperationsService service, CancellationToke
 ops.MapPost("/support-grants", async (SupportGrantRequest request, OperationsService service,
     HttpContext context, CancellationToken cancellationToken) => Results.Ok(await service.CreateGrantAsync(
         request.TenantId, context.User.FindFirstValue(ClaimTypes.NameIdentifier)!, request.Scope, request.Minutes, cancellationToken)));
+ops.MapPost("/support-grants/{id}/approve", async (string id, OperationsService service,
+    HttpContext context, CancellationToken cancellationToken) => Results.Ok(await service.ApproveGrantAsync(
+        id, context.User.FindFirstValue(ClaimTypes.NameIdentifier)!, cancellationToken)));
 ops.MapPost("/support-grants/{id}/revoke", async (string id, OperationsService service,
     HttpContext context, CancellationToken cancellationToken) =>
 {

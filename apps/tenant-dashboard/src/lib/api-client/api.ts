@@ -75,6 +75,13 @@ export const api = {
   displaySuffix: () => request<Schema['DisplaySuffixDto']>('/v1/profile/display-suffix'),
   updateDisplaySuffix: (suffix: string) => put<Schema['DisplaySuffixDto']>('/v1/profile/display-suffix', { suffix }),
   dashboard: () => request<Schema['DashboardSummary']>('/v1/dashboard/summary'),
+  butlerAsk: (question: string) => post<Schema['ButlerAnswer']>('/v1/butler/ask', { question }),
+  butlerReports: () => request<Schema['ButlerReport'][]>('/v1/butler/reports'),
+  generateButlerReport: (kind: string) => post<Schema['ButlerReport']>('/v1/butler/reports', { kind }),
+  retryButlerReport: (id: string) => post<Schema['ButlerReport']>(`/v1/butler/reports/${id}/retry`),
+  butlerSchedules: () => request<Schema['ReportSchedule'][]>('/v1/butler/schedules'),
+  saveButlerSchedule: (kind: string, frequency: string, enabled: boolean) =>
+    post<Schema['ReportSchedule']>('/v1/butler/schedules', { kind, frequency, enabled }),
   projects: () => request<Schema['ProjectSummary'][]>('/v1/projects'),
   project: (id: string) => request<Schema['ProjectDetail']>(`/v1/projects/${id}`),
   employees: () => request<Schema['EmployeeSummary'][]>('/v1/employees'),

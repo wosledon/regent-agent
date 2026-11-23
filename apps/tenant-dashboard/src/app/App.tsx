@@ -6,6 +6,7 @@ import { ComponentGalleryPage } from '@regent/ui-shared';
 import { LoginPage } from '../pages/LoginPage';
 import { SettingsPage } from '../pages/SettingsPage';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
+import { ButlerPage } from '../features/butler/ButlerPage';
 import { ProjectListPage } from '../features/projects/ProjectListPage';
 import { ProjectDetailPage } from '../features/projects/ProjectDetailPage';
 import { DeliveryPage } from '../features/projects/DeliveryPage';
@@ -42,6 +43,7 @@ export function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route element={<ProtectedShell />}>
           <Route index element={<DashboardPage />} />
+          <Route path="butler" element={<ButlerPage />} />
           <Route path="projects" element={<ProjectListPage />} />
           <Route path="projects/:projectId" element={<ProjectDetailPage />} />
           <Route path="projects/:projectId/delivery" element={<DeliveryPage />} />

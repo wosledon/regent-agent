@@ -345,6 +345,163 @@
         }
       }
     },
+    "/v1/butler/ask": {
+      "post": {
+        "tags": [
+          "Butler"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ButlerQuestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ButlerAnswer"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/butler/reports": {
+      "get": {
+        "tags": [
+          "Butler"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ButlerReport"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Butler"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ButlerReport"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/butler/reports/{reportId}/retry": {
+      "post": {
+        "tags": [
+          "Butler"
+        ],
+        "parameters": [
+          {
+            "name": "reportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ButlerReport"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/butler/schedules": {
+      "get": {
+        "tags": [
+          "Butler"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReportSchedule"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Butler"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReportScheduleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportSchedule"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/profile/display-suffix": {
       "get": {
         "tags": [
@@ -4783,6 +4940,85 @@
           }
         }
       },
+      "ButlerAnswer": {
+        "required": [
+          "answer",
+          "evidenceRefs",
+          "intent"
+        ],
+        "type": "object",
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "intent": {
+            "type": "string"
+          }
+        }
+      },
+      "ButlerQuestionRequest": {
+        "required": [
+          "question"
+        ],
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          }
+        }
+      },
+      "ButlerReport": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "detailsJson": {
+            "type": "string"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "attempts": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "CalibrationReport": {
         "type": "object",
         "properties": {
@@ -5507,6 +5743,25 @@
           },
           "reason": {
             "type": "string"
+          }
+        }
+      },
+      "CreateReportScheduleRequest": {
+        "required": [
+          "kind",
+          "frequency",
+          "enabled"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "frequency": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
           }
         }
       },
@@ -6649,6 +6904,17 @@
           "stale",
           "unknown"
         ]
+      },
+      "GenerateReportRequest": {
+        "required": [
+          "kind"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          }
+        }
       },
       "GoNoGoDecision": {
         "type": "object",
@@ -7984,6 +8250,48 @@
           }
         }
       },
+      "ReportSchedule": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "frequency": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "nextRunAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastRunAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "ResearchFinding": {
         "type": "object",
         "properties": {
@@ -8784,6 +9092,9 @@
   "tags": [
     {
       "name": "RegentAgent.ControlPlane"
+    },
+    {
+      "name": "Butler"
     },
     {
       "name": "Identity"

@@ -21,6 +21,7 @@ test('login, dashboard, project and employee timeline', async ({ page }) => {
 test('workflows, messages, evaluations and compliance are available', async ({ page }) => {
   await page.goto('/login');
   await page.getByRole('button', { name: 'Sign in' }).click();
+  await expect(page.getByRole('heading', { name: 'Regent Autonomous Company' })).toBeVisible();
 
   await page.goto('/workflows');
   await expect(page.getByText('Product Delivery v1')).toBeVisible();
@@ -37,9 +38,19 @@ test('workflows, messages, evaluations and compliance are available', async ({ p
 
   await page.goto('/governance/compliance');
   await expect(page.getByRole('heading', { name: 'Policy' })).toBeVisible();
+
+  await page.goto('/butler');
+  await expect(page.getByRole('heading', { name: 'Butler', exact: true })).toBeVisible();
+  await page.getByRole('textbox', { name: 'Question' }).fill('What is the project status?');
+  await page.getByRole('button', { name: 'Ask', exact: true }).click();
+  await expect(page.getByText('Tenant Dashboard MVP').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Generate now' }).click();
+  await expect(page.getByRole('cell', { name: 'Daily company report' }).first()).toBeVisible();
 });
 
 test('operations console supports tenant and grant views', async ({ page }) => {
+  await page.goto('http://localhost:4173/status');
+  await expect(page.getByRole('heading', { name: 'Platform status' })).toBeVisible();
   await page.goto('http://localhost:4173/login');
   await page.getByRole('button', { name: 'Sign in as Demo Operator' }).click();
   await expect(page.getByRole('heading', { name: 'Operations Overview' })).toBeVisible();
@@ -49,6 +60,13 @@ test('operations console supports tenant and grant views', async ({ page }) => {
   await expect(page.getByText('Regent Demo')).toBeVisible();
   await page.goto('http://localhost:4173/support');
   await expect(page.getByRole('heading', { name: 'Support Grants' })).toBeVisible();
+  await page.getByRole('button', { name: 'Request 30-minute read-only grant' }).click();
+  await page.getByRole('button', { name: 'Approve' }).first().click();
+  await expect(page.getByText('Active').first()).toBeVisible();
+  await page.goto('http://localhost:4173/platform');
+  await expect(page.getByRole('heading', { name: 'Platform status' })).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh health' }).click();
+  await expect(page.getByText('ControlPlane')).toBeVisible();
 });
 
 test('organization, delivery, security, lifecycle and runtime pages work end to end', async ({ page }) => {

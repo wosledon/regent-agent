@@ -8,6 +8,7 @@ import { useTenantHub } from '../hooks/useTenantHub';
 
 const navigation = [
   { key: 'dashboard', path: '/', icon: 'dashboard' as const },
+  { key: 'butler', path: '/butler', icon: 'dashboard' as const },
   { key: 'projects', path: '/projects', icon: 'evaluation' as const },
   { key: 'organization', path: '/organization', icon: 'organization' as const },
   { key: 'organizationManage', path: '/organization/manage', icon: 'organization' as const },
