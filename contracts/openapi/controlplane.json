@@ -2040,6 +2040,52 @@
         }
       }
     },
+    "/v1/localization": {
+      "get": {
+        "tags": [
+          "Localization"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalizationSettings"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Localization"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalizationSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocalizationSettings"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/compliance/profile": {
       "get": {
         "tags": [
@@ -11049,6 +11095,34 @@
           }
         }
       },
+      "LocalizationSettings": {
+        "required": [
+          "locale",
+          "timeZone",
+          "currency",
+          "version"
+        ],
+        "type": "object",
+        "properties": {
+          "locale": {
+            "type": "string"
+          },
+          "timeZone": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "LoginRequest": {
         "required": [
           "email",
@@ -14618,6 +14692,9 @@
     },
     {
       "name": "Notifications"
+    },
+    {
+      "name": "Localization"
     },
     {
       "name": "Compliance"

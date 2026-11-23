@@ -16,6 +16,8 @@ export function SettingsPage() {
   const invitations = useQuery({ queryKey: ['invitations', tenantId], queryFn: () => api.invitations(tenantId), enabled: Boolean(tenantId) });
   const delegations = useQuery({ queryKey: ['ownership-delegations', tenantId], queryFn: () => api.ownershipDelegations(tenantId), enabled: Boolean(tenantId) });
   const suffix = useQuery({ queryKey: ['display-suffix'], queryFn: api.displaySuffix, enabled: Boolean(session) });
+  const localization = useQuery({ queryKey: ['localization'], queryFn: api.localization, enabled: Boolean(session) });
+  const [localizationDraft, setLocalizationDraft] = useState<Awaited<ReturnType<typeof api.localization>> | null>(null);
   const [invitationEmail, setInvitationEmail] = useState('');
   const [invitationRole, setInvitationRole] = useState('Member');
   const [delegateUserId, setDelegateUserId] = useState('');
@@ -48,9 +50,17 @@ export function SettingsPage() {
   const saveSuffix = useMutation({
     mutationFn: () => api.updateDisplaySuffix(suffixDraft), onSuccess: invalidateIdentity
   });
+  const saveLocalization = useMutation({
+    mutationFn: () => api.updateLocalization(localizationDraft ?? localization.data!),
+    onSuccess: async result => {
+      setLocalizationDraft(null);
+      await i18n.changeLanguage(result.locale);
+      await queryClient.invalidateQueries({ queryKey: ['localization'] });
+    }
+  });
 
-  if (tenants.isLoading || sessions.isLoading || invitations.isLoading || delegations.isLoading || suffix.isLoading) return <LoadingState />;
-  const identityError = tenants.error ?? sessions.error ?? invitations.error ?? delegations.error ?? suffix.error;
+  if (tenants.isLoading || sessions.isLoading || invitations.isLoading || delegations.isLoading || suffix.isLoading || localization.isLoading) return <LoadingState />;
+  const identityError = tenants.error ?? sessions.error ?? invitations.error ?? delegations.error ?? suffix.error ?? localization.error;
   if (identityError) return <ErrorState message={identityError.message} />;
 
   return (
@@ -58,12 +68,17 @@ export function SettingsPage() {
       <PageHeader title={t('settings')} description="Language, tenant context, identity providers, sessions and ownership." />
       <Grid columns={2}>
         <Card title="Preferences">
-          <Select label="Language" value={translator.language} onChange={language => void i18n.changeLanguage(language)} options={[
-            { value: 'zh-CN', label: '简体中文' }, { value: 'en-US', label: 'English' }
-          ]} />
+          <Select label="Language" value={localizationDraft?.locale ?? localization.data?.locale ?? translator.language}
+            onChange={locale => setLocalizationDraft({ ...(localizationDraft ?? localization.data!), locale })} options={[
+              { value: 'zh-CN', label: '简体中文' }, { value: 'en-US', label: 'English' }
+            ]} />
+          <FormField label="IANA time zone"><TextInput value={localizationDraft?.timeZone ?? localization.data?.timeZone ?? 'Asia/Shanghai'}
+            onChange={timeZone => setLocalizationDraft({ ...(localizationDraft ?? localization.data!), timeZone })} /></FormField>
+          <FormField label="ISO currency"><TextInput value={localizationDraft?.currency ?? localization.data?.currency ?? 'CNY'}
+            onChange={currency => setLocalizationDraft({ ...(localizationDraft ?? localization.data!), currency: currency.toUpperCase() })} /></FormField>
+          <Button onClick={() => saveLocalization.mutate()} disabled={!localization.data} loading={saveLocalization.isPending}>Save preferences</Button>
           <FormField label="Boss display suffix"><TextInput value={suffixDraft || suffix.data?.suffix || ''} onChange={setSuffixDraft} placeholder="[Boss]" /></FormField>
           <Button onClick={() => saveSuffix.mutate()} loading={saveSuffix.isPending}>Save display suffix</Button>
-          <Text>Timezone: Asia/Shanghai</Text>
           <Text>Notifications: dashboard only</Text>
         </Card>
         <Card title="Tenant ownership">

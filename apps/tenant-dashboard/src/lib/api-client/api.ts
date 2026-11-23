@@ -72,6 +72,8 @@ export const api = {
     put<Schema['IdentityProviderDto']>(`/v1/tenants/${tenantId}/identity-providers/${provider}`, {
       tenantId, provider, issuer, clientId, enabled: true, groupMappingJson: '{}'
     }),
+  localization: () => request<Schema['LocalizationSettings']>('/v1/localization'),
+  updateLocalization: (settings: Schema['LocalizationSettings']) => put<Schema['LocalizationSettings']>('/v1/localization', settings),
   displaySuffix: () => request<Schema['DisplaySuffixDto']>('/v1/profile/display-suffix'),
   updateDisplaySuffix: (suffix: string) => put<Schema['DisplaySuffixDto']>('/v1/profile/display-suffix', { suffix }),
   dashboard: () => request<Schema['DashboardSummary']>('/v1/dashboard/summary'),

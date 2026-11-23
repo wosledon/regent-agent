@@ -58,6 +58,8 @@ builder.Services.AddScoped<TenantService>();
 builder.Services.AddScoped<OrganizationService>();
 builder.Services.AddScoped<AuditIntegrityService>();
 builder.Services.AddScoped<MemoryEventService>();
+builder.Services.AddSingleton(new JsonDocumentStore<LocalizationSettings>("data/modules/localization.json"));
+builder.Services.AddSingleton<LocalizationService>();
 builder.Services.AddSingleton(sp => new DeliveryService(
     new JsonDocumentStore<ProjectDeliveryState>("data/modules/project-delivery.json"), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new LocalArtifactSigner("data/security/tool-signing-key.pem"));
@@ -167,6 +169,7 @@ RegisterTenantStore<EvaluationRun>(builder.Services, "data/modules/evaluations.j
 RegisterTenantStore<JudgeAssignment>(builder.Services, "data/modules/judges.json");
 RegisterTenantStore<EvaluationQaState>(builder.Services, "data/modules/evaluation-qa.json");
 RegisterTenantStore<ComplianceProfile>(builder.Services, "data/modules/compliance.json");
+RegisterTenantStore<LocalizationSettings>(builder.Services, "data/modules/localization.json");
 RegisterTenantStore<ProjectDeliveryState>(builder.Services, "data/modules/project-delivery.json");
 RegisterTenantStore<GovernanceState>(builder.Services, "data/modules/governance.json");
 RegisterTenantStore<DataLifecycleState>(builder.Services, "data/modules/lifecycle.json");
@@ -965,6 +968,12 @@ api.MapPost("/notifications/{id:guid}/archive", async (Guid id, HttpContext cont
     return Results.NoContent();
 }).WithTags("Notifications");
 
+api.MapGet("/localization", async (HttpContext context, LocalizationService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(CurrentTenant(context), cancellationToken)))
+    .Produces<LocalizationSettings>().WithTags("Localization");
+api.MapPut("/localization", async (LocalizationSettings settings, HttpContext context,
+    LocalizationService service, CancellationToken cancellationToken) => Results.Ok(await service.UpdateAsync(
+        CurrentTenant(context), settings, cancellationToken))).Produces<LocalizationSettings>().WithTags("Localization");
 api.MapGet("/compliance/profile", async (HttpContext context, ComplianceService service,
     CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(CurrentTenant(context), cancellationToken)))
     .WithTags("Compliance");
