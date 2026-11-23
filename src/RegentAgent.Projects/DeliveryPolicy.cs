@@ -33,6 +33,12 @@ public static class DeliveryPolicy
             errors.Add("Child task weight must exactly match requirement weight.");
         if (plan.Tasks.Select(x => x.Id).Distinct().Count() != plan.Tasks.Count) errors.Add("Task identifiers must be unique.");
         if (plan.Tasks.Any(x => string.IsNullOrWhiteSpace(x.Title) || x.Weight <= 0)) errors.Add("Every task needs a title and positive weight.");
+        if (plan.Tasks.Any(x => string.IsNullOrWhiteSpace(x.TaskType) || string.IsNullOrWhiteSpace(x.RequiredCapabilitiesJson)
+                || System.Text.Json.JsonSerializer.Deserialize<string[]>(x.RequiredCapabilitiesJson) is not { Length: > 0 }))
+            errors.Add("Every task needs a type and at least one required capability.");
+        foreach (var criterion in requirement.AcceptanceCriteria)
+            if (plan.Tasks.SelectMany(x => x.AcceptanceCriteria).All(x => !string.Equals(x, criterion, StringComparison.OrdinalIgnoreCase)))
+                errors.Add($"Task plan does not cover acceptance criterion: {criterion}");
         foreach (var dependency in plan.Tasks.SelectMany(x => x.DependsOn))
         {
             if (plan.Tasks.All(x => x.Id != dependency)) errors.Add("Dependency is outside the plan.");

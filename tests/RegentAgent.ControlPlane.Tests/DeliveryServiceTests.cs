@@ -1,3 +1,4 @@
+using System.Text.Json;
 using RegentAgent.Contracts.Projects;
 using RegentAgent.Projects;
 using RegentAgent.Storage;
@@ -42,7 +43,8 @@ public sealed class DeliveryServiceTests
                 Tasks = taskIds.Select((id, index) => new DeliveryTask
                 {
                     Id = id, Title = $"Delivery task {index}", Weight = 2,
-                    Author = "Engineer", AcceptanceCriteria = ["Verified"]
+                    RequiredCapabilitiesJson = JsonSerializer.Serialize(new[] { "engineering.implement" }),
+                    Author = "Engineer", AcceptanceCriteria = requirement.AcceptanceCriteria
                 }).ToArray()
             }, CancellationToken.None);
             await service.ApprovePlanAsync(tenantId, projectId, plan.Id, CancellationToken.None);
@@ -56,7 +58,7 @@ public sealed class DeliveryServiceTests
                 }, CancellationToken.None);
                 await service.CompleteTaskAsync(tenantId, projectId, taskId, new DoneEvidence
                 {
-                    CriteriaResults = new Dictionary<string, bool> { ["verified"] = true },
+                    CriteriaResults = requirement.AcceptanceCriteria.ToDictionary(value => value, _ => true),
                     Artifacts = [new($"artifact-{taskId:N}", "document", "local")],
                     TestResults = ["PASS"], SecurityChecks = ["PASS"], OpenP0P1Defects = 0, Validator = $"Reviewer-{taskId:N}"
                 }, CancellationToken.None);

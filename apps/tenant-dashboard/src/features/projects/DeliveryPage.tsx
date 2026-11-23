@@ -90,7 +90,7 @@ export function DeliveryPage() {
         title: `${requirement.title ?? 'Requirement'} — step ${index + 1}`, taskType: 'engineering.implement',
         requiredCapabilitiesJson: JSON.stringify(['engineering.implement']), dependsOn: [], weight: 2,
         status: 'Backlog', author: 'Controller', assignee: null, validator: null,
-        acceptanceCriteria: acceptanceCriteria.slice(index, index + 1)
+        acceptanceCriteria
       }));
       const plan = await api.proposePlan(projectId, {
         id: crypto.randomUUID(), requirementId, requirementVersion: requirement.version ?? 1,
