@@ -1153,6 +1153,203 @@
         }
       }
     },
+    "/v1/recruitment/interviews": {
+      "get": {
+        "tags": [
+          "Recruitment"
+        ],
+        "parameters": [
+          {
+            "name": "candidateId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/InterviewStageDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Recruitment"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewStageDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewStageDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/recruitment/appeals": {
+      "get": {
+        "tags": [
+          "Recruitment"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CandidateAppealDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Recruitment"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CandidateAppealDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateAppealDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/recruitment/appeals/{appealId}/resolve": {
+      "post": {
+        "tags": [
+          "Recruitment"
+        ],
+        "parameters": [
+          {
+            "name": "appealId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveAppealRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateAppealDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/recruitment/fairness-audits": {
+      "post": {
+        "tags": [
+          "Recruitment"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FairnessAuditRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FairnessAuditDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Recruitment"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FairnessAuditDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/dashboard/summary": {
       "get": {
         "tags": [
@@ -1654,6 +1851,632 @@
         }
       }
     },
+    "/v1/memories/{id}/forget": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/memories/{id}": {
+      "delete": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/memories/decay": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/improvements": {
+      "get": {
+        "tags": [
+          "Performance"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Performance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateImprovementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/improvements/{id}/review": {
+      "post": {
+        "tags": [
+          "Performance"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewImprovementRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/agent-runtime/context": {
+      "post": {
+        "tags": [
+          "Agent Runtime"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BuildContextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentContextSnapshot"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-runtime/tool-loop": {
+      "post": {
+        "tags": [
+          "Agent Runtime"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolLoopRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolLoopResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance": {
+      "get": {
+        "tags": [
+          "Task Governance"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskGovernanceState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/task-types": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskTypeDefinition"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskTypeDefinition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/capabilities": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilityAssessment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityAssessment"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/claim-score": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimScoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimScoreDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/ledger": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkLedgerEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkLedgerEntry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/reviews": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewTaskRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTaskRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/reviews/{reviewId}/approve": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "parameters": [
+          {
+            "name": "reviewId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTaskRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/debates": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DebateTaskRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebateTaskRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/debates/{debateId}/decide": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "parameters": [
+          {
+            "name": "debateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideDebateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebateTaskRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/adjudications": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdjudicationTaskRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdjudicationTaskRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution": {
+      "get": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/prompts": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePromptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/prompts/{id}/activate": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/skills": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSkillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/skills/{id}/activate": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/tool-policies": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolDisclosurePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/tools/disclose": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolDisclosureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/v1/kpis": {
       "get": {
         "tags": [
@@ -1676,6 +2499,70 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/performance-actions": {
+      "get": {
+        "tags": [
+          "Performance"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Performance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PerformActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/performance-actions/{id}/appeal": {
+      "post": {
+        "tags": [
+          "Performance"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AppealActionRequest"
               }
             }
           },
@@ -2491,6 +3378,95 @@
         }
       }
     },
+    "/v1/projects/{projectId}/delivery/releases/{releaseId}/observe": {
+      "post": {
+        "tags": [
+          "Delivery"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "releaseId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ObserveReleaseRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReleaseRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/delivery/terminate": {
+      "post": {
+        "tags": [
+          "Delivery"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Retrospective"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Retrospective"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/projects/{projectId}/delivery/releases/{releaseId}/rollback": {
       "post": {
         "tags": [
@@ -2727,6 +3703,36 @@
         }
       }
     },
+    "/v1/governance/tools/{toolId}/impact": {
+      "get": {
+        "tags": [
+          "Governance"
+        ],
+        "parameters": [
+          {
+            "name": "toolId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolRevocationImpact"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/governance/injections/scan": {
       "post": {
         "tags": [
@@ -2781,6 +3787,28 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/governance/dlp/delete": {
+      "post": {
+        "tags": [
+          "Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteDlpTokensRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
           }
         }
       }
@@ -3010,6 +4038,46 @@
         }
       }
     },
+    "/v1/governance/incidents/{incidentId}/evidence": {
+      "post": {
+        "tags": [
+          "Governance"
+        ],
+        "parameters": [
+          {
+            "name": "incidentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SealEvidenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecurityIncident"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/governance/incidents/{incidentId}/close": {
       "post": {
         "tags": [
@@ -3118,6 +4186,43 @@
         "responses": {
           "200": {
             "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/governance/approval-delegations/chain": {
+      "get": {
+        "tags": [
+          "Governance"
+        ],
+        "parameters": [
+          {
+            "name": "primary",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "action",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalChainDto"
+                }
+              }
+            }
           }
         }
       }
@@ -4403,6 +5508,12 @@
           "reviewer": {
             "type": "string"
           },
+          "authorEmployeeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
           "functionalScore": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
@@ -4510,6 +5621,35 @@
           }
         }
       },
+      "AdjudicationTaskRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "debateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "adjudicator": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "dissentRefsJson": {
+            "type": "string"
+          }
+        }
+      },
       "AdmitToolRequest": {
         "required": [
           "reviewer"
@@ -4518,6 +5658,39 @@
         "properties": {
           "reviewer": {
             "type": "string"
+          }
+        }
+      },
+      "AgentContextSnapshot": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "systemPrefix": {
+            "type": "string"
+          },
+          "tenantMemory": {
+            "type": "string"
+          },
+          "taskGrantJson": {
+            "type": "string"
+          },
+          "toolResultRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkpointJson": {
+            "type": "string"
+          },
+          "prefixHash": {
+            "type": "string"
+          },
+          "compressed": {
+            "type": "boolean"
           }
         }
       },
@@ -4545,6 +5718,31 @@
           },
           "currency": {
             "type": "string"
+          }
+        }
+      },
+      "AppealActionRequest": {
+        "required": [
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "ApprovalChainDto": {
+        "required": [
+          "approvers"
+        ],
+        "type": "object",
+        "properties": {
+          "approvers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -4673,6 +5871,17 @@
           "rejected",
           "expired"
         ]
+      },
+      "ApproveReviewRequest": {
+        "required": [
+          "approver"
+        ],
+        "type": "object",
+        "properties": {
+          "approver": {
+            "type": "string"
+          }
+        }
       },
       "ArchiveManifest": {
         "type": "object",
@@ -4940,6 +6149,45 @@
           }
         }
       },
+      "BuildContextRequest": {
+        "required": [
+          "taskId",
+          "systemPrefix",
+          "tenantMemory",
+          "taskGrantJson",
+          "toolResultRefs",
+          "checkpointJson",
+          "compressed"
+        ],
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "systemPrefix": {
+            "type": "string"
+          },
+          "tenantMemory": {
+            "type": "string"
+          },
+          "taskGrantJson": {
+            "type": "string"
+          },
+          "toolResultRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "checkpointJson": {
+            "type": "string"
+          },
+          "compressed": {
+            "type": "boolean"
+          }
+        }
+      },
       "ButlerAnswer": {
         "required": [
           "answer",
@@ -5101,6 +6349,35 @@
           }
         }
       },
+      "CandidateAppealDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "candidateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "CandidateAssessmentDto": {
         "required": [
           "candidateId",
@@ -5178,6 +6455,66 @@
           },
           "fairnessJson": {
             "type": "string"
+          }
+        }
+      },
+      "CapabilityAssessment": {
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dimension": {
+            "type": "string"
+          },
+          "modelScore": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "historyScore": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "toolFit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "contextFit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "effectiveScore": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "confidence": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
           }
         }
       },
@@ -5303,6 +6640,100 @@
               "string"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "ClaimScoreDto": {
+        "required": [
+          "employeeId",
+          "score",
+          "eligible",
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "score": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "eligible": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "ClaimScoreRequest": {
+        "required": [
+          "employeeId",
+          "taskType",
+          "currentWip",
+          "wipLimit",
+          "historySuccess",
+          "toolFit",
+          "costEfficiency",
+          "independent"
+        ],
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskType": {
+            "type": "string"
+          },
+          "currentWip": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "wipLimit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "historySuccess": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "toolFit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "costEfficiency": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "independent": {
+            "type": "boolean"
           }
         }
       },
@@ -5721,6 +7152,29 @@
           }
         }
       },
+      "CreateImprovementRequest": {
+        "required": [
+          "employeeId",
+          "category",
+          "summary",
+          "expectedBenefit"
+        ],
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "expectedBenefit": {
+            "type": "string"
+          }
+        }
+      },
       "CreateOwnershipDelegationRequest": {
         "required": [
           "delegateUserId",
@@ -5742,6 +7196,21 @@
             "format": "int32"
           },
           "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "CreatePromptRequest": {
+        "required": [
+          "name",
+          "content"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "content": {
             "type": "string"
           }
         }
@@ -5780,6 +7249,26 @@
             "type": "string"
           },
           "evidenceJson": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateSkillRequest": {
+        "required": [
+          "name",
+          "promptBundleId",
+          "configJson"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "promptBundleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "configJson": {
             "type": "string"
           }
         }
@@ -5953,6 +7442,52 @@
           }
         }
       },
+      "DebateTaskRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "question": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decision": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "DecideDebateRequest": {
+        "required": [
+          "decision"
+        ],
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string"
+          }
+        }
+      },
       "DecisionRequest": {
         "required": [
           "decision",
@@ -6082,6 +7617,20 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/EvidenceRef"
+            }
+          }
+        }
+      },
+      "DeleteDlpTokensRequest": {
+        "required": [
+          "tokens"
+        ],
+        "type": "object",
+        "properties": {
+          "tokens": {
+            "type": "array",
+            "items": {
+              "type": "string"
             }
           }
         }
@@ -6897,6 +8446,82 @@
           }
         }
       },
+      "FairnessAuditDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "period": {
+            "type": "string"
+          },
+          "sampleSize": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "selectionRateRatio": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "status": {
+            "type": "string"
+          },
+          "detailsJson": {
+            "type": "string"
+          }
+        }
+      },
+      "FairnessAuditRequest": {
+        "required": [
+          "positionId",
+          "period",
+          "sampleSize",
+          "selectionRateRatio"
+        ],
+        "type": "object",
+        "properties": {
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "period": {
+            "type": "string"
+          },
+          "sampleSize": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "selectionRateRatio": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          }
+        }
+      },
       "Freshness": {
         "enum": [
           "live",
@@ -6981,6 +8606,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/ToolAdmissionReview"
+            }
+          },
+          "toolUsages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolUsageRecord"
             }
           },
           "dlpTokens": {
@@ -7069,6 +8700,44 @@
           },
           "recommendedAction": {
             "type": "string"
+          }
+        }
+      },
+      "InterviewStageDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "candidateId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stage": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "score": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "evidenceJson": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -7631,6 +9300,21 @@
           }
         }
       },
+      "ObserveReleaseRequest": {
+        "required": [
+          "healthy",
+          "metricsJson"
+        ],
+        "type": "object",
+        "properties": {
+          "healthy": {
+            "type": "boolean"
+          },
+          "metricsJson": {
+            "type": "string"
+          }
+        }
+      },
       "OffboardRequest": {
         "required": [
           "approvalId"
@@ -7713,6 +9397,32 @@
           },
           "status": {
             "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "PerformActionRequest": {
+        "required": [
+          "employeeId",
+          "actionType",
+          "approvalId",
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string"
+          },
+          "actionType": {
+            "type": "string"
+          },
+          "approvalId": {
+            "type": [
+              "null",
+              "string"
+            ]
           },
           "reason": {
             "type": "string"
@@ -7836,6 +9546,9 @@
           "projectId": {
             "type": "string",
             "format": "uuid"
+          },
+          "projectStatus": {
+            "type": "string"
           },
           "findings": {
             "type": "array",
@@ -8223,6 +9936,12 @@
           "status": {
             "type": "string"
           },
+          "observationStatus": {
+            "type": "string"
+          },
+          "metricsJson": {
+            "type": "string"
+          },
           "rolledBackTo": {
             "type": [
               "null",
@@ -8324,6 +10043,17 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "ResolveAppealRequest": {
+        "required": [
+          "resolution"
+        ],
+        "type": "object",
+        "properties": {
+          "resolution": {
+            "type": "string"
           }
         }
       },
@@ -8490,6 +10220,60 @@
           }
         }
       },
+      "ReviewImprovementRequest": {
+        "required": [
+          "approved"
+        ],
+        "type": "object",
+        "properties": {
+          "approved": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ReviewTaskRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "author": {
+            "type": "string"
+          },
+          "requiredQuorum": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "approvers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
       "RightsRecord": {
         "type": "object",
         "properties": {
@@ -8641,6 +10425,17 @@
         "type": "object",
         "properties": {
           "content": {
+            "type": "string"
+          }
+        }
+      },
+      "SealEvidenceRequest": {
+        "required": [
+          "evidence"
+        ],
+        "type": "object",
+        "properties": {
+          "evidence": {
             "type": "string"
           }
         }
@@ -8841,6 +10636,75 @@
           }
         }
       },
+      "TaskGovernanceState": {
+        "type": "object",
+        "properties": {
+          "taskTypes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskTypeDefinition"
+            }
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CapabilityAssessment"
+            }
+          },
+          "ledger": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkLedgerEntry"
+            }
+          },
+          "reviews": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewTaskRecord"
+            }
+          },
+          "debates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DebateTaskRecord"
+            }
+          },
+          "adjudications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdjudicationTaskRecord"
+            }
+          }
+        }
+      },
+      "TaskTypeDefinition": {
+        "type": "object",
+        "properties": {
+          "taskType": {
+            "type": "string"
+          },
+          "requiredCapabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "toolProfile": {
+            "type": "string"
+          },
+          "doneTemplate": {
+            "type": "string"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "TenantDto": {
         "required": [
           "id",
@@ -8976,6 +10840,152 @@
           }
         }
       },
+      "ToolDisclosurePolicy": {
+        "type": "object",
+        "properties": {
+          "toolName": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "requiredCapabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      },
+      "ToolDisclosureRequest": {
+        "required": [
+          "capabilities",
+          "restrictedActivated"
+        ],
+        "type": "object",
+        "properties": {
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "restrictedActivated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ToolLoopRequest": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "maxSteps": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "costWarningThreshold": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolLoopStep"
+            }
+          }
+        }
+      },
+      "ToolLoopResult": {
+        "type": "object",
+        "properties": {
+          "completed": {
+            "type": "boolean"
+          },
+          "executedSteps": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "duplicateSteps": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "unauthorizedSteps": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "totalCost": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "reviewRequired": {
+            "type": "boolean"
+          },
+          "checkpointJson": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ToolLoopStep": {
+        "type": "object",
+        "properties": {
+          "toolName": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string"
+          },
+          "authorized": {
+            "type": "boolean"
+          },
+          "result": {
+            "type": "string"
+          },
+          "cost": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          }
+        }
+      },
       "ToolManifest": {
         "type": "object",
         "properties": {
@@ -9017,6 +11027,64 @@
           }
         }
       },
+      "ToolRevocationImpact": {
+        "required": [
+          "affectedActors",
+          "affectedCapabilities",
+          "actors"
+        ],
+        "type": "object",
+        "properties": {
+          "affectedActors": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "affectedCapabilities": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "actors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ToolUsageRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "toolId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string"
+          },
+          "allowed": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "WilsonInterval": {
         "required": [
           "low",
@@ -9039,6 +11107,76 @@
               "string"
             ],
             "format": "double"
+          }
+        }
+      },
+      "WorkLedgerEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "employeeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskType": {
+            "type": "string"
+          },
+          "taskWeight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "roleRelation": {
+            "type": "string"
+          },
+          "qualityFactor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "capabilityFitFactor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "weightedScore": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "cost": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "evidenceRefsJson": {
+            "type": "string"
           }
         }
       },
@@ -9137,6 +11275,15 @@
     },
     {
       "name": "Performance"
+    },
+    {
+      "name": "Agent Runtime"
+    },
+    {
+      "name": "Task Governance"
+    },
+    {
+      "name": "Agent Evolution"
     },
     {
       "name": "Communication"
