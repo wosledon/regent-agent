@@ -471,11 +471,18 @@ api.MapDelete("/delegations/{id:guid}", async (Guid id, OrganizationService serv
     return Results.NoContent();
 }).WithTags("Organization");
 api.MapPost("/employees/{employeeId:guid}/offboard", async (Guid employeeId, OffboardRequest request,
-    OrganizationService service, CancellationToken cancellationToken) =>
+    OrganizationService service, MemoryService memory, RegentDbContext db, HttpContext context,
+    CancellationToken cancellationToken) =>
 {
     await service.OffboardAsync(employeeId, request.ApprovalId, cancellationToken);
+    var employee = await db.Employees.AsNoTracking().SingleAsync(x => x.Id == employeeId, cancellationToken);
+    await memory.IsolatePersonalClaimsAsync(CurrentTenant(context), employee.DisplayName, cancellationToken);
     return Results.NoContent();
 }).WithTags("Organization");
+api.MapPost("/employees/{employeeId:guid}/rehire", async (Guid employeeId, RehireRequest request,
+    OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RehireAsync(employeeId, request.PositionId, request.ApprovalId, cancellationToken)))
+    .Produces<EmployeeSummary>().WithTags("Organization");
 api.MapPost("/candidates", async (CreateCandidateRequest request, OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CreateCandidateAsync(request.PositionId, request.DisplayName, request.ModelVersion, cancellationToken)))
     .Produces<CandidateDto>().WithTags("Recruitment");
@@ -1500,6 +1507,7 @@ public sealed record PositionStatusRequest(string Status);
 public sealed record SplitPositionRequest(string Name, string Responsibilities);
 public sealed record CreateDelegationRequest(Guid DelegateEmployeeId, Guid SubtreePositionId, IReadOnlyList<string> Actions, long BudgetLimitMinor, int Minutes);
 public sealed record OffboardRequest(string ApprovalId);
+public sealed record RehireRequest(Guid PositionId, string ApprovalId);
 public sealed record CreateCandidateRequest(Guid PositionId, string DisplayName, string ModelVersion);
 public sealed record HireCandidateRequest(string ApprovalId);
 public sealed record DecisionRequest(string Decision, string Rationale, IReadOnlyList<Guid> EvidenceIds, int Reround, string Decider);

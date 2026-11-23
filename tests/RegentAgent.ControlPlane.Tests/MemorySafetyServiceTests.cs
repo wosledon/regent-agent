@@ -232,6 +232,20 @@ public sealed class MemorySafetyServiceTests
     }
 
     [Fact]
+    public async Task Offboarding_isolates_private_memory_without_deleting_it()
+    {
+        using var fixture = new MemoryFixture();
+        var claim = await fixture.Memory.CaptureAsync(Tenant, "personal", "Private employee notes", "source:private",
+            0.8, "trusted", "Alice", CancellationToken.None);
+
+        await fixture.Memory.IsolatePersonalClaimsAsync(Tenant, "Alice", CancellationToken.None);
+        var result = await fixture.Index.SearchHybridAsync(Tenant, "private employee", null, 10, "Alice", CancellationToken.None);
+
+        Assert.Empty(result.Hits);
+        Assert.Equal("Isolated", (await fixture.Claims.GetAsync(claim.Id, CancellationToken.None))!.Status);
+    }
+
+    [Fact]
     public async Task Cross_tenant_claim_access_is_rejected()
     {
         using var fixture = new MemoryFixture();

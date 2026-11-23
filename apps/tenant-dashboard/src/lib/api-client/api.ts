@@ -88,6 +88,8 @@ export const api = {
   transitionProject: (id: string, stage: string, evidence: string) =>
     post<Schema['ProjectDetail']>(`/v1/projects/${id}/transitions`, { stage, evidence }),
   employees: () => request<Schema['EmployeeSummary'][]>('/v1/employees'),
+  rehireEmployee: (employeeId: string, positionId: string, approvalId: string) =>
+    post<Schema['EmployeeSummary']>(`/v1/employees/${employeeId}/rehire`, { positionId, approvalId }),
   employeeTimeline: (id: string) => request<Schema['EmployeeTimeline']>(`/v1/employees/${id}/timeline`),
   createApproval: (body: Schema['CreateApprovalDto']) => post<Schema['ApprovalDto']>('/v1/approvals', body),
   approval: (id: string) => request<Schema['ApprovalDto']>(`/v1/approvals/${id}`),

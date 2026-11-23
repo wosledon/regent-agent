@@ -1163,6 +1163,46 @@
         }
       }
     },
+    "/v1/employees/{employeeId}/rehire": {
+      "post": {
+        "tags": [
+          "Organization"
+        ],
+        "parameters": [
+          {
+            "name": "employeeId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RehireRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmployeeSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/candidates": {
       "post": {
         "tags": [
@@ -12945,6 +12985,22 @@
             "type": "string"
           },
           "companyName": {
+            "type": "string"
+          }
+        }
+      },
+      "RehireRequest": {
+        "required": [
+          "positionId",
+          "approvalId"
+        ],
+        "type": "object",
+        "properties": {
+          "positionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "approvalId": {
             "type": "string"
           }
         }

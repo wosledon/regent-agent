@@ -27,6 +27,9 @@ export function OrganizationPage() {
   const [splitId, setSplitId] = useState('');
   const [splitName, setSplitName] = useState('');
   const [splitResponsibilities, setSplitResponsibilities] = useState('');
+  const [rehireEmployeeId, setRehireEmployeeId] = useState('');
+  const [rehirePositionId, setRehirePositionId] = useState('');
+  const [rehireApprovalId, setRehireApprovalId] = useState('');
 
   const refresh = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['charter'] }),
@@ -54,6 +57,7 @@ export function OrganizationPage() {
     mutationFn: () => api.createCandidate({ positionId: candidatePosition, displayName: candidateName, modelVersion: candidateModel }),
     onSuccess: async () => { setCandidateName(''); await refresh(); }
   });
+  const rehire = useMutation({ mutationFn: () => api.rehireEmployee(rehireEmployeeId, rehirePositionId, rehireApprovalId), onSuccess: async () => { setRehireApprovalId(''); await refresh(); } });
   const createTenant = useMutation({
     mutationFn: () => api.createTenant({ name: tenantName, companyName }),
     onSuccess: async () => { setTenantName(''); setCompanyName(''); await refresh(); }
@@ -113,6 +117,15 @@ export function OrganizationPage() {
             <Button tone="secondary" onClick={() => splitPosition.mutate()} disabled={!splitId || !splitName} loading={splitPosition.isPending}>Split</Button>
           </Stack>
         </Grid>
+      </Card>
+      <Card title="Rehire with Boss approval">
+        <Stack spacing={2}>
+          <FormField label="Terminated employee ID"><TextInput value={rehireEmployeeId} onChange={setRehireEmployeeId} /></FormField>
+          <FormField label="Open position ID"><TextInput value={rehirePositionId} onChange={setRehirePositionId} /></FormField>
+          <FormField label="Boss approval ID"><TextInput value={rehireApprovalId} onChange={setRehireApprovalId} /></FormField>
+          <Button tone="secondary" disabled={!rehireEmployeeId || !rehirePositionId || !rehireApprovalId} loading={rehire.isPending} onClick={() => rehire.mutate()}>Rehire employee</Button>
+          <Text variant="caption">Private memory remains isolated after rehire and is not restored automatically.</Text>
+        </Stack>
       </Card>
       <Grid columns={2}>
         <Card title="Create position">

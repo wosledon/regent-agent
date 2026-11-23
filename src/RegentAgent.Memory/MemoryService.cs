@@ -71,6 +71,16 @@ public sealed class MemoryService(JsonDocumentStore<MemoryClaim> claims, JsonDoc
         (await claims.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId && x.Status == "Candidate")
             .OrderByDescending(x => x.CreatedAt).ToArray();
 
+    public async Task IsolatePersonalClaimsAsync(string tenantId, string author, CancellationToken cancellationToken)
+    {
+        foreach (var claim in (await claims.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId
+                     && x.Scope == "personal" && x.Author == author && x.Status is "Active" or "Disputed").ToArray())
+        {
+            await claims.PutAsync(claim.Id, claim with { Status = "Isolated" }, cancellationToken);
+            if (index is not null) await index.RemoveFromRecallAsync(tenantId, claim.Id, cancellationToken);
+        }
+    }
+
     public async Task ArchiveAsync(string claimId, string tenantId, CancellationToken cancellationToken)
     {
         var claim = await claims.GetAsync(claimId, cancellationToken) ?? throw new KeyNotFoundException("Memory claim not found.");

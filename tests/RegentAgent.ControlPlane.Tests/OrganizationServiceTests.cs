@@ -95,6 +95,38 @@ public sealed class OrganizationServiceTests
         Assert.Equal(EmployeeState.Terminated, (await db.Employees.SingleAsync(x => x.Id == controller.Id)).State);
     }
 
+    [Fact]
+    public async Task Rehire_preserves_employee_number_and_does_not_restore_private_memory()
+    {
+        await using var db = CreateDb();
+        var tenantId = Guid.NewGuid();
+        db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "rehire-test", CompanyName = "Rehire Test" });
+        await db.SaveChangesAsync();
+        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System);
+        var controller = await service.StartCompanyAsync(CancellationToken.None);
+        var employeeNo = controller.EmployeeNo;
+        db.Approvals.Add(new ApprovalRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ActionType = "employee.offboard", Title = "Offboard Controller",
+            Severity = Severity.High, State = ApprovalState.Approved, ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+        });
+        await db.SaveChangesAsync();
+        await service.OffboardAsync(controller.Id, (await db.Approvals.SingleAsync()).Id.ToString(), CancellationToken.None);
+        db.Approvals.Add(new ApprovalRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ActionType = "hiring.hire", Title = "Rehire Controller",
+            Severity = Severity.High, State = ApprovalState.Approved, ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+        });
+        await db.SaveChangesAsync();
+        var positionId = (await db.Positions.SingleAsync()).Id;
+
+        var rehired = await service.RehireAsync(controller.Id, positionId, (await db.Approvals.OrderBy(x => x.CreatedAt).LastAsync()).Id.ToString(), CancellationToken.None);
+
+        Assert.Equal(employeeNo, rehired.EmployeeNo);
+        Assert.Equal(EmployeeState.Active, (await db.Employees.SingleAsync()).State);
+        Assert.Equal(2, await db.EmploymentPeriods.CountAsync());
+    }
+
     private static RegentDbContext CreateDb() => new(
         new DbContextOptionsBuilder<RegentDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())

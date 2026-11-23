@@ -196,6 +196,36 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         await AuditAsync("employee.offboarded", new { employee_id = employeeId, approval_id = approvalId }, cancellationToken);
     }
 
+    public async Task<EmployeeSummary> RehireAsync(Guid employeeId, Guid positionId, string approvalId,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenant.TenantId.Value;
+        var employee = await db.Employees.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == employeeId, cancellationToken)
+            ?? throw new KeyNotFoundException("Employee not found.");
+        if (employee.State != EmployeeState.Terminated) throw new InvalidOperationException("Only terminated employees can be rehired.");
+        var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Position not found.");
+        if (position.Status is not "Open") throw new InvalidOperationException("Rehire position must be open.");
+        var approval = await db.Approvals.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId
+            && x.Id == Guid.Parse(approvalId) && x.State == ApprovalState.Approved
+            && x.ActionType == "hiring.hire" && x.Title.Contains(employee.DisplayName, StringComparison.OrdinalIgnoreCase), cancellationToken);
+        if (approval is null) throw new InvalidOperationException("Human Boss approval is required for rehiring.");
+        if (await db.Employees.CountAsync(x => x.TenantId == tenantId && x.State != EmployeeState.Terminated, cancellationToken) >= 20)
+            throw new InvalidOperationException("Headcount limit reached.");
+        employee.State = EmployeeState.Active;
+        employee.StateReason = null;
+        employee.Position = position.Name;
+        position.Status = "Filled";
+        db.EmploymentPeriods.Add(new EmploymentPeriodRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, EmployeeId = employeeId,
+            PositionId = positionId, Kind = "Primary", StartedAt = clock.GetUtcNow()
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("employee.rehired", new { employee_id = employeeId, position_id = positionId, approval_id = approvalId }, cancellationToken);
+        return Mappings.ToSummary(employee, Freshness.Fresh);
+    }
+
     public async Task<CandidateDto> CreateCandidateAsync(Guid positionId, string displayName, string modelVersion,
         CancellationToken cancellationToken)
     {
