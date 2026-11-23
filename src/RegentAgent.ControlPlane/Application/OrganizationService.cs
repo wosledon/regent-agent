@@ -218,6 +218,59 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         return Mappings.ToSummary(employee, Freshness.Fresh);
     }
 
+    public async Task<PositionDto> SetPositionStatusAsync(Guid positionId, string status,
+        CancellationToken cancellationToken)
+    {
+        if (status is not ("Open" or "Filled" or "Frozen" or "Closed")) throw new InvalidOperationException("Invalid position status.");
+        var tenantId = tenant.TenantId.Value;
+        var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Position not found.");
+        position.Status = status;
+        position.Version++;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToPosition(position);
+    }
+
+    public async Task<PositionDto> MergePositionsAsync(Guid sourceId, Guid targetId,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenant.TenantId.Value;
+        var source = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == sourceId, cancellationToken)
+            ?? throw new KeyNotFoundException("Source position not found.");
+        var target = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == targetId, cancellationToken)
+            ?? throw new KeyNotFoundException("Target position not found.");
+        if (source.Id == target.Id) throw new InvalidOperationException("Cannot merge a position into itself.");
+        var periods = await db.EmploymentPeriods.Where(x => x.TenantId == tenantId && x.PositionId == sourceId && x.EndedAt == null).ToListAsync(cancellationToken);
+        foreach (var period in periods) period.PositionId = targetId;
+        var employees = await db.Employees.Where(x => x.TenantId == tenantId && x.Position == source.Name).ToListAsync(cancellationToken);
+        foreach (var employee in employees) employee.Position = target.Name;
+        source.Status = "Closed";
+        source.Version++;
+        target.Status = "Filled";
+        target.Version++;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToPosition(target);
+    }
+
+    public async Task<PositionDto> SplitPositionAsync(Guid positionId, string name, string responsibilities,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenant.TenantId.Value;
+        var source = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Position not found.");
+        var split = new PositionRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Name = name, Responsibilities = responsibilities,
+            CapabilitiesJson = source.CapabilitiesJson, BudgetMinor = source.BudgetMinor / 2,
+            ParentPositionId = source.ParentPositionId, Status = "Open"
+        };
+        source.BudgetMinor -= split.BudgetMinor;
+        source.Version++;
+        db.Positions.Add(split);
+        await db.SaveChangesAsync(cancellationToken);
+        return ToPosition(split);
+    }
+
     public async Task<IReadOnlyList<InterviewStageDto>> ListInterviewStagesAsync(Guid? candidateId,
         CancellationToken cancellationToken)
     {

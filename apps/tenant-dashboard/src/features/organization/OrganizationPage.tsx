@@ -22,6 +22,11 @@ export function OrganizationPage() {
   const [tenantName, setTenantName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [charterDraft, setCharterDraft] = useState<Awaited<ReturnType<typeof api.charter>> | null>(null);
+  const [mergeSource, setMergeSource] = useState('');
+  const [mergeTarget, setMergeTarget] = useState('');
+  const [splitId, setSplitId] = useState('');
+  const [splitName, setSplitName] = useState('');
+  const [splitResponsibilities, setSplitResponsibilities] = useState('');
 
   const refresh = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['charter'] }),
@@ -42,6 +47,9 @@ export function OrganizationPage() {
     }),
     onSuccess: async () => { setPositionName(''); await refresh(); }
   });
+  const setPositionStatus = useMutation({ mutationFn: ({ id, status }: { id: string; status: string }) => api.setPositionStatus(id, status), onSuccess: refresh });
+  const mergePositions = useMutation({ mutationFn: () => api.mergePositions(mergeSource, mergeTarget), onSuccess: async () => { setMergeSource(''); setMergeTarget(''); await refresh(); } });
+  const splitPosition = useMutation({ mutationFn: () => api.splitPosition(splitId, splitName, splitResponsibilities), onSuccess: async () => { setSplitName(''); setSplitResponsibilities(''); await refresh(); } });
   const createCandidate = useMutation({
     mutationFn: () => api.createCandidate({ positionId: candidatePosition, displayName: candidateName, modelVersion: candidateModel }),
     onSuccess: async () => { setCandidateName(''); await refresh(); }
@@ -82,8 +90,29 @@ export function OrganizationPage() {
           { id: 'name', header: 'Position', render: row => row.name },
           { id: 'responsibilities', header: 'Responsibilities', render: row => row.responsibilities },
           { id: 'capabilities', header: 'Capabilities', render: row => row.capabilities.join(', ') },
-          { id: 'status', header: 'Status', render: row => row.status }
+          { id: 'status', header: 'Status', render: row => row.status },
+          { id: 'actions', header: 'Actions', render: row => <Stack direction="row">
+            <Button tone="neutral" onClick={() => setPositionStatus.mutate({ id: row.id, status: row.status === 'Frozen' ? 'Open' : 'Frozen' })}>{row.status === 'Frozen' ? 'Unfreeze' : 'Freeze'}</Button>
+            <Button tone="danger" onClick={() => setPositionStatus.mutate({ id: row.id, status: 'Closed' })} disabled={row.status === 'Closed'}>Close</Button>
+          </Stack> }
         ]} />
+      </Card>
+      <Card title="Position lifecycle">
+        <Grid columns={2}>
+          <Stack>
+            <Text variant="h3">Merge positions</Text>
+            <Select label="Source" value={mergeSource} onChange={setMergeSource} options={[{ value: '', label: 'Select source' }, ...(positions.data ?? []).map(position => ({ value: position.id, label: position.name }))]} />
+            <Select label="Target" value={mergeTarget} onChange={setMergeTarget} options={[{ value: '', label: 'Select target' }, ...(positions.data ?? []).map(position => ({ value: position.id, label: position.name }))]} />
+            <Button onClick={() => mergePositions.mutate()} disabled={!mergeSource || !mergeTarget || mergeSource === mergeTarget} loading={mergePositions.isPending}>Merge</Button>
+          </Stack>
+          <Stack>
+            <Text variant="h3">Split position</Text>
+            <Select label="Position" value={splitId} onChange={setSplitId} options={[{ value: '', label: 'Select position' }, ...(positions.data ?? []).map(position => ({ value: position.id, label: position.name }))]} />
+            <FormField label="New name"><TextInput value={splitName} onChange={setSplitName} /></FormField>
+            <FormField label="Responsibilities"><TextInput value={splitResponsibilities} onChange={setSplitResponsibilities} /></FormField>
+            <Button tone="secondary" onClick={() => splitPosition.mutate()} disabled={!splitId || !splitName} loading={splitPosition.isPending}>Split</Button>
+          </Stack>
+        </Grid>
       </Card>
       <Grid columns={2}>
         <Card title="Create position">

@@ -124,6 +124,9 @@ export const api = {
   startCompany: () => post<Schema['EmployeeSummary']>('/v1/company/start'),
   positions: () => request<Schema['PositionDto'][]>('/v1/positions'),
   createPosition: (position: Schema['PositionDto']) => post<Schema['PositionDto']>('/v1/positions', position),
+  setPositionStatus: (id: string, status: string) => put<Schema['PositionDto']>(`/v1/positions/${id}/status`, { status }),
+  mergePositions: (sourceId: string, targetId: string) => post<Schema['PositionDto']>(`/v1/positions/${sourceId}/merge/${targetId}`),
+  splitPosition: (id: string, name: string, responsibilities: string) => post<Schema['PositionDto']>(`/v1/positions/${id}/split`, { name, responsibilities }),
   createCandidate: (body: Schema['CreateCandidateRequest']) => post<Schema['CandidateDto']>('/v1/candidates', body),
   assessCandidate: (id: string, assessment: Schema['CandidateAssessmentDto']) =>
     post<Schema['CandidateDto']>(`/v1/candidates/${id}/assessment`, assessment),

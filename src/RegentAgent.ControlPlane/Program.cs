@@ -432,6 +432,15 @@ api.MapGet("/positions", async (OrganizationService service, CancellationToken c
     Results.Ok(await service.ListPositionsAsync(cancellationToken))).Produces<IReadOnlyList<PositionDto>>().WithTags("Organization");
 api.MapPost("/positions", async (PositionDto position, OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CreatePositionAsync(position, cancellationToken))).Produces<PositionDto>().WithTags("Organization");
+api.MapPut("/positions/{positionId:guid}/status", async (Guid positionId, PositionStatusRequest request,
+    OrganizationService service, CancellationToken cancellationToken) => Results.Ok(await service.SetPositionStatusAsync(
+        positionId, request.Status, cancellationToken))).Produces<PositionDto>().WithTags("Organization");
+api.MapPost("/positions/{sourceId:guid}/merge/{targetId:guid}", async (Guid sourceId, Guid targetId,
+    OrganizationService service, CancellationToken cancellationToken) => Results.Ok(await service.MergePositionsAsync(
+        sourceId, targetId, cancellationToken))).Produces<PositionDto>().WithTags("Organization");
+api.MapPost("/positions/{positionId:guid}/split", async (Guid positionId, SplitPositionRequest request,
+    OrganizationService service, CancellationToken cancellationToken) => Results.Ok(await service.SplitPositionAsync(
+        positionId, request.Name, request.Responsibilities, cancellationToken))).Produces<PositionDto>().WithTags("Organization");
 api.MapPost("/employees/{employeeId:guid}/assignments", async (Guid employeeId, AssignPositionRequest request,
     OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.AssignAsync(employeeId, request.PositionId, cancellationToken)))
@@ -1233,6 +1242,8 @@ public sealed record DevLoginRequest(string Email, Guid? TenantId = null);
 public sealed record SwitchTenantRequest(Guid TenantId);
 public sealed record CreateTenantRequest(string Name, string CompanyName);
 public sealed record AssignPositionRequest(Guid PositionId);
+public sealed record PositionStatusRequest(string Status);
+public sealed record SplitPositionRequest(string Name, string Responsibilities);
 public sealed record CreateDelegationRequest(Guid DelegateEmployeeId, Guid SubtreePositionId, IReadOnlyList<string> Actions, long BudgetLimitMinor, int Minutes);
 public sealed record OffboardRequest(string ApprovalId);
 public sealed record CreateCandidateRequest(Guid PositionId, string DisplayName, string ModelVersion);
