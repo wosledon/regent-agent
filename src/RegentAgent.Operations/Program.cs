@@ -19,6 +19,10 @@ builder.Services.AddSingleton(new JsonDocumentStore<PlatformIncident>("data/ops/
 builder.Services.AddHttpClient();
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<PlatformStatusService>();
+builder.Services.AddSingleton(new JsonDocumentStore<ObservabilityProfile>("data/ops/observability-profile.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<SloDefinition>("data/ops/slos.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<TelemetrySample>("data/ops/telemetry-samples.json"));
+builder.Services.AddSingleton<ObservabilityService>();
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
@@ -98,6 +102,20 @@ ops.MapPut("/backups", async (BackupRequest request, OperationsService service,
 });
 ops.MapGet("/audit", async (OperationsService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.AuditsAsync(cancellationToken)));
+ops.MapGet("/observability/profile", async (ObservabilityService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetProfileAsync(cancellationToken)));
+ops.MapPut("/observability/profile", async (ObservabilityProfile profile, ObservabilityService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.UpdateProfileAsync(profile, cancellationToken)));
+ops.MapPost("/observability/slos", async (SloDefinition slo, ObservabilityService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.SaveSloAsync(slo, cancellationToken)));
+ops.MapPost("/observability/samples", async (TelemetrySample sample, ObservabilityService service,
+    CancellationToken cancellationToken) =>
+{
+    await service.RecordSampleAsync(sample, cancellationToken);
+    return Results.NoContent();
+});
+ops.MapGet("/observability/evaluation", async (ObservabilityService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.EvaluateAsync(cancellationToken)));
 app.Run();
 
 public sealed record SupportGrantRequest(string TenantId, string Scope, int Minutes);

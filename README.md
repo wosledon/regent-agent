@@ -79,6 +79,10 @@ corepack pnpm build
 corepack pnpm --filter @regent/tenant-dashboard exec playwright install chromium
 corepack pnpm test:e2e
 python3 scripts/validate-docs.py
+python3 scripts/check-offline-cache.py --require
+python3 scripts/capacity-baseline.py --requests 50 --concurrency 8
+python3 scripts/backup-local.py --source src --output data/local-backup.zip
+python3 scripts/restore-local.py data/local-backup.zip --target data/restored
 ```
 
 ## 后续能力
