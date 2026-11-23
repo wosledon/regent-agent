@@ -56,6 +56,7 @@ builder.Services.AddScoped<TaskExecutionService>();
 builder.Services.AddScoped<TenantService>();
 builder.Services.AddScoped<OrganizationService>();
 builder.Services.AddScoped<AuditIntegrityService>();
+builder.Services.AddScoped<MemoryEventService>();
 builder.Services.AddSingleton(sp => new DeliveryService(
     new JsonDocumentStore<ProjectDeliveryState>("data/modules/project-delivery.json"), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new LocalArtifactSigner("data/security/tool-signing-key.pem"));
@@ -71,12 +72,17 @@ builder.Services.AddSingleton(sp => new RuntimePolicyService(
 builder.Services.AddSingleton(sp => new WorkflowService(
     new JsonDocumentStore<WorkflowDefinition>("data/modules/workflows.json"),
     new JsonDocumentStore<WorkflowRun>("data/modules/workflow-runs.json")));
-builder.Services.AddSingleton(sp => new MemoryService(
-    new JsonDocumentStore<MemoryClaim>("data/modules/memory.json"),
-    new JsonDocumentStore<CorrectionTask>("data/modules/corrections.json")));
-builder.Services.AddSingleton(sp => new MemoryGraphService(
-    new JsonDocumentStore<MemoryGraphNode>("data/modules/memory-graph-nodes.json"),
-    new JsonDocumentStore<MemoryGraphEdge>("data/modules/memory-graph-edges.json")));
+builder.Services.AddSingleton(new JsonDocumentStore<MemoryClaim>("data/modules/memory.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<CorrectionTask>("data/modules/corrections.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<MemoryVectorRecord>("data/modules/memory-vectors.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<MemoryFinding>("data/modules/memory-findings.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<MemoryImpactRecord>("data/modules/memory-impacts.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<MemoryGraphNode>("data/modules/memory-graph-nodes.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<MemoryGraphEdge>("data/modules/memory-graph-edges.json"));
+builder.Services.AddSingleton<MemoryGraphService>();
+builder.Services.AddSingleton<MemoryIndexService>();
+builder.Services.AddSingleton<MemorySafetyService>();
+builder.Services.AddSingleton<MemoryService>();
 builder.Services.AddSingleton(sp => new PerformanceService(
     new JsonDocumentStore<KpiSnapshot>("data/modules/kpis.json"),
     new JsonDocumentStore<PerformanceReview>("data/modules/reviews.json")));
@@ -142,6 +148,11 @@ RegisterTenantStore<WorkflowDefinition>(builder.Services, "data/modules/workflow
 RegisterTenantStore<WorkflowRun>(builder.Services, "data/modules/workflow-runs.json");
 RegisterTenantStore<MemoryClaim>(builder.Services, "data/modules/memory.json");
 RegisterTenantStore<CorrectionTask>(builder.Services, "data/modules/corrections.json");
+RegisterTenantStore<MemoryVectorRecord>(builder.Services, "data/modules/memory-vectors.json");
+RegisterTenantStore<MemoryFinding>(builder.Services, "data/modules/memory-findings.json");
+RegisterTenantStore<MemoryImpactRecord>(builder.Services, "data/modules/memory-impacts.json");
+RegisterTenantStore<MemoryGraphNode>(builder.Services, "data/modules/memory-graph-nodes.json");
+RegisterTenantStore<MemoryGraphEdge>(builder.Services, "data/modules/memory-graph-edges.json");
 RegisterTenantStore<KpiSnapshot>(builder.Services, "data/modules/kpis.json");
 RegisterTenantStore<PerformanceReview>(builder.Services, "data/modules/reviews.json");
 RegisterTenantStore<ImprovementProposal>(builder.Services, "data/modules/improvements.json");
@@ -196,6 +207,7 @@ builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser().Build();
+    options.AddPolicy("MemoryGovernor", policy => policy.RequireRole("Owner", "CoOwner"));
 });
 
 builder.Services.AddCors(options =>
@@ -952,29 +964,137 @@ api.MapPost("/workflow-runs/{id}/advance", async (string id, WorkflowService ser
 
 api.MapGet("/memories", async (string? query, HttpContext context, MemoryService service,
     CancellationToken cancellationToken) => Results.Ok(await service.SearchAsync(CurrentTenant(context), query, cancellationToken)))
-    .WithTags("Memory");
-api.MapPost("/memories/{id}/correct", async (string id, CorrectMemoryRequest request, HttpContext context,
-    MemoryService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.CorrectAsync(id, CurrentTenant(context), request.Content, request.Reason, cancellationToken)))
-    .WithTags("Memory");
-api.MapPost("/memories/{id}/forget", async (string id, HttpContext context, MemoryService service,
+    .Produces<IReadOnlyList<MemoryClaim>>().WithTags("Memory");
+api.MapPost("/memories", async (MemoryCaptureRequest request, HttpContext context, MemoryService service,
+    MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
+{
+    var tenantId = CurrentTenant(context);
+    var claim = await service.CaptureAsync(tenantId, request.Scope, request.Content, request.SourceRef,
+        request.Confidence, request.Taint, CurrentUser(context), cancellationToken);
+    var findings = await safety.ListClaimFindingsAsync(claim.Id, tenantId, cancellationToken);
+    await events.RecordAsync(Guid.Parse(tenantId), CurrentUserId(context), CurrentUser(context), "memory.claim.captured",
+        new { claim_id = claim.Id, scope = claim.Scope, version = claim.Version, taint = claim.Taint, finding_count = findings.Count },
+        cancellationToken: cancellationToken);
+    if (findings.Any(x => x.RiskLevel == "High"))
+        await events.RecordAsync(Guid.Parse(tenantId), CurrentUserId(context), CurrentUser(context), "memory.finding.detected",
+            new { claim_id = claim.Id, finding_ids = findings.Where(x => x.RiskLevel == "High").Select(x => x.Id).ToArray() },
+            "High-risk memory claim quarantined", "High", cancellationToken);
+    return Results.Ok(claim);
+}).Produces<MemoryClaim>().WithTags("Memory");
+api.MapGet("/memories/search", async (string query, string? scope, int? maxResults, HttpContext context,
+    MemoryIndexService index, CancellationToken cancellationToken) => Results.Ok(await index.SearchHybridAsync(
+        CurrentTenant(context), query, scope, maxResults ?? 10, cancellationToken)))
+    .Produces<MemorySearchResult>().WithTags("Memory");
+api.MapGet("/memories/{id}", async (string id, HttpContext context, MemoryService service,
     CancellationToken cancellationToken) =>
+    {
+        var claim = await service.GetAsync(id, CurrentTenant(context), cancellationToken);
+        return claim is null ? Results.NotFound() : Results.Ok(claim);
+    })
+    .Produces<MemoryClaim>().Produces(StatusCodes.Status404NotFound).WithTags("Memory");
+api.MapPost("/memory/index/rebuild", async (HttpContext context, MemoryIndexService index,
+    MemoryEventService events, CancellationToken cancellationToken) =>
+{
+    var indexed = await index.RebuildAsync(CurrentTenant(context), cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.index.rebuilt", new { indexed }, cancellationToken: cancellationToken);
+    return Results.Ok(new { indexed });
+}).RequireAuthorization("MemoryGovernor").WithTags("Memory");
+api.MapGet("/memory/findings", async (HttpContext context, MemorySafetyService safety,
+    CancellationToken cancellationToken) => Results.Ok(await safety.ListFindingsAsync(CurrentTenant(context), cancellationToken)))
+    .Produces<IReadOnlyList<MemoryFinding>>().WithTags("Memory");
+api.MapPost("/memory/findings", async (MemoryDetectRequest request, HttpContext context,
+    MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
+{
+    var detected = await safety.DetectAsync(request.ClaimId, CurrentTenant(context), cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.finding.detected", new { claim_id = request.ClaimId, finding_ids = detected.Select(x => x.Id).ToArray() },
+        detected.Any(x => x.RiskLevel == "High") ? "High-risk memory claim quarantined" : null,
+        "High", cancellationToken);
+    return Results.Ok(detected);
+}).Produces<IReadOnlyList<MemoryFinding>>().WithTags("Memory");
+api.MapPost("/memory/findings/{id}/quarantine", async (string id, MemoryQuarantineRequest request,
+    HttpContext context, MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
+{
+    var finding = await safety.QuarantineAsync(id, CurrentTenant(context), request, cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.claim.quarantined", new { finding_id = id, claim_id = finding.ClaimId, reviewer_id = request.ReviewerId, scope = request.Scope },
+        "Memory claim quarantined for independent review", "High", cancellationToken);
+    return Results.Ok(finding);
+}).Produces<MemoryFinding>().RequireAuthorization("MemoryGovernor").WithTags("Memory");
+api.MapPost("/memory/findings/{id}/appeal", async (string id, MemoryAppealRequest request,
+    HttpContext context, MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
+{
+    var finding = await safety.AppealAsync(id, CurrentTenant(context), request, cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.finding.appealed", new { finding_id = id, claim_id = finding.ClaimId, submitted_by = request.SubmittedBy },
+        cancellationToken: cancellationToken);
+    return Results.Ok(finding);
+}).Produces<MemoryFinding>().WithTags("Memory");
+api.MapPost("/memory/findings/{id}/review", async (string id, MemoryReviewRequest request,
+    HttpContext context, MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
+{
+    var finding = await safety.ReviewAppealAsync(id, CurrentTenant(context), request, cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.finding.reviewed", new { finding_id = id, claim_id = finding.ClaimId, reviewer_id = request.ReviewerId, released = request.Release },
+        "Memory quarantine appeal reviewed", "Medium", cancellationToken);
+    return Results.Ok(finding);
+}).Produces<MemoryFinding>().RequireAuthorization("MemoryGovernor").WithTags("Memory");
+api.MapGet("/memory/corrections", async (HttpContext context, MemorySafetyService safety,
+    CancellationToken cancellationToken) => Results.Ok(await safety.ListCorrectionsAsync(CurrentTenant(context), cancellationToken)))
+    .Produces<IReadOnlyList<CorrectionTask>>().WithTags("Memory");
+api.MapPost("/memory/corrections", async (MemoryCorrectionRequest request, HttpContext context,
+    MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
+{
+    var task = await safety.CreateCorrectionAsync(request.ClaimId, CurrentTenant(context), request, cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.correction.created", new { correction_id = task.Id, claim_id = task.ClaimId, reviewer_id = task.ReviewerId },
+        cancellationToken: cancellationToken);
+    return Results.Ok(task);
+}).Produces<CorrectionTask>().RequireAuthorization("MemoryGovernor").WithTags("Memory");
+api.MapPost("/memory/corrections/{id}/approve", async (string id, MemoryCorrectionApprovalRequest request,
+    HttpContext context, MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
+{
+    var corrected = await safety.ApproveCorrectionAsync(id, CurrentTenant(context), request, cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.correction.published", new { correction_id = id, old_claim_id = corrected.SupersedesId, new_claim_id = corrected.Id, reviewer_id = request.ReviewerId },
+        "Memory correction published and recall index updated", "Medium", cancellationToken);
+    return Results.Ok(corrected);
+}).Produces<MemoryClaim>().RequireAuthorization("MemoryGovernor").WithTags("Memory");
+api.MapGet("/memory/claims/{id}/impact", async (string id, HttpContext context, MemorySafetyService safety,
+    CancellationToken cancellationToken) => Results.Ok(await safety.GetImpactAsync(id, CurrentTenant(context), cancellationToken)))
+    .Produces<IReadOnlyList<MemoryImpactRecord>>().WithTags("Memory");
+api.MapPost("/memory/claims/{id}/impact", async (string id, MemoryImpactRequest request,
+    HttpContext context, MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
+{
+    var impact = await safety.RecordImpactAsync(id, CurrentTenant(context), request, cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.impact.recorded", new { impact_id = impact.Id, claim_id = id, target_type = impact.TargetType, target_id = impact.TargetId },
+        cancellationToken: cancellationToken);
+    return Results.Ok(impact);
+}).Produces<MemoryImpactRecord>().WithTags("Memory");
+api.MapPost("/memories/{id}/forget", async (string id, HttpContext context, MemoryService service,
+    MemoryEventService events, CancellationToken cancellationToken) =>
 {
     await service.ForgetAsync(id, CurrentTenant(context), cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.claim.forgotten", new { claim_id = id }, cancellationToken: cancellationToken);
     return Results.NoContent();
-}).WithTags("Memory");
+}).RequireAuthorization("MemoryGovernor").WithTags("Memory");
 api.MapDelete("/memories/{id}", async (string id, HttpContext context, MemoryService service,
-    CancellationToken cancellationToken) =>
+    MemoryEventService events, CancellationToken cancellationToken) =>
 {
     await service.DeleteAsync(id, CurrentTenant(context), cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.claim.purged", new { claim_id = id }, cancellationToken: cancellationToken);
     return Results.NoContent();
-}).WithTags("Memory");
+}).RequireAuthorization("MemoryGovernor").WithTags("Memory");
 api.MapPost("/memory-graph/nodes", async (MemoryGraphNode node, HttpContext context, MemoryGraphService service,
     CancellationToken cancellationToken) => Results.Ok(await service.AddNodeAsync(node with { TenantId = CurrentTenant(context) }, cancellationToken)))
-    .Produces<MemoryGraphNode>().WithTags("Memory");
+    .Produces<MemoryGraphNode>().RequireAuthorization("MemoryGovernor").WithTags("Memory");
 api.MapPost("/memory-graph/edges", async (MemoryGraphEdge edge, HttpContext context, MemoryGraphService service,
     CancellationToken cancellationToken) => Results.Ok(await service.AddEdgeAsync(edge with { TenantId = CurrentTenant(context) }, cancellationToken)))
-    .Produces<MemoryGraphEdge>().WithTags("Memory");
+    .Produces<MemoryGraphEdge>().RequireAuthorization("MemoryGovernor").WithTags("Memory");
 api.MapGet("/memory-graph/query", async (string startClaimId, int maxDepth, int maxNodes, HttpContext context,
     MemoryGraphService service, CancellationToken cancellationToken) => Results.Ok(await service.QueryAsync(
         CurrentTenant(context), startClaimId, maxDepth, maxNodes, cancellationToken)))
@@ -1217,8 +1337,13 @@ static string CurrentUser(HttpContext context) => context.User.FindFirstValue(Cl
 static Guid CurrentUserId(HttpContext context) =>
     Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException("Missing user identity."));
 
-static void RegisterTenantStore<T>(IServiceCollection services, string path) where T : class =>
-    services.AddSingleton<ITenantJsonDocumentStore>(new JsonDocumentStore<T>(path));
+static void RegisterTenantStore<T>(IServiceCollection services, string path) where T : class
+{
+    if (services.Any(descriptor => descriptor.ServiceType == typeof(JsonDocumentStore<T>)))
+        services.AddSingleton<ITenantJsonDocumentStore>(provider => provider.GetRequiredService<JsonDocumentStore<T>>());
+    else
+        services.AddSingleton<ITenantJsonDocumentStore>(new JsonDocumentStore<T>(path));
+}
 
 static async Task<IResult> CompleteAuthAsync(HttpContext context, AuthResult result)
 {
@@ -1287,7 +1412,6 @@ public sealed record JudgeAssignmentRequest(Guid CandidateEmployeeId, string Can
 public sealed record CalibrationRequest(string SuiteId, int SuiteSize, IReadOnlyList<CalibrationSample> Samples);
 public sealed record EvaluationGateRequest(string SuiteId, Guid CandidateEmployeeId, int Repeats, int SampleCount,
     int Successes, int BaselineSuccesses, int DiscordantA, int DiscordantB, bool CalibrationPassed);
-public sealed record CorrectMemoryRequest(string Content, string Reason);
 public sealed record CreateReviewRequest(string EmployeeId, string Conclusion, string EvidenceJson);
 public sealed record SendMessageRequest(string Body, string Priority);
 public sealed record RunEvaluationRequest(string SuiteId, string CandidateEmployeeId, int Seed);

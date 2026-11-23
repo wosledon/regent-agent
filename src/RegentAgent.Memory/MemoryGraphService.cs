@@ -13,6 +13,33 @@ public sealed class MemoryGraphService(
         return node;
     }
 
+    public async Task<MemoryGraphNode> EnsureClaimNodeAsync(string tenantId, string claimId, string label,
+        CancellationToken cancellationToken)
+    {
+        var id = $"claim:{claimId}";
+        var existing = (await nodes.GetAllAsync(cancellationToken)).FirstOrDefault(x =>
+            x.TenantId == tenantId && x.ClaimId == claimId);
+        if (existing is not null) return existing;
+        var node = new MemoryGraphNode(id, tenantId, claimId, label);
+        await nodes.PutAsync(id, node, cancellationToken);
+        return node;
+    }
+
+    public async Task DeleteClaimAsync(string tenantId, string claimId, CancellationToken cancellationToken)
+    {
+        var relatedNodes = (await nodes.GetAllAsync(cancellationToken))
+            .Where(x => x.TenantId == tenantId && x.ClaimId == claimId).ToArray();
+        foreach (var node in relatedNodes) await nodes.DeleteAsync(node.Id, cancellationToken);
+        var relatedEdges = (await edges.GetAllAsync(cancellationToken))
+            .Where(x => x.TenantId == tenantId && (x.FromClaimId == claimId || x.ToClaimId == claimId)).ToArray();
+        foreach (var edge in relatedEdges) await edges.DeleteAsync(edge.Id, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<MemoryGraphEdge>> GetClaimEdgesAsync(string tenantId, string claimId,
+        CancellationToken cancellationToken) =>
+        (await edges.GetAllAsync(cancellationToken))
+            .Where(x => x.TenantId == tenantId && (x.FromClaimId == claimId || x.ToClaimId == claimId)).ToArray();
+
     public async Task<MemoryGraphEdge> AddEdgeAsync(MemoryGraphEdge edge, CancellationToken cancellationToken)
     {
         var allNodes = await nodes.GetAllAsync(cancellationToken);

@@ -2092,12 +2092,213 @@
         ],
         "responses": {
           "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryClaim"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryCaptureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryClaim"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memories/search": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "maxResults",
+            "in": "query",
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemorySearchResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memories/{id}": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryClaim"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
             "description": "OK"
           }
         }
       }
     },
-    "/v1/memories/{id}/correct": {
+    "/v1/memory/index/rebuild": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/memory/findings": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryFinding"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryDetectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryFinding"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/findings/{id}/quarantine": {
       "post": {
         "tags": [
           "Memory"
@@ -2116,7 +2317,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CorrectMemoryRequest"
+                "$ref": "#/components/schemas/MemoryQuarantineRequest"
               }
             }
           },
@@ -2124,13 +2325,186 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryFinding"
+                }
+              }
+            }
           }
         }
       }
     },
-    "/v1/memories/{id}/forget": {
+    "/v1/memory/findings/{id}/appeal": {
       "post": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryAppealRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryFinding"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/findings/{id}/review": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryFinding"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/corrections": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CorrectionTask"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryCorrectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CorrectionTask"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/corrections/{id}/approve": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryCorrectionApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryClaim"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/claims/{id}/impact": {
+      "get": {
         "tags": [
           "Memory"
         ],
@@ -2146,13 +2520,60 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryImpactRecord"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryImpactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryImpactRecord"
+                }
+              }
+            }
           }
         }
       }
     },
-    "/v1/memories/{id}": {
-      "delete": {
+    "/v1/memories/{id}/forget": {
+      "post": {
         "tags": [
           "Memory"
         ],
@@ -7675,18 +8096,68 @@
           }
         }
       },
-      "CorrectMemoryRequest": {
+      "CorrectionTask": {
         "required": [
-          "content",
-          "reason"
+          "id",
+          "tenantId",
+          "claimId",
+          "reason",
+          "status",
+          "createdAt"
         ],
         "type": "object",
         "properties": {
-          "content": {
+          "id": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "claimId": {
             "type": "string"
           },
           "reason": {
             "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "findingId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "assigneeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reviewerId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "weight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 2
+          },
+          "proposedContent": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -10029,6 +10500,307 @@
           }
         }
       },
+      "MemoryAppealRequest": {
+        "required": [
+          "reason",
+          "submittedBy"
+        ],
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string"
+          },
+          "submittedBy": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryCaptureRequest": {
+        "required": [
+          "scope",
+          "content",
+          "sourceRef",
+          "confidence",
+          "taint"
+        ],
+        "type": "object",
+        "properties": {
+          "scope": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "sourceRef": {
+            "type": "string"
+          },
+          "confidence": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "taint": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryClaim": {
+        "required": [
+          "id",
+          "tenantId",
+          "scope",
+          "content",
+          "sourceRef",
+          "confidence",
+          "taint",
+          "status",
+          "version"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "sourceRef": {
+            "type": "string"
+          },
+          "confidence": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "taint": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "supersedesId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "lastAccessedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "recallCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 0
+          },
+          "author": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "verified": {
+            "type": "boolean",
+            "default": false
+          },
+          "verifiedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "MemoryCorrectionApprovalRequest": {
+        "required": [
+          "reviewerId"
+        ],
+        "type": "object",
+        "properties": {
+          "reviewerId": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryCorrectionRequest": {
+        "required": [
+          "claimId",
+          "content",
+          "reason",
+          "reviewerId"
+        ],
+        "type": "object",
+        "properties": {
+          "claimId": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "reviewerId": {
+            "type": "string"
+          },
+          "findingId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "MemoryDetectRequest": {
+        "required": [
+          "claimId"
+        ],
+        "type": "object",
+        "properties": {
+          "claimId": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryFinding": {
+        "required": [
+          "id",
+          "tenantId",
+          "claimId",
+          "ruleId",
+          "riskLevel",
+          "reason",
+          "evidenceRefs",
+          "status",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "claimId": {
+            "type": "string"
+          },
+          "ruleId": {
+            "type": "string"
+          },
+          "riskLevel": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reviewedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "resolution": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "quarantineReason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "quarantineScope": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reviewDueAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "appealReason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "appealedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "appealedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "reviewedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
       "MemoryGraphEdge": {
         "required": [
           "id",
@@ -10097,6 +10869,246 @@
             "items": {
               "$ref": "#/components/schemas/MemoryGraphEdge"
             }
+          }
+        }
+      },
+      "MemoryImpactRecord": {
+        "required": [
+          "id",
+          "tenantId",
+          "claimId",
+          "claimVersion",
+          "targetType",
+          "targetId",
+          "usedAt",
+          "risk",
+          "requiredAction"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "claimId": {
+            "type": "string"
+          },
+          "claimVersion": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "targetType": {
+            "type": "string"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "usedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "risk": {
+            "type": "string"
+          },
+          "requiredAction": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryImpactRequest": {
+        "required": [
+          "targetType",
+          "targetId",
+          "risk",
+          "requiredAction"
+        ],
+        "type": "object",
+        "properties": {
+          "targetType": {
+            "type": "string"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "string"
+          },
+          "requiredAction": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryQuarantineRequest": {
+        "required": [
+          "reviewerId",
+          "reason",
+          "scope"
+        ],
+        "type": "object",
+        "properties": {
+          "reviewerId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "reviewAfterHours": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 72
+          }
+        }
+      },
+      "MemoryReviewRequest": {
+        "required": [
+          "reviewerId",
+          "resolution",
+          "release"
+        ],
+        "type": "object",
+        "properties": {
+          "reviewerId": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": "string"
+          },
+          "release": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MemorySearchHit": {
+        "required": [
+          "claimId",
+          "content",
+          "scope",
+          "sourceRef",
+          "confidence",
+          "taint",
+          "version",
+          "score",
+          "vectorScore",
+          "keywordScore",
+          "graphExpanded",
+          "conflictWithIds",
+          "reviewRequired",
+          "findingRules"
+        ],
+        "type": "object",
+        "properties": {
+          "claimId": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "sourceRef": {
+            "type": "string"
+          },
+          "confidence": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "taint": {
+            "type": "string"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "score": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "vectorScore": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "keywordScore": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "graphExpanded": {
+            "type": "boolean"
+          },
+          "conflictWithIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reviewRequired": {
+            "type": "boolean"
+          },
+          "findingRules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "MemorySearchResult": {
+        "required": [
+          "hits",
+          "considered",
+          "indexVersion"
+        ],
+        "type": "object",
+        "properties": {
+          "hits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemorySearchHit"
+            }
+          },
+          "considered": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "indexVersion": {
+            "type": "string"
           }
         }
       },

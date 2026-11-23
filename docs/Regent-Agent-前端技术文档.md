@@ -15,6 +15,7 @@
 - `UI.Shared` 已提供 `Stack`、`Grid`、`PageHeader`、`FormField` 以及按钮、文本、卡片、表格、输入、选择、状态和时间线组件，并进入组件注册表。
 - API 类型从 `contracts/openapi/controlplane.json` 生成；新增页面使用 TanStack Query 和共享加载、错误、空状态组件。
 - Playwright 覆盖登录、项目、员工、工作流、消息、评测、合规、运营台、审批幂等，以及组织/交付/安全/生命周期/模型/成本页面。
+- 知识页提供 claim 捕获、混合召回分数、冲突/待复核提示、投毒 Finding、隔离/申诉/解封、独立纠错和影响图操作。
 - 所有页面运行在本地 SQLite、JSON、文件和确定性 Provider 模式；未连接远程服务，未创建或测试容器。
 
 ## 1. 范围与原则

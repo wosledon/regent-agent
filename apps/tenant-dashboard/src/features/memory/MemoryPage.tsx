@@ -1,32 +1,79 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, EmptyState, ErrorState, LoadingState, StatusChip, Text, TextInput } from '@regent/ui-shared';
+import {
+  Button, Card, EmptyState, ErrorState, FormField, Grid, LoadingState, PageHeader,
+  Select, Stack, StatusChip, Text, TextInput
+} from '@regent/ui-shared';
 import { api } from '../../lib/api-client/api';
+import { MemoryCaptureForm } from './MemoryCaptureForm';
+import { MemoryImpactPanel } from './MemoryImpactPanel';
+import { MemorySafetyPanel } from './MemorySafetyPanel';
 
 export function MemoryPage() {
   const queryClient = useQueryClient();
-  const [query, setQuery] = useState('');
-  const [correction, setCorrection] = useState('Updated after review.');
-  const { data, isLoading, error } = useQuery({ queryKey: ['memories', query], queryFn: () => api.memories(query) });
-  const correct = useMutation({
-    mutationFn: (id: string) => api.correctMemory(id, correction, 'Reviewed from dashboard'),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['memories'] })
+  const [query, setQuery] = useState('Provider contract');
+  const [scope, setScope] = useState('organization');
+  const [selectedClaimId, setSelectedClaimId] = useState('');
+  const search = useQuery({
+    queryKey: ['memory-search', query, scope],
+    queryFn: () => api.searchMemories(query, scope || undefined),
+    enabled: query.trim().length > 0
   });
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error.message} />;
+  const rebuild = useMutation({ mutationFn: api.rebuildMemoryIndex, onSuccess: invalidate });
+  const forget = useMutation({ mutationFn: api.forgetMemory, onSuccess: invalidate });
+  const purge = useMutation({ mutationFn: api.deleteMemory, onSuccess: invalidate });
+
+  async function invalidate() {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['memory-search'] }),
+      queryClient.invalidateQueries({ queryKey: ['memory-findings'] }),
+      queryClient.invalidateQueries({ queryKey: ['memory-corrections'] }),
+      queryClient.invalidateQueries({ queryKey: ['memory-impact'] })
+    ]);
+  }
+
   return (
-    <div>
-      <Text variant="h1">Knowledge & Memory</Text>
-      <TextInput value={query} onChange={setQuery} placeholder="Search memory" />
-      <TextInput value={correction} onChange={setCorrection} placeholder="Correction text" />
-      {data?.length === 0 ? <EmptyState title="No matching memory" /> : null}
-      {data?.map(item => (
-        <Card key={item.id} title={`${item.scope} · v${item.version}`} action={<StatusChip label={item.taint} tone="info" />}>
-          <Text>{item.content}</Text>
-          <Text variant="caption">Source: {item.sourceRef} · Confidence: {item.confidence}</Text>
-          <Button tone="neutral" onClick={() => correct.mutate(item.id)} loading={correct.isPending}>Create correction</Button>
+    <Stack spacing={3}>
+      <PageHeader title="Knowledge & Memory" description="Hybrid recall, poisoning detection, independent correction and impact tracing."
+        actions={<Button tone="secondary" onClick={() => rebuild.mutate()} loading={rebuild.isPending}>Rebuild index</Button>} />
+      <Grid columns={2}>
+        <MemoryCaptureForm onCaptured={invalidate} />
+        <Card title="Hybrid recall">
+          <Stack spacing={2}>
+            <FormField label="Search query">
+              <TextInput value={query} onChange={setQuery} placeholder="Search memory" />
+            </FormField>
+            <Select label="Scope" value={scope} onChange={setScope} options={[
+              { value: '', label: 'All scopes' },
+              { value: 'personal', label: 'Personal' },
+              { value: 'organization', label: 'Organization' },
+              { value: 'knowledge_base', label: 'Knowledge base' }
+            ]} />
+            {search.isLoading ? <LoadingState /> : null}
+            {search.error ? <ErrorState message={search.error.message} /> : null}
+            {search.data?.hits.length === 0 ? <EmptyState title="No matching memory" description="Quarantined and forgotten claims are excluded from recall." /> : null}
+            {search.data?.hits.map(hit => (
+              <Card key={hit.claimId} title={`${hit.scope} · v${hit.version}`} padding="small"
+                action={<StatusChip label={hit.taint} tone={hit.taint === 'trusted' ? 'success' : 'error'} />}>
+                <Stack spacing={1}>
+                  <Text>{hit.content}</Text>
+                  <Text variant="caption">Score {Number(hit.score).toFixed(3)} · vector {Number(hit.vectorScore).toFixed(3)} · keyword {Number(hit.keywordScore).toFixed(3)} · graph {hit.graphExpanded ? 'expanded' : 'direct'}</Text>
+                  <Text variant="caption">Source: {hit.sourceRef} · confidence {hit.confidence} · index {search.data.indexVersion}</Text>
+                  {hit.conflictWithIds.length > 0 ? <StatusChip label={`Conflicts: ${hit.conflictWithIds.join(', ')}`} tone="warning" /> : null}
+                  {hit.reviewRequired ? <StatusChip label={`Review: ${hit.findingRules.join(', ')}`} tone="warning" /> : null}
+                  <Stack direction="row" wrap>
+                    <Button tone="secondary" onClick={() => setSelectedClaimId(hit.claimId)}>Inspect impact</Button>
+                    <Button tone="neutral" onClick={() => forget.mutate(hit.claimId)} loading={forget.isPending}>Forget</Button>
+                    <Button tone="danger" onClick={() => purge.mutate(hit.claimId)} loading={purge.isPending}>Delete</Button>
+                  </Stack>
+                </Stack>
+              </Card>
+            ))}
+          </Stack>
         </Card>
-      ))}
-    </div>
+      </Grid>
+      <MemorySafetyPanel onChanged={invalidate} />
+      <MemoryImpactPanel claimId={selectedClaimId} onChanged={invalidate} />
+    </Stack>
   );
 }

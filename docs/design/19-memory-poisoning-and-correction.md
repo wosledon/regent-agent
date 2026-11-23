@@ -228,3 +228,14 @@ memory.correction.published
 8. 误隔离可以申诉和解除。
 9. 已完成工作不会因纠错自动回滚。
 10. 所有隔离、纠正、传播和通知均审计。
+
+## 17. 本地实现基线（2026-11-23）
+
+- `MemorySafetyService` 对 poisoned taint、注入模式、权限升级、无证据高置信、作者缺失、同范围事实冲突、同源重复和短时间异常灌入生成 Finding。
+- 高风险 Finding 立即将 claim 置为 `Quarantined`、移出向量召回并创建独立 CorrectionTask；低风险 Finding 保留召回但降权并标记待复核。
+- 隔离记录理由、范围、复核人和到期时间；申诉保留提交人、理由和时间，解封由独立复核者决定且不删除隔离历史。
+- CorrectionTask 必须有拟纠正内容，复核者不能是原始作者或任务执行者；批准后生成 Verified 新版本、旧版本置为 Superseded，并替换向量和图关系。
+- 影响记录支持 Task、Summary、Decision、Review、Release、ExternalAction 和 Context；查询按租户和 claim 隔离。
+- 捕获、检测、隔离、申诉、复核、纠错和影响记录写入哈希审计与 Outbox；高风险检测和隔离写入站内通知。`memory.correction.published` 事件携带新旧 claim ID。
+- 索引重建、隔离复核、纠错批准、遗忘/删除和图关系变更要求 Owner 或 Co-Owner 的 `MemoryGovernor` 策略；普通认证用户仍可捕获、检索、报告 Finding 和提交申诉。
+- 当前本地实现覆盖 claim 级检测、隔离、申诉、独立纠错、影响记录和索引传播；在途任务自动失效、已完成任务自动回归和外部动作自动进入安全事件仍待跨模块联动。

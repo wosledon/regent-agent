@@ -26,9 +26,8 @@ public sealed class DomainModuleTests
                 new JsonDocumentStore<MemoryClaim>(Path.Combine(root, "memory.json")),
                 new JsonDocumentStore<CorrectionTask>(Path.Combine(root, "corrections.json")));
             await memory.SeedAsync(CancellationToken.None);
-            var corrected = await memory.CorrectAsync("memory-1", "11111111-1111-1111-1111-111111111111",
-                "Corrected memory", "test", CancellationToken.None);
-            Assert.Equal(2, corrected.Version);
+            var seeded = Assert.Single(await memory.SearchAsync("11111111-1111-1111-1111-111111111111", "Provider", CancellationToken.None));
+            Assert.Equal(1, seeded.Version);
 
             var chat = new ChatService(
                 new JsonDocumentStore<Conversation>(Path.Combine(root, "conversations.json")),

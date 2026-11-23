@@ -21,7 +21,8 @@ public sealed class OutboxService(RegentDbContext db, TimeProvider clock)
 
     public async Task<int> ProcessAsync(CancellationToken cancellationToken)
     {
-        var pending = await db.Outbox.Where(x => x.Status == "Pending").OrderBy(x => x.CreatedAt).Take(100).ToListAsync(cancellationToken);
+        var batch = await db.Outbox.Where(x => x.Status == "Pending").Take(100).ToListAsync(cancellationToken);
+        var pending = batch.OrderBy(x => x.CreatedAt).ToArray();
         foreach (var message in pending)
         {
             if (!await db.Inbox.AnyAsync(x => x.TenantId == message.TenantId && x.MessageId == message.Id, cancellationToken))
@@ -35,10 +36,10 @@ public sealed class OutboxService(RegentDbContext db, TimeProvider clock)
             message.Attempts++;
         }
         await db.SaveChangesAsync(cancellationToken);
-        return pending.Count;
+        return pending.Length;
     }
 
-    public Task<IReadOnlyList<OutboxRecord>> ListAsync(Guid tenantId, CancellationToken cancellationToken) =>
-        db.Outbox.AsNoTracking().Where(x => x.TenantId == tenantId).OrderByDescending(x => x.CreatedAt).ToArrayAsync()
-            .ContinueWith(task => (IReadOnlyList<OutboxRecord>)task.Result, cancellationToken);
+    public async Task<IReadOnlyList<OutboxRecord>> ListAsync(Guid tenantId, CancellationToken cancellationToken) =>
+        (await db.Outbox.AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken))
+            .OrderByDescending(x => x.CreatedAt).ToArray();
 }

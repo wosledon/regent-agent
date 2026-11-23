@@ -328,6 +328,15 @@ memory.purge.requested
 - 清除失败进入重试和告警。
 - 备份中的副本按保留策略到期清除。
 
+## 13. 本地实现基线（2026-11-23）
+
+- 本地模式使用 `LocalEmbeddingProvider` 生成确定性的 256 维 `local-hash-v1` 向量，向量、内容哈希、模型版本和索引时间持久化到 JSON。
+- `MemoryIndexService` 先按租户和 `scope` 过滤，再融合向量 0.55、关键词 0.35、元数据 0.10；元数据包含置信度、验证状态、使用次数和时效衰减。
+- 图扩展最多取 3 个种子、每个种子 2 跳且最多 20 个节点；扩展只能提升已通过租户和范围过滤的候选，不能扩大权限。
+- 普通召回要求综合分数达到 0.30；低风险 Finding 降权，冲突候选返回 `ConflictWithIds`， quarantined、forgotten 和 superseded 版本不进入普通召回。
+- 纠错通过新版本替换旧向量并迁移图关系；删除沿 `supersedes` 链传递，同步清理向量、图节点/边、Finding、影响记录和 CorrectionTask。
+- 当前本地实现未接入 pgvector、PostgreSQL 全文检索、Embedding Gateway 计费和完整个人记忆 ACL；生产存储与权限模型仍按第 2、5、11 节实施。
+
 ## 13. 维护任务
 
 | 任务 | 职责 |

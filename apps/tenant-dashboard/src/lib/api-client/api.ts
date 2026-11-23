@@ -101,8 +101,27 @@ export const api = {
   startWorkflow: (id: string) => request<WorkflowRun>(`/v1/workflows/${id}/runs`, { method: 'POST' }),
   advanceWorkflow: (id: string) => request<WorkflowRun>(`/v1/workflow-runs/${id}/advance`, { method: 'POST' }),
   memories: (query = '') => request<MemoryClaim[]>(`/v1/memories?query=${encodeURIComponent(query)}`),
-  correctMemory: (id: string, content: string, reason: string) =>
-    request<MemoryClaim>(`/v1/memories/${id}/correct`, { method: 'POST', body: JSON.stringify({ content, reason }) }),
+  captureMemory: (body: Schema['MemoryCaptureRequest']) => post<Schema['MemoryClaim']>('/v1/memories', body),
+  searchMemories: (query: string, scope?: string) => request<Schema['MemorySearchResult']>(
+    `/v1/memories/search?query=${encodeURIComponent(query)}${scope ? `&scope=${encodeURIComponent(scope)}` : ''}&maxResults=20`),
+  rebuildMemoryIndex: () => post<{ indexed: number }>('/v1/memory/index/rebuild'),
+  memoryFindings: () => request<Schema['MemoryFinding'][]>('/v1/memory/findings'),
+  detectMemoryPoisoning: (claimId: string) => post<Schema['MemoryFinding'][]>('/v1/memory/findings', { claimId }),
+  quarantineMemoryFinding: (id: string, reviewerId: string, reason: string, scope: string) =>
+    post<Schema['MemoryFinding']>(`/v1/memory/findings/${id}/quarantine`, { reviewerId, reason, scope, reviewAfterHours: 72 }),
+  appealMemoryFinding: (id: string, reason: string, submittedBy: string) =>
+    post<Schema['MemoryFinding']>(`/v1/memory/findings/${id}/appeal`, { reason, submittedBy }),
+  reviewMemoryAppeal: (id: string, reviewerId: string, resolution: string, release: boolean) =>
+    post<Schema['MemoryFinding']>(`/v1/memory/findings/${id}/review`, { reviewerId, resolution, release }),
+  memoryCorrections: () => request<Schema['CorrectionTask'][]>('/v1/memory/corrections'),
+  createMemoryCorrection: (body: Schema['MemoryCorrectionRequest']) => post<Schema['CorrectionTask']>('/v1/memory/corrections', body),
+  approveMemoryCorrection: (id: string, reviewerId: string) =>
+    post<Schema['MemoryClaim']>(`/v1/memory/corrections/${id}/approve`, { reviewerId }),
+  memoryImpact: (claimId: string) => request<Schema['MemoryImpactRecord'][]>(`/v1/memory/claims/${claimId}/impact`),
+  recordMemoryImpact: (claimId: string, body: Schema['MemoryImpactRequest']) =>
+    post<Schema['MemoryImpactRecord']>(`/v1/memory/claims/${claimId}/impact`, body),
+  forgetMemory: (id: string) => post<void>(`/v1/memories/${id}/forget`),
+  deleteMemory: (id: string) => request<void>(`/v1/memories/${id}`, { method: 'DELETE' }),
   kpis: () => request<KpiSnapshot[]>('/v1/kpis'),
   conversations: () => request<Conversation[]>('/v1/conversations'),
   messages: (id: string) => request<ChatMessage[]>(`/v1/conversations/${id}/messages`),

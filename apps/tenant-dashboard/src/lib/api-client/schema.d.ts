@@ -2781,7 +2781,71 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["MemoryClaim"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryCaptureRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryClaim"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memories/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    query: string;
+                    scope?: string;
+                    maxResults?: number | string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemorySearchResult"];
+                    };
                 };
             };
         };
@@ -2793,7 +2857,161 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/memories/{id}/correct": {
+    "/v1/memories/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryClaim"];
+                    };
+                };
+                /** @description Not Found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/index/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryFinding"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryDetectRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryFinding"][];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/findings/{id}/quarantine": {
         parameters: {
             query?: never;
             header?: never;
@@ -2813,7 +3031,7 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": components["schemas"]["CorrectMemoryRequest"];
+                    "application/json": components["schemas"]["MemoryQuarantineRequest"];
                 };
             };
             responses: {
@@ -2822,7 +3040,252 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["MemoryFinding"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/findings/{id}/appeal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryAppealRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryFinding"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/findings/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryReviewRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryFinding"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CorrectionTask"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryCorrectionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CorrectionTask"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/corrections/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryCorrectionApprovalRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryClaim"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory/claims/{id}/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryImpactRecord"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryImpactRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryImpactRecord"];
+                    };
                 };
             };
         };
@@ -2862,41 +3325,6 @@ export interface paths {
             };
         };
         delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/memories/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
         options?: never;
         head?: never;
         patch?: never;
@@ -8197,9 +8625,23 @@ export interface components {
             delta: number | string;
             reason: string;
         };
-        CorrectMemoryRequest: {
-            content: string;
+        CorrectionTask: {
+            id: string;
+            tenantId: string;
+            claimId: string;
             reason: string;
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            findingId?: null | string;
+            assigneeId?: null | string;
+            reviewerId?: null | string;
+            /**
+             * Format: int32
+             * @default 2
+             */
+            weight: number | string;
+            proposedContent?: null | string;
         };
         CostEntry: {
             /** Format: uuid */
@@ -8869,6 +9311,83 @@ export interface components {
             /** Format: double */
             pValue: number | string;
         };
+        MemoryAppealRequest: {
+            reason: string;
+            submittedBy: string;
+        };
+        MemoryCaptureRequest: {
+            scope: string;
+            content: string;
+            sourceRef: string;
+            /** Format: double */
+            confidence: number | string;
+            taint: string;
+        };
+        MemoryClaim: {
+            id: string;
+            tenantId: string;
+            scope: string;
+            content: string;
+            sourceRef: string;
+            /** Format: double */
+            confidence: number | string;
+            taint: string;
+            status: string;
+            /** Format: int32 */
+            version: number | string;
+            supersedesId?: null | string;
+            /** Format: date-time */
+            lastAccessedAt?: null | string;
+            /**
+             * Format: int32
+             * @default 0
+             */
+            recallCount: number | string;
+            author?: null | string;
+            /** @default false */
+            verified: boolean;
+            /** Format: date-time */
+            verifiedAt?: null | string;
+            /** Format: date-time */
+            createdAt?: null | string;
+        };
+        MemoryCorrectionApprovalRequest: {
+            reviewerId: string;
+        };
+        MemoryCorrectionRequest: {
+            claimId: string;
+            content: string;
+            reason: string;
+            reviewerId: string;
+            findingId?: null | string;
+        };
+        MemoryDetectRequest: {
+            claimId: string;
+        };
+        MemoryFinding: {
+            id: string;
+            tenantId: string;
+            claimId: string;
+            ruleId: string;
+            riskLevel: string;
+            reason: string;
+            evidenceRefs: string[];
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+            reviewedBy?: null | string;
+            resolution?: null | string;
+            quarantineReason?: null | string;
+            quarantineScope?: null | string;
+            /** Format: date-time */
+            reviewDueAt?: null | string;
+            appealReason?: null | string;
+            appealedBy?: null | string;
+            /** Format: date-time */
+            appealedAt?: null | string;
+            /** Format: date-time */
+            reviewedAt?: null | string;
+        };
         MemoryGraphEdge: {
             id: string;
             tenantId: string;
@@ -8885,6 +9404,67 @@ export interface components {
         MemoryGraphQueryResult: {
             nodes: components["schemas"]["MemoryGraphNode"][];
             edges: components["schemas"]["MemoryGraphEdge"][];
+        };
+        MemoryImpactRecord: {
+            id: string;
+            tenantId: string;
+            claimId: string;
+            /** Format: int32 */
+            claimVersion: number | string;
+            targetType: string;
+            targetId: string;
+            /** Format: date-time */
+            usedAt: string;
+            risk: string;
+            requiredAction: string;
+        };
+        MemoryImpactRequest: {
+            targetType: string;
+            targetId: string;
+            risk: string;
+            requiredAction: string;
+        };
+        MemoryQuarantineRequest: {
+            reviewerId: string;
+            reason: string;
+            scope: string;
+            /**
+             * Format: int32
+             * @default 72
+             */
+            reviewAfterHours: number | string;
+        };
+        MemoryReviewRequest: {
+            reviewerId: string;
+            resolution: string;
+            release: boolean;
+        };
+        MemorySearchHit: {
+            claimId: string;
+            content: string;
+            scope: string;
+            sourceRef: string;
+            /** Format: double */
+            confidence: number | string;
+            taint: string;
+            /** Format: int32 */
+            version: number | string;
+            /** Format: double */
+            score: number | string;
+            /** Format: double */
+            vectorScore: number | string;
+            /** Format: double */
+            keywordScore: number | string;
+            graphExpanded: boolean;
+            conflictWithIds: string[];
+            reviewRequired: boolean;
+            findingRules: string[];
+        };
+        MemorySearchResult: {
+            hits: components["schemas"]["MemorySearchHit"][];
+            /** Format: int32 */
+            considered: number | string;
+            indexVersion: string;
         };
         ModelCatalogEntry: {
             provider?: string;

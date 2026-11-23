@@ -3,16 +3,47 @@ using RegentAgent.Storage;
 namespace RegentAgent.Memory;
 
 public sealed record MemoryClaim(string Id, string TenantId, string Scope, string Content, string SourceRef, double Confidence, string Taint, string Status, int Version, string? SupersedesId = null,
-    DateTimeOffset? LastAccessedAt = null, int RecallCount = 0);
-public sealed record CorrectionTask(string Id, string TenantId, string ClaimId, string Reason, string Status, DateTimeOffset CreatedAt);
+    DateTimeOffset? LastAccessedAt = null, int RecallCount = 0, string? Author = null, bool Verified = false,
+    DateTimeOffset? VerifiedAt = null, DateTimeOffset? CreatedAt = null);
+public sealed record CorrectionTask(string Id, string TenantId, string ClaimId, string Reason, string Status, DateTimeOffset CreatedAt,
+    string? FindingId = null, string? AssigneeId = null, string? ReviewerId = null, int Weight = 2,
+    string? ProposedContent = null);
 
-public sealed class MemoryService(JsonDocumentStore<MemoryClaim> claims, JsonDocumentStore<CorrectionTask> corrections)
+public sealed class MemoryService(JsonDocumentStore<MemoryClaim> claims, JsonDocumentStore<CorrectionTask> corrections,
+    MemoryIndexService? index = null, MemorySafetyService? safety = null)
 {
     public async Task SeedAsync(CancellationToken cancellationToken)
     {
         if ((await claims.GetAllAsync(cancellationToken)).Count > 0) return;
-        await claims.PutAsync("memory-1", new MemoryClaim("memory-1", "11111111-1111-1111-1111-111111111111", "organization",
-            "Provider contract tests must cover native streaming errors.", "decision:provider-contract", 0.92, "trusted", "Active", 1), cancellationToken);
+        var seed = new MemoryClaim("memory-1", "11111111-1111-1111-1111-111111111111", "organization",
+            "Provider contract tests must cover native streaming errors.", "decision:provider-contract", 0.92, "trusted", "Active", 1,
+            Author: "system", Verified: true, VerifiedAt: DateTimeOffset.UtcNow, CreatedAt: DateTimeOffset.UtcNow);
+        await claims.PutAsync(seed.Id, seed, cancellationToken);
+        if (index is not null) await index.IndexClaimAsync(seed, cancellationToken);
+    }
+
+    public async Task<MemoryClaim> CaptureAsync(string tenantId, string scope, string content, string sourceRef,
+        double confidence, string taint, string author, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(sourceRef) || string.IsNullOrWhiteSpace(author))
+            throw new InvalidOperationException("Memory content, source and author are required.");
+        if (scope is not ("personal" or "organization" or "knowledge_base"))
+            throw new InvalidOperationException("Invalid memory scope.");
+        if (taint is not ("trusted" or "untrusted" or "poisoned"))
+            throw new InvalidOperationException("Invalid memory taint.");
+        if (confidence is < 0 or > 1) throw new InvalidOperationException("Confidence must be in [0, 1].");
+        var claim = new MemoryClaim(Guid.NewGuid().ToString("N"), tenantId, scope, content, sourceRef,
+            confidence, taint, "Active", 1, Author: author, CreatedAt: DateTimeOffset.UtcNow);
+        await claims.PutAsync(claim.Id, claim, cancellationToken);
+        if (index is not null) await index.IndexClaimAsync(claim, cancellationToken);
+        if (safety is not null) await safety.DetectAsync(claim.Id, tenantId, cancellationToken);
+        return await claims.GetAsync(claim.Id, cancellationToken) ?? claim;
+    }
+
+    public async Task<MemoryClaim?> GetAsync(string claimId, string tenantId, CancellationToken cancellationToken)
+    {
+        var claim = await claims.GetAsync(claimId, cancellationToken);
+        return claim is not null && claim.TenantId == tenantId ? claim : null;
     }
 
     public async Task<IReadOnlyList<MemoryClaim>> SearchAsync(string tenantId, string? query, CancellationToken cancellationToken)
@@ -40,28 +71,37 @@ public sealed class MemoryService(JsonDocumentStore<MemoryClaim> claims, JsonDoc
         var claim = await claims.GetAsync(claimId, cancellationToken) ?? throw new KeyNotFoundException("Memory claim not found.");
         if (claim.TenantId != tenantId) throw new UnauthorizedAccessException();
         await claims.PutAsync(claimId, claim with { Status = "Forgotten" }, cancellationToken);
+        if (index is not null) await index.RemoveFromRecallAsync(tenantId, claimId, cancellationToken);
     }
 
     public async Task DeleteAsync(string claimId, string tenantId, CancellationToken cancellationToken)
     {
         var claim = await claims.GetAsync(claimId, cancellationToken) ?? throw new KeyNotFoundException("Memory claim not found.");
         if (claim.TenantId != tenantId) throw new UnauthorizedAccessException();
-        var related = (await claims.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId &&
-            (x.Id == claimId || x.SupersedesId == claimId)).Select(x => x.Id).ToArray();
-        foreach (var id in related) await claims.DeleteAsync(id, cancellationToken);
-        foreach (var correction in (await corrections.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId && related.Contains(x.ClaimId)).ToArray())
-            await corrections.DeleteAsync(correction.Id, cancellationToken);
+        var tenantClaims = (await claims.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId).ToArray();
+        var related = new HashSet<string>(StringComparer.Ordinal) { claimId };
+        var queue = new Queue<string>();
+        queue.Enqueue(claimId);
+        while (queue.Count > 0)
+        {
+            var currentId = queue.Dequeue();
+            foreach (var child in tenantClaims.Where(x => x.SupersedesId == currentId))
+                if (related.Add(child.Id)) queue.Enqueue(child.Id);
+        }
+        foreach (var id in related)
+        {
+            await claims.DeleteAsync(id, cancellationToken);
+            if (index is not null) await index.DeleteClaimAsync(tenantId, id, cancellationToken);
+        }
+        if (safety is not null)
+        {
+            await safety.PurgeClaimDataAsync(tenantId, related.ToArray(), cancellationToken);
+        }
+        else
+        {
+            foreach (var correction in (await corrections.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId && related.Contains(x.ClaimId)).ToArray())
+                await corrections.DeleteAsync(correction.Id, cancellationToken);
+        }
     }
 
-    public async Task<MemoryClaim> CorrectAsync(string claimId, string tenantId, string content, string reason, CancellationToken cancellationToken)
-    {
-        var current = await claims.GetAsync(claimId, cancellationToken) ?? throw new KeyNotFoundException("Memory claim not found.");
-        if (current.TenantId != tenantId) throw new UnauthorizedAccessException();
-        var corrected = new MemoryClaim(Guid.NewGuid().ToString("N"), tenantId, current.Scope, content,
-            current.SourceRef, current.Confidence, current.Taint, "Active", current.Version + 1, current.Id);
-        await claims.PutAsync(current.Id, current with { Status = "Superseded" }, cancellationToken);
-        await claims.PutAsync(corrected.Id, corrected, cancellationToken);
-        await corrections.PutAsync(Guid.NewGuid().ToString("N"), new CorrectionTask(Guid.NewGuid().ToString("N"), tenantId, claimId, reason, "Completed", DateTimeOffset.UtcNow), cancellationToken);
-        return corrected;
-    }
 }
