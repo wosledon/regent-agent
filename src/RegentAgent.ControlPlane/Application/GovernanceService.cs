@@ -251,6 +251,21 @@ public sealed class GovernanceService(JsonDocumentStore<GovernanceState> store,
         return (true, incident);
     }, cancellationToken);
 
+    public Task<EvidenceVerificationDto> VerifyIncidentEvidenceAsync(Guid tenantId, Guid incidentId,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        var incident = Find(state.Incidents, incidentId);
+        var checkedCount = 0;
+        foreach (var reference in incident.EvidenceRefs.Where(x => x.StartsWith("sha256:", StringComparison.Ordinal)))
+        {
+            var parts = reference.Split(":sig:", 2, StringSplitOptions.None);
+            if (parts.Length != 2 || !signer.Verify(parts[0]["sha256:".Length..], parts[1]))
+                return (false, new EvidenceVerificationDto(false, checkedCount, "Evidence signature mismatch."));
+            checkedCount++;
+        }
+        return (false, new EvidenceVerificationDto(true, checkedCount, "Incident evidence verified."));
+    }, cancellationToken);
+
     private async Task<T> MutateAsync<T>(Guid tenantId,
         Func<GovernanceState, (bool Changed, T Result)> mutation, CancellationToken cancellationToken)
     {

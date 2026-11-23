@@ -9,7 +9,7 @@ using RegentAgent.Storage;
 namespace RegentAgent.ControlPlane.Application;
 
 public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> store,
-    IObjectStore objects, RegentDbContext db, TimeProvider clock)
+    IObjectStore objects, RegentDbContext db, TimeProvider clock, TenantPurgeService tenantPurge)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -167,11 +167,7 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
         var manifest = JsonSerializer.Serialize(new { request.Id, request.ResourceType, request.ResourceId, request.DeletedAt });
         var manifestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
         if (request.ResourceType.Equals("Tenant", StringComparison.OrdinalIgnoreCase))
-        {
-            var artifacts = await db.Artifacts.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken);
-            foreach (var artifact in artifacts) await objects.DeleteAsync(artifact.ObjectKey, cancellationToken);
-            await PurgeTenantRowsAsync(tenantId, cancellationToken);
-        }
+            await tenantPurge.PurgeAsync(tenantId, cancellationToken);
         request.Status = "Purged";
         var proof = new DeletionProof
         {
@@ -205,6 +201,25 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
         state.Licenses.Add(license);
         return (true, license);
     }, cancellationToken);
+
+    public async Task<int> RunDuePurgeAsync(CancellationToken cancellationToken)
+    {
+        var states = await store.GetAllAsync(cancellationToken);
+        var purged = 0;
+        foreach (var state in states)
+        {
+            var due = state.DeletionRequests.Where(x => x.Status == "SoftDeleted" && x.RestoreUntil <= clock.GetUtcNow()).ToArray();
+            foreach (var request in due)
+            {
+                var blocked = state.LegalHolds.Where(IsActiveHold).Any(x => x.ResourceRef == request.ResourceId
+                    || x.ResourceRef == $"tenant:{request.ResourceId}" || x.ResourceRef == "*");
+                if (blocked) continue;
+                await PurgeAsync(state.TenantId, request.Id, "PURGE", cancellationToken);
+                purged++;
+            }
+        }
+        return purged;
+    }
 
     public Task<LifecycleEvaluation> EvaluateAsync(Guid tenantId, CancellationToken cancellationToken) =>
         MutateAsync(tenantId, state =>
@@ -243,27 +258,6 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
             return result;
         }
         finally { gate.Release(); }
-    }
-
-    private async Task PurgeTenantRowsAsync(Guid tenantId, CancellationToken cancellationToken)
-    {
-        db.Artifacts.RemoveRange(await db.Artifacts.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.WorkEntries.RemoveRange(await db.WorkEntries.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.AuditCheckpoints.RemoveRange(await db.AuditCheckpoints.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.Notifications.RemoveRange(await db.Notifications.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.Approvals.RemoveRange(await db.Approvals.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.Tasks.RemoveRange(await db.Tasks.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        var projectIds = await db.Projects.Where(x => x.TenantId == tenantId).Select(x => x.Id).ToListAsync(cancellationToken);
-        db.Milestones.RemoveRange(await db.Milestones.Where(x => projectIds.Contains(x.ProjectId)).ToListAsync(cancellationToken));
-        db.Projects.RemoveRange(await db.Projects.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.EmploymentPeriods.RemoveRange(await db.EmploymentPeriods.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.OrgDelegations.RemoveRange(await db.OrgDelegations.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.Candidates.RemoveRange(await db.Candidates.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.Positions.RemoveRange(await db.Positions.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.Charters.RemoveRange(await db.Charters.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.Employees.RemoveRange(await db.Employees.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.Memberships.RemoveRange(await db.Memberships.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
-        db.Tenants.RemoveRange(await db.Tenants.Where(x => x.Id == tenantId).ToListAsync(cancellationToken));
     }
 
     private static T Find<T>(IEnumerable<T> items, Guid id) where T : class =>

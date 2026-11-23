@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace RegentAgent.Storage;
 
-public sealed class JsonDocumentStore<T> where T : class
+public sealed class JsonDocumentStore<T> : ITenantJsonDocumentStore where T : class
 {
     private readonly string path;
     private readonly SemaphoreSlim gate = new(1, 1);
@@ -50,6 +50,33 @@ public sealed class JsonDocumentStore<T> where T : class
             return true;
         }
         finally { gate.Release(); }
+    }
+
+    public async Task<int> DeleteTenantAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var values = await LoadAsync(cancellationToken);
+            var keys = values.Where(x => BelongsToTenant(x.Key, x.Value, tenantId)).Select(x => x.Key).ToArray();
+            foreach (var key in keys) values.Remove(key);
+            if (keys.Length > 0) await SaveAsync(values, cancellationToken);
+            return keys.Length;
+        }
+        finally { gate.Release(); }
+    }
+
+    private static bool BelongsToTenant<TValue>(string key, TValue value, Guid tenantId)
+    {
+        if (key.Equals(tenantId.ToString(), StringComparison.OrdinalIgnoreCase)
+            || key.StartsWith($"{tenantId}:", StringComparison.OrdinalIgnoreCase)) return true;
+        var raw = typeof(TValue).GetProperty("TenantId")?.GetValue(value);
+        return raw switch
+        {
+            Guid id => id == tenantId,
+            string text => Guid.TryParse(text, out var id) && id == tenantId,
+            _ => false
+        };
     }
 
     private async Task<Dictionary<string, T>> LoadAsync(CancellationToken cancellationToken)

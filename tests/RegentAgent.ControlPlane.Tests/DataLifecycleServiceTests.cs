@@ -3,6 +3,7 @@ using RegentAgent.ControlPlane.Application;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.ControlPlane.Infrastructure;
 using RegentAgent.Contracts.Governance;
+using RegentAgent.Memory;
 using RegentAgent.Storage;
 using Xunit;
 
@@ -17,9 +18,10 @@ public sealed class DataLifecycleServiceTests
         try
         {
             await using var db = CreateDb();
+            var objects = new LocalFileObjectStore(Path.Combine(root, "objects"));
             var service = new DataLifecycleService(
                 new JsonDocumentStore<DataLifecycleState>(Path.Combine(root, "lifecycle.json")),
-                new LocalFileObjectStore(Path.Combine(root, "objects")), db, TimeProvider.System);
+                objects, db, TimeProvider.System, new TenantPurgeService(db, objects, []));
             var tenantId = Guid.NewGuid();
             var archive = await service.ArchiveAsync(tenantId, "2026-11", "Archive", 42, CancellationToken.None);
             var restored = await service.RestoreArchiveAsync(tenantId, archive.Id, CancellationToken.None);
@@ -46,10 +48,13 @@ public sealed class DataLifecycleServiceTests
             await using var db = CreateDb();
             await DbInitializer.InitializeAsync(db, CancellationToken.None);
             var clock = new MutableTimeProvider();
+            var objects = new LocalFileObjectStore(Path.Combine(root, "objects"));
+            var tenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+            var moduleStore = new JsonDocumentStore<MemoryClaim>(Path.Combine(root, "memory.json"));
+            await moduleStore.PutAsync("memory-1", new MemoryClaim("memory-1", tenantId.ToString(), "company", "purge me", "source", 1, "trusted", "Active", 1), CancellationToken.None);
             var service = new DataLifecycleService(
                 new JsonDocumentStore<DataLifecycleState>(Path.Combine(root, "lifecycle.json")),
-                new LocalFileObjectStore(Path.Combine(root, "objects")), db, clock);
-            var tenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+                objects, db, clock, new TenantPurgeService(db, objects, [moduleStore]));
             var request = await service.SoftDeleteAsync(tenantId, "Tenant", tenantId.ToString(), "Owner requested", CancellationToken.None);
             var hold = await service.CreateLegalHoldAsync(tenantId, new LegalHoldRecord
             {
@@ -64,6 +69,7 @@ public sealed class DataLifecycleServiceTests
 
             Assert.NotEmpty(proof.ProofHash);
             Assert.False(await db.Tenants.AnyAsync(x => x.Id == tenantId));
+            Assert.Null(await moduleStore.GetAsync("memory-1", CancellationToken.None));
         }
         finally
         {

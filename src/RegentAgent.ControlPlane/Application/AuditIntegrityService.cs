@@ -103,6 +103,27 @@ public sealed class AuditIntegrityService(RegentDbContext db, TimeProvider clock
         return new AuditCheckpointDto(checkpoint.Id, checkpoint.ThroughSeq, root, profile, checkpoint.CreatedAt);
     }
 
+    public async Task<AuditVerificationDto> VerifyAnchorsAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var path = Path.Combine("data", "audit-anchors", $"{tenantId:N}.jsonl");
+        if (!File.Exists(path)) return new AuditVerificationDto(true, 0, null, "No external anchors recorded.");
+        var lines = await File.ReadAllLinesAsync(path, cancellationToken);
+        var checkedCount = 0;
+        foreach (var line in lines)
+        {
+            var anchor = JsonSerializer.Deserialize<AnchorRecord>(line);
+            if (anchor is null || anchor.TenantId != tenantId) return new AuditVerificationDto(false, checkedCount, null, "Anchor tenant mismatch.");
+            var checkpoint = await db.AuditCheckpoints.AsNoTracking().SingleOrDefaultAsync(
+                x => x.TenantId == tenantId && x.ThroughSeq == anchor.ThroughSeq, cancellationToken);
+            if (checkpoint is null || checkpoint.MerkleRoot != anchor.MerkleRoot)
+                return new AuditVerificationDto(false, checkedCount, anchor.ThroughSeq, "Anchor checksum mismatch.");
+            checkedCount++;
+        }
+        return new AuditVerificationDto(true, checkedCount, null, "Audit anchors verified.");
+    }
+
+    private sealed record AnchorRecord(Guid TenantId, long ThroughSeq, string MerkleRoot, DateTimeOffset CreatedAt);
+
     private static string ComputeHash(AuditRecord record, string previousHash) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
         JsonSerializer.Serialize(new
         {

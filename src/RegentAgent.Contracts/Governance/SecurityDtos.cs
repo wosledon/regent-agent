@@ -101,6 +101,7 @@ public sealed class ToolUsageRecord
 
 public sealed record ToolRevocationImpact(int AffectedActors, int AffectedCapabilities, IReadOnlyList<string> Actors);
 public sealed record ApprovalChainDto(IReadOnlyList<string> Approvers);
+public sealed record EvidenceVerificationDto(bool Valid, int CheckedEvidence, string? Message);
 
 public sealed class GovernanceState
 {

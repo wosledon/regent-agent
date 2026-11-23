@@ -114,6 +114,7 @@ builder.Services.AddSingleton(new JsonDocumentStore<ButlerReport>("data/modules/
 builder.Services.AddSingleton(new JsonDocumentStore<ReportSchedule>("data/modules/report-schedules.json"));
 builder.Services.AddScoped<ButlerService>();
 builder.Services.AddHostedService<ButlerReportWorker>();
+builder.Services.AddHostedService<DataLifecycleWorker>();
 
 builder.Services.AddDbContext<RegentDbContext>(options =>
 {
@@ -132,6 +133,37 @@ builder.Services.AddDbContext<RegentDbContext>(options =>
         options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres"));
     }
 });
+
+RegisterTenantStore<WorkflowDefinition>(builder.Services);
+RegisterTenantStore<WorkflowRun>(builder.Services);
+RegisterTenantStore<MemoryClaim>(builder.Services);
+RegisterTenantStore<CorrectionTask>(builder.Services);
+RegisterTenantStore<KpiSnapshot>(builder.Services);
+RegisterTenantStore<PerformanceReview>(builder.Services);
+RegisterTenantStore<ImprovementProposal>(builder.Services);
+RegisterTenantStore<PerformanceActionRecord>(builder.Services);
+RegisterTenantStore<Conversation>(builder.Services);
+RegisterTenantStore<ChatMessage>(builder.Services);
+RegisterTenantStore<BenchmarkSuite>(builder.Services);
+RegisterTenantStore<EvaluationRun>(builder.Services);
+RegisterTenantStore<JudgeAssignment>(builder.Services);
+RegisterTenantStore<EvaluationQaState>(builder.Services);
+RegisterTenantStore<ComplianceProfile>(builder.Services);
+RegisterTenantStore<ProjectDeliveryState>(builder.Services);
+RegisterTenantStore<GovernanceState>(builder.Services);
+RegisterTenantStore<DataLifecycleState>(builder.Services);
+RegisterTenantStore<ModelPoolState>(builder.Services);
+RegisterTenantStore<RuntimePolicyState>(builder.Services);
+RegisterTenantStore<AuthSessionRecord>(builder.Services);
+RegisterTenantStore<IdentityProviderRecord>(builder.Services);
+RegisterTenantStore<InvitationRecord>(builder.Services);
+RegisterTenantStore<OwnershipDelegationRecord>(builder.Services);
+RegisterTenantStore<UserTenantProfileRecord>(builder.Services);
+RegisterTenantStore<ButlerReport>(builder.Services);
+RegisterTenantStore<ReportSchedule>(builder.Services);
+RegisterTenantStore<AgentEvolutionState>(builder.Services);
+RegisterTenantStore<TaskGovernanceState>(builder.Services);
+builder.Services.AddScoped<TenantPurgeService>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -617,6 +649,9 @@ governance.MapPost("/incidents/{incidentId:guid}/evidence", async (Guid incident
     HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.SealIncidentEvidenceAsync(Guid.Parse(CurrentTenant(context)), incidentId,
         request.Evidence, cancellationToken))).Produces<SecurityIncident>().WithTags("Governance");
+governance.MapGet("/incidents/{incidentId:guid}/evidence/verify", async (Guid incidentId, HttpContext context,
+    GovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.VerifyIncidentEvidenceAsync(
+        Guid.Parse(CurrentTenant(context)), incidentId, cancellationToken))).Produces<EvidenceVerificationDto>().WithTags("Governance");
 governance.MapPost("/incidents/{incidentId:guid}/close", async (Guid incidentId, CloseIncidentRequest request,
     HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CloseIncidentAsync(Guid.Parse(CurrentTenant(context)), incidentId, request.Retrospective, cancellationToken)))
@@ -700,6 +735,8 @@ lifecycle.MapPost("/licenses", async (LicenseRecord license, HttpContext context
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RecordLicenseAsync(Guid.Parse(CurrentTenant(context)), license, cancellationToken)))
     .Produces<LicenseRecord>().WithTags("Lifecycle");
+lifecycle.MapPost("/run-due", async (DataLifecycleService service, CancellationToken cancellationToken) =>
+    Results.Ok(new { purged = await service.RunDuePurgeAsync(cancellationToken) })).WithTags("Lifecycle");
 lifecycle.MapGet("/evaluation", async (HttpContext context, DataLifecycleService service,
     CancellationToken cancellationToken) => Results.Ok(await service.EvaluateAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<LifecycleEvaluation>().WithTags("Lifecycle");
@@ -780,6 +817,9 @@ api.MapPost("/approvals", async (CreateApprovalDto input, ApprovalService servic
 api.MapGet("/audit/verify", async (HttpContext context, AuditIntegrityService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.VerifyAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<AuditVerificationDto>().WithTags("Audit");
+api.MapGet("/audit/anchors/verify", async (HttpContext context, AuditIntegrityService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.VerifyAnchorsAsync(
+        Guid.Parse(CurrentTenant(context)), cancellationToken))).Produces<AuditVerificationDto>().WithTags("Audit");
 api.MapPost("/audit/checkpoints", async (AuditCheckpointRequest request, HttpContext context,
     AuditIntegrityService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CheckpointAsync(Guid.Parse(CurrentTenant(context)), request.Profile, cancellationToken)))
@@ -1114,6 +1154,9 @@ static string CurrentUser(HttpContext context) => context.User.FindFirstValue(Cl
 
 static Guid CurrentUserId(HttpContext context) =>
     Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException("Missing user identity."));
+
+static void RegisterTenantStore<T>(IServiceCollection services) where T : class =>
+    services.AddSingleton<ITenantJsonDocumentStore>(sp => sp.GetRequiredService<JsonDocumentStore<T>>());
 
 static async Task<IResult> CompleteAuthAsync(HttpContext context, AuthResult result)
 {
