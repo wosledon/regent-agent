@@ -340,7 +340,9 @@ AppShell
 | `Button` | Button | `tone`、`variant`、`loading`、`disabled`、`startIcon` |
 | `IconButton` | IconButton | `label`、`tone`、`selected`、`disabled` |
 | `ButtonGroup` | ButtonGroup | 操作分组、尺寸和禁用状态 |
+| `Icon` | SvgIcon | 统一尺寸、颜色、语义名称和无障碍标签 |
 | `Card` | Card | `padding`、`elevation`、`header`、`actions` |
+| `Text` | Typography | 单行/多行文本、标题层级、颜色、截断和换行 |
 | `Input` | Input | 单行输入、前后缀、错误和禁用状态 |
 | `TextField` | TextField | label、helper text、多行、必填和错误 |
 | `SearchInput` | InputAdornment | 搜索、清空、防抖和提交 |
@@ -378,6 +380,8 @@ AppShell
 
 通用组件规则：
 
+- 页面和 feature 不得直接散写 MUI Button、Typography、TextField、Select、Tooltip、Card 等原语，必须使用统一封装。
+- 相同呈现或交互第二次出现时必须抽取组件。
 - 使用语义属性，如 `tone="danger"`，不在业务页面直接散落 MUI color。
 - 所有异步组件统一 `loading`、`empty`、`error` 和 `disabled`。
 - Tooltip 只放辅助说明，不隐藏关键操作或唯一状态。
