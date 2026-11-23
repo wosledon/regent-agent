@@ -19,6 +19,9 @@ public sealed class ProjectService(RegentDbContext db, ITenantContext tenant, Ti
             .ToArray();
     }
 
+    public Task<bool> ExistsAsync(ProjectId id, CancellationToken cancellationToken) =>
+        db.Projects.AsNoTracking().AnyAsync(x => x.TenantId == tenant.TenantId.Value && x.Id == id.Value, cancellationToken);
+
     public async Task<ProjectDetail?> GetAsync(ProjectId id, CancellationToken cancellationToken)
     {
         var tenantId = tenant.TenantId.Value;

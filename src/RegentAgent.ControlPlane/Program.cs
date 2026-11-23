@@ -17,6 +17,7 @@ using RegentAgent.Communication;
 using RegentAgent.Evaluation;
 using RegentAgent.Memory;
 using RegentAgent.Performance;
+using RegentAgent.Projects;
 using RegentAgent.Workflows;
 using RegentAgent.Contracts.Artifacts;
 using RegentAgent.Contracts.Dashboard;
@@ -46,6 +47,8 @@ builder.Services.AddScoped<ArtifactService>();
 builder.Services.AddScoped<TaskExecutionService>();
 builder.Services.AddScoped<TenantService>();
 builder.Services.AddScoped<OrganizationService>();
+builder.Services.AddSingleton(sp => new DeliveryService(
+    new JsonDocumentStore<ProjectDeliveryState>("data/modules/project-delivery.json"), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new WorkflowService(
     new JsonDocumentStore<WorkflowDefinition>("data/modules/workflows.json"),
     new JsonDocumentStore<WorkflowRun>("data/modules/workflow-runs.json")));
@@ -250,6 +253,87 @@ api.MapGet("/projects/{id:guid}", async (Guid id, ProjectService service, Cancel
     var project = await service.GetAsync(new ProjectId(id), cancellationToken);
     return project is null ? Results.NotFound() : Results.Ok(project);
 }).Produces<ProjectDetail>(StatusCodes.Status200OK).Produces(StatusCodes.Status404NotFound).WithTags("Projects");
+
+var delivery = api.MapGroup("/projects/{projectId:guid}/delivery");
+delivery.AddEndpointFilter(async (context, next) =>
+{
+    var projectId = Guid.Parse(context.HttpContext.GetRouteValue("projectId")!.ToString()!);
+    var projects = context.HttpContext.RequestServices.GetRequiredService<ProjectService>();
+    return await projects.ExistsAsync(new ProjectId(projectId), context.HttpContext.RequestAborted)
+        ? await next(context) : Results.NotFound();
+});
+delivery.MapGet("", async (Guid projectId, HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), projectId, cancellationToken)))
+    .Produces<ProjectDeliveryState>().WithTags("Delivery");
+delivery.MapPost("/findings", async (Guid projectId, ResearchFinding finding, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AddFindingAsync(Guid.Parse(CurrentTenant(context)), projectId, finding, cancellationToken)))
+    .Produces<ResearchFinding>().WithTags("Delivery");
+delivery.MapPost("/briefs", async (Guid projectId, ProductBrief brief, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CreateBriefAsync(Guid.Parse(CurrentTenant(context)), projectId, brief, cancellationToken)))
+    .Produces<ProductBrief>().WithTags("Delivery");
+delivery.MapPost("/briefs/{briefId:guid}/decision", async (Guid projectId, Guid briefId, DecisionRequest request,
+    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.DecideAsync(Guid.Parse(CurrentTenant(context)), projectId, briefId, request.Decision,
+        request.Rationale, request.EvidenceIds, request.Reround, request.Decider, cancellationToken)))
+    .Produces<GoNoGoDecision>().WithTags("Delivery");
+delivery.MapPost("/requirements", async (Guid projectId, DeliveryRequirement requirement, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CreateRequirementAsync(Guid.Parse(CurrentTenant(context)), projectId, requirement, cancellationToken)))
+    .Produces<DeliveryRequirement>().WithTags("Delivery");
+delivery.MapPost("/requirements/{requirementId:guid}/ready", async (Guid projectId, Guid requirementId,
+    ReadyRequirementRequest request, HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ReadyRequirementAsync(Guid.Parse(CurrentTenant(context)), projectId, requirementId,
+        request.TotalWeight, cancellationToken))).Produces<DeliveryRequirement>().WithTags("Delivery");
+delivery.MapPost("/plans", async (Guid projectId, DecompositionPlan plan, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ProposePlanAsync(Guid.Parse(CurrentTenant(context)), projectId, plan, cancellationToken)))
+    .Produces<DecompositionPlan>().WithTags("Delivery");
+delivery.MapPost("/plans/{planId:guid}/approve", async (Guid projectId, Guid planId, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ApprovePlanAsync(Guid.Parse(CurrentTenant(context)), projectId, planId, cancellationToken)))
+    .Produces<DecompositionPlan>().WithTags("Delivery");
+delivery.MapPost("/tasks/{taskId:guid}/claim", async (Guid projectId, Guid taskId, ClaimTaskRequest request,
+    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ClaimTaskAsync(Guid.Parse(CurrentTenant(context)), projectId, taskId, request.Assignee, cancellationToken)))
+    .Produces<DeliveryTask>().WithTags("Delivery");
+delivery.MapPost("/tasks/{taskId:guid}/submit", async (Guid projectId, Guid taskId, SubmitTaskRequest request,
+    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.SubmitTaskAsync(Guid.Parse(CurrentTenant(context)), projectId, taskId, request.Author, cancellationToken)))
+    .Produces<DeliveryTask>().WithTags("Delivery");
+delivery.MapPost("/tasks/{taskId:guid}/complete", async (Guid projectId, Guid taskId, DoneEvidence evidence,
+    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CompleteTaskAsync(Guid.Parse(CurrentTenant(context)), projectId, taskId, evidence, cancellationToken)))
+    .Produces<DoneEvidence>().WithTags("Delivery");
+delivery.MapPost("/defects", async (Guid projectId, Defect defect, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ReportDefectAsync(Guid.Parse(CurrentTenant(context)), projectId, defect, cancellationToken)))
+    .Produces<Defect>().WithTags("Delivery");
+delivery.MapPost("/defects/{defectId:guid}/retest", async (Guid projectId, Guid defectId, RetestDefectRequest request,
+    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RetestDefectAsync(Guid.Parse(CurrentTenant(context)), projectId, defectId,
+        request.Passed, request.Retester, cancellationToken))).Produces<Defect>().WithTags("Delivery");
+delivery.MapPost("/reviews", async (Guid projectId, Review review, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AddReviewAsync(Guid.Parse(CurrentTenant(context)), projectId, review, cancellationToken)))
+    .Produces<Review>().WithTags("Delivery");
+delivery.MapPost("/acceptance-reports", async (Guid projectId, AcceptanceReport report, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AddAcceptanceReportAsync(Guid.Parse(CurrentTenant(context)), projectId, report, cancellationToken)))
+    .Produces<AcceptanceReport>().WithTags("Delivery");
+delivery.MapPost("/releases", async (Guid projectId, ReleaseRequest request, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ReleaseAsync(Guid.Parse(CurrentTenant(context)), projectId, request.Version,
+        request.ArtifactRef, cancellationToken))).Produces<ReleaseRecord>().WithTags("Delivery");
+delivery.MapPost("/releases/{releaseId:guid}/rollback", async (Guid projectId, Guid releaseId,
+    RollbackRequest request, HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RollbackAsync(Guid.Parse(CurrentTenant(context)), projectId, releaseId,
+        request.TargetVersion, cancellationToken))).Produces<ReleaseRecord>().WithTags("Delivery");
+delivery.MapPost("/retrospectives", async (Guid projectId, Retrospective retrospective, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AddRetrospectiveAsync(Guid.Parse(CurrentTenant(context)), projectId, retrospective, cancellationToken)))
+    .Produces<Retrospective>().WithTags("Delivery");
 
 api.MapGet("/employees", async (EmployeeService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(cancellationToken)))
@@ -461,6 +545,13 @@ public sealed record CreateDelegationRequest(Guid DelegateEmployeeId, Guid Subtr
 public sealed record OffboardRequest(string ApprovalId);
 public sealed record CreateCandidateRequest(Guid PositionId, string DisplayName, string ModelVersion);
 public sealed record HireCandidateRequest(string ApprovalId);
+public sealed record DecisionRequest(string Decision, string Rationale, IReadOnlyList<Guid> EvidenceIds, int Reround, string Decider);
+public sealed record ReadyRequirementRequest(int TotalWeight);
+public sealed record ClaimTaskRequest(string Assignee);
+public sealed record SubmitTaskRequest(string Author);
+public sealed record RetestDefectRequest(bool Passed, string Retester);
+public sealed record ReleaseRequest(string Version, string ArtifactRef);
+public sealed record RollbackRequest(string TargetVersion);
 public sealed record CorrectMemoryRequest(string Content, string Reason);
 public sealed record CreateReviewRequest(string EmployeeId, string Conclusion, string EvidenceJson);
 public sealed record SendMessageRequest(string Body, string Priority);
