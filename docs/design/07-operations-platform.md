@@ -263,7 +263,7 @@ Pending -> Active -> Suspended -> Active
 | Subscription | tenant_id、plan_id、status、billing_period |
 | QuotaPolicy | tenant_id、max_employees、runner_weight、rate_limits |
 | RunnerPool | id、labels、capacity、scheduling_policy |
-| Deployment | id、release_version、component_versions、image_digests、status |
+| Deployment | id、release_version、component_versions、built_image_ids、status |
 | ReleaseManifest | release_version、schema_version、api_versions、compatible_versions、backup_required |
 | UpgradeRun | id、from_version、to_version、phase、backup_refs、migration_status、rollback_decision |
 | Incident | id、severity、status、impact、timeline |

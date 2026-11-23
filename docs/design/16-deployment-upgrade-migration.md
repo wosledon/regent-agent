@@ -282,7 +282,7 @@ Runner 额外提供：
 记录：
 
 - 操作者和审批。
-- ReleaseManifest 和镜像 digest。
+- ReleaseManifest、基础镜像 digest 和本地镜像 ID。
 - 前置检查结果。
 - 备份引用和校验。
 - 迁移版本、耗时和校验和。
@@ -293,7 +293,7 @@ Runner 额外提供：
 
 ## 14. 验收场景
 
-1. 镜像必须按 digest 固定。
+1. 发布必须固定版本 Tag，并记录基础镜像 digest 和本地构建镜像 ID。
 2. N-2 Runner 无法注册。
 3. 升级前必须完成 Drain；备份启用时完成备份，关闭时记录风险接受。
 4. Expand Migration 不删除旧结构。

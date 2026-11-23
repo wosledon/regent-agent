@@ -92,7 +92,7 @@ version
 - WAL/PITR 日志。
 - RustFS 对象清单、版本和快照。
 - Postgres `keyvault` schema 的加密密钥库。
-- ReleaseManifest、镜像 digest、Schema 和配置版本。
+- ReleaseManifest、基础镜像 digest、本地镜像 ID、Schema 和配置版本。
 - 审计检查点、签名和锚定状态。
 
 Runner 本地工作区不备份，从 RustFS 快照恢复。

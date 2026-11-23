@@ -72,6 +72,15 @@
 | 全天可配置、低价窗口和成本感知调度 | [38 公司作息与调度](./design/38-company-work-schedule-and-dispatch.md) |
 | GitHub 版本 Tag、Actions 检查和本地 Compose 构建 | [39 GitHub CI/CD 与本地部署](./design/39-github-actions-and-local-compose.md) |
 | 成本归属、显式分摊、预算结转和确定性异常 | [40 成本归属、分摊与异常](./design/40-cost-allocation-and-anomaly.md) |
+| 内部通知、持久化、SignalR 和去重 | [41 内部通知中心](./design/41-internal-notification-center.md) |
+| 内部 API、Tool、MCP 和公共生态边界 | [42 内部 API 与扩展边界](./design/42-internal-api-and-extension-boundary.md) |
+| Tag 源码、Compose、离线缓存和升级恢复 | [43 自托管安装与离线升级](./design/43-self-hosted-install-and-offline-upgrade.md) |
+| 单机容量、API P95、队列和 noisy neighbor | [44 容量与性能基线](./design/44-capacity-and-performance-baseline.md) |
+| 可配置合规、fail-closed 和支持边界 | [45 企业合规与支持边界](./design/45-enterprise-compliance-and-support-boundary.md) |
+| 密封集、Judge 员工、校准、统计和失败处置 | [46 模型评测 QA 实施细则](./design/46-evaluation-qa-implementation.md) |
+| OpenAPI、认证、幂等、分页、错误和代码生成 | [47 OpenAPI 基线](./design/47-openapi-baseline.md) |
+| 前端页面、路由、权限、布局和组件映射 | [48 前端页面与路由地图](./design/48-frontend-route-map.md) |
+| 核心 ERD、Schema 所有权、RLS 和数据字典 | [49 核心 ERD 与数据字典](./design/49-core-data-model-and-erd.md) |
 
 完整缺口登记和全局不变量见 [详细设计 README](./design/README.md)；四部分拓扑、工具调用、项目交付和模型预算流程见 [完整架构流程图](./Regent-Agent-架构流程图.md)。
 
@@ -153,7 +162,7 @@ Regent = 摄政者：**君主（股东）长期缺席，摄政者代行统治**�
 | Model Catalog / Price Snapshot | models.dev 每日同步、BYOK 补价、自动覆盖、自动档位和不可变价格快照 |
 | Benchmark Suite / EvaluationRun | 版本化评测集、密封防泄漏、公司内复用、回归与质量门槛 |
 | Data & Object Storage | Postgres + 强制 RLS、RustFS 对象存储、Runner 本地隔离工作区 |
-| Release Manifest | 镜像 digest、schema、API、事件和兼容版本；Expand/Deploy/Contract |
+| Release Manifest | 版本 Tag、基础镜像 digest、本地镜像 ID、schema、API、事件和兼容版本；Expand/Deploy/Contract |
 | Telemetry Backend | OpenTelemetry + off/local/otlp/elastic Profile；Elastic Stack 可选 |
 | Untrusted Content / Task Grant | 内容来源与 taint、任务预授权、执行层独立鉴权和自主性边界 |
 | Memory Claim / Correction | claim 级隔离、CorrectionTask、版本化纠错、引用影响与传播 |
@@ -773,7 +782,7 @@ Position / CapabilityGrant
 
 ### 6.20 部署、升级与迁移
 
-- MVP 和自托管采用单机 Docker Compose + systemd 监管，所有镜像按 digest 固定。
+- MVP 和自托管采用单机 Docker Compose + systemd 监管，基础镜像尽量按 digest 固定，本地构建记录镜像 ID。
 - ReleaseManifest 声明 schema、API、事件、Runner 和配置兼容版本；升级期间只允许 N/N-1 混跑。
 - 升级执行 Drain → Backup → Expand → Deploy → Smoke → Resume → Contract；备份关闭时记录跳过和风险接受。
 - 生产迁移使用独立 Job、迁移角色和 advisory lock，禁止启动时自动迁移。
@@ -1163,7 +1172,7 @@ Position / CapabilityGrant
 | 20~50 | 单机多 Runner | 无 |
 | 100~200 | 加机器、Runner 集群化 | 内存、预算 |
 | 1000 | Postgres 主从、仪表盘按部门分层 | **钱**（约 $50k/月）、API 供应商限额、主控上下文（靠动态岗位的摘要上滚缓解） |
-| 10000 | 控制面自己变成分布式系统：HA + 分片、真消息中间件、OTel 后端、公司自建 GPU 农场 | 钱、治理安全、组织噪声（沟通成本 n²） |
+| 10000 | 控制面自己变成分布式系统：HA + 分片、真消息中间件、OTel 后端；本地 GPU 推理如需引入必须作为新需求 | 钱、治理安全、组织噪声（沟通成本 n²） |
 
 设计不为万人过度工程，但绝不欠万人要还的债：三条不变性（Runner 无状态 / 员工状态全在控制面 / 通信只走 HTTP 契约）保证万人时要换的是控制面的**实现**，不是系统的**形状**。组织模型与 Runner 模型原样存活。
 
@@ -1192,7 +1201,7 @@ Position / CapabilityGrant
 | 常驻服务 | Generic Host + `BackgroundService`；systemd 保活 |
 | 并发/收件箱 | `System.Threading.Channels` |
 | 存储 | EF Core + Postgres + 强制 RLS；SQLite 仅用于单租户开发和测试 |
-| 记忆 | Postgres + vec 扩展起步，接口预留 Qdrant；租户过滤与来源标记必选 |
+| 记忆 | Postgres + pgvector + 全文检索；租户过滤与来源标记必选 |
 | 工作区/成果 | 活动工作区使用 Runner 本地或容器隔离目录；快照和成果统一 RustFS S3 接口 |
 | 沙箱 | Docker.DotNet |
 | 体验官 | Playwright（TypeScript/JavaScript） |
@@ -1235,7 +1244,7 @@ frontend/                            # 独立 TypeScript workspace
 └─ packages/ui-shared                # TypeScript UI 包，不共享会话和权限
 ```
 
-单机部署：Docker Compose 运行 Postgres、RustFS、四个服务和两个前端入口，由 systemd 监管；Elasticsearch、Kibana、APM Server 和 Collector 位于可选 Compose Profile，仅 elastic Profile 启动。镜像按 digest 固定，前端保持独立认证和授权。
+单机部署：Docker Compose 运行 Postgres、RustFS、四个服务和两个前端入口，由 systemd 监管；Elasticsearch、Kibana、APM Server 和 Collector 位于可选 Compose Profile，仅 elastic Profile 启动。基础镜像尽量按 digest 固定，本地构建记录镜像 ID，前端保持独立认证和授权。
 
 ---
 

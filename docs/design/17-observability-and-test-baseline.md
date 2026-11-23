@@ -57,7 +57,7 @@ Regent-Agent services
 
 - 仅 Kibana 可按需暴露，Elasticsearch 和 APM 不直接暴露公网。
 - 启用认证、TLS、最小权限和 ILM 保留策略。
-- 镜像按 digest 固定并纳入 ReleaseManifest。
+- 基础镜像尽量按 digest 固定，本地构建镜像 ID 纳入 LocalBuild 和 ReleaseManifest。
 
 ## 3. 信号清单
 

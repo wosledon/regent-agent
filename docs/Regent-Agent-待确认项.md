@@ -591,7 +591,7 @@ ClaimScore =
 ### 22.1 部署与版本集
 
 - MVP 和自托管采用单机 Docker Compose + systemd 监管，Postgres、RustFS、四个服务和两个前端同机部署。
-- 每次发布生成 ReleaseManifest，固定镜像 digest、schema、API、事件和兼容版本。
+- 每次发布生成 ReleaseManifest，固定版本 Tag、基础镜像 digest、本地镜像 ID、schema、API、事件和兼容版本。
 - 四个部分作为版本集发布，升级期间只允许 N/N-1 混跑，N-2 Runner 拒绝注册。
 
 ### 22.2 升级顺序

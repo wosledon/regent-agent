@@ -830,7 +830,7 @@ Outbox 发布器可以重试，消费者按 `event_id` 去重。事件顺序只�
 194. 即时不变量使用单库短事务，跨模块使用 Outbox/Inbox/Saga。
 195. 状态持久化为稳定字符串，代码使用密封引用类型包装。
 196. SQLite 不得用于生产集成和 RLS 验证。
-197. 发布镜像必须按 digest 固定并生成 ReleaseManifest。
+197. 发布必须固定版本 Tag，记录基础镜像 digest 和本地构建镜像 ID，并生成 ReleaseManifest。
 198. 升级期间只允许 N/N-1 混跑，N-2 Runner 拒绝注册。
 199. 数据库采用 Expand → Deploy → Contract，破坏性变更至少延后一个版本。
 200. 生产禁止应用启动时自动迁移。

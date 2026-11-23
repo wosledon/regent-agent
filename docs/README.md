@@ -57,6 +57,9 @@
 | [44 容量与性能基线](./design/44-capacity-and-performance-baseline.md) | 单机聚合容量、API P95、队列上限、背压和租户公平 | 容量、调度、SLO |
 | [45 企业合规与支持边界](./design/45-enterprise-compliance-and-support-boundary.md) | 可配置合规、fail-closed、技术证据和支持边界 | 合规、Operations、法务 |
 | [46 模型评测 QA 实施细则](./design/46-evaluation-qa-implementation.md) | 密封集、污染、Judge 员工、校准、统计和失败处置 | 评测、QA、数据治理 |
+| [47 OpenAPI 基线](./design/47-openapi-baseline.md) | 内部 API 认证、幂等、分页、错误、版本和代码生成 | 后端、前端、契约 |
+| [48 前端页面与路由地图](./design/48-frontend-route-map.md) | 两个前端的页面、路由、权限、布局和组件映射 | 前端、设计、QA |
+| [49 核心 ERD 与数据字典](./design/49-core-data-model-and-erd.md) | 核心实体关系、Schema 所有权、RLS、保留和数据字典 | 后端、数据、架构 |
 
 ## 拆分原则
 

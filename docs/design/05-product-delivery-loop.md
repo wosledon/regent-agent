@@ -240,7 +240,7 @@ merge: squash merge after review and CI
 
 - 自动化门禁通过。
 - 独立体验门禁通过。
-- 发布审批已绑定镜像摘要、环境和参数。
+- 发布审批已绑定版本 Tag、本地镜像 ID、环境和参数。
 - ReleaseManifest 固定版本 Tag、源 commit、基础镜像 digest、schema 和兼容版本。
 - 数据库迁移采用 Expand/Deploy/Contract，并明确应用回滚边界。
 - 运行时密钥、域名、TLS 和监控已配置；备份按 BackupProfile 可选启用。
@@ -389,7 +389,7 @@ Charter → 组织 → 简报 → 项目/需求/任务 → 加权认领
 21. 租户 token 不能访问运营平台，运营人员无 SupportGrant 不能读取租户业务数据。
 22. 暂停租户后新任务和新模型调用被拒绝，备份和导出仍可按授权执行。
 23. 产品发布前已完成运营监控、状态页、备份和回滚演练。
-24. 发布必须固定镜像 digest 并通过 Expand/Deploy/Contract 兼容检查。
+24. 发布必须固定版本 Tag、记录本地镜像 ID，并通过 Expand/Deploy/Contract 兼容检查。
 25. 发布必须通过安全、容量、混沌和升级测试；恢复测试仅对启用备份组件要求。
 26. elastic Profile 下关键链路必须在 Kibana 中具有指标、日志和 APM 追踪；local/off Profile 不要求该门禁。
 27. 工具、MCP、Skill、依赖和镜像必须具有 digest、签名、SBOM 和准入记录。

@@ -81,7 +81,7 @@ Regent-Agent 不是聊天工具，也不是固定工作流脚本，而是一个*
 | Model Catalog / 模型目录 | models.dev 每日快照、BYOK 补价和自动档位 | 目录版本化；models.dev 优先，历史账目不可改写 |
 | Benchmark Suite / 评测集 | 版本化案例、密封集、评分规则和 EvaluationRun | 公司内匹配复用；防泄漏；结果作为能力证据 |
 | Data & Object Storage / 数据与对象存储 | Postgres、RustFS 和 Runner 本地隔离工作区 | 状态、快照和活动代码分层；RLS 与事务保证隔离 |
-| Release Manifest / 发布清单 | 镜像 digest、schema、API、事件和兼容版本 | 版本集发布；Expand/Deploy/Contract；明确回滚边界 |
+| Release Manifest / 发布清单 | 版本 Tag、基础镜像 digest、本地镜像 ID、schema、API、事件和兼容版本 | 版本集发布；Expand/Deploy/Contract；明确回滚边界 |
 | Telemetry Backend / 遥测后端 | OpenTelemetry + off/local/otlp/elastic Profile | 默认 local；Elastic Stack 可选；统一指标、日志和链路追踪 |
 | Untrusted Content / 不可信内容 | 外部内容信封、来源、hash、taint 和风险处置 | 不提升权限；taint 跨摘要和记忆保留 |
 | Task Grant / 任务授权 | 工作区、Tool、网络、预算和动作范围 | Grant 内完全自主，只有越界才审批 |
@@ -308,7 +308,7 @@ Boss 的展示名称由 `display_name + title_suffix` 组成，例如 `张三老
 
 - MVP 和自托管采用单机 Docker Compose + systemd 监管。
 - 四个服务、两个前端、Postgres 和 RustFS 按同一 ReleaseManifest 版本集发布。
-- 镜像按 digest 固定，升级期间只允许 N/N-1 混跑。
+- 基础镜像尽量按 digest 固定，本地构建记录镜像 ID；升级期间只允许 N/N-1 混跑。
 - 升级顺序为 Drain → Backup → Expand → Deploy → Smoke → Resume → Contract；备份默认关闭，跳过时记录风险接受。
 - 生产禁止启动时自动迁移，迁移使用独立角色、advisory lock 和可恢复回填。
 - 应用只能在 Expand 且数据兼容时回滚；Contract 后必须前滚或恢复备份。

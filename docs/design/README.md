@@ -52,6 +52,9 @@
 | [44 容量与性能基线](./44-capacity-and-performance-baseline.md) | CapacityPolicy、QueueLimit、CapacityReport |
 | [45 企业合规与支持边界](./45-enterprise-compliance-and-support-boundary.md) | ComplianceProfile、ComplianceControl、ComplianceEvaluation、ComplianceViolation |
 | [46 模型评测 QA 实施细则](./46-evaluation-qa-implementation.md) | JudgeAssignment、JudgeCalibration、ContaminationFinding、StatisticalGate |
+| [47 OpenAPI 基线](./47-openapi-baseline.md) | OpenAPI 3.1、认证、幂等、分页、错误、版本和代码生成 |
+| [48 前端页面与路由地图](./48-frontend-route-map.md) | Tenant Dashboard 与 Ops Console 路由、权限、布局和组件映射 |
+| [49 核心 ERD 与数据字典](./49-core-data-model-and-erd.md) | 核心实体关系、Schema 所有权、RLS、保留和数据字典 |
 
 ## 2. 设计缺口登记
 
@@ -78,7 +81,7 @@
 | G-19 | 公司记忆缺少来源、失效和访问控制 | 05 | 已细化 | 记忆可溯源、可策展、可失效，检索带租户和项目过滤 |
 | G-20 | 数据保留、删除和导出流程不完整 | 04 | 已细化 | 保留类别、删除宽限期、备份清除和导出校验明确 |
 | G-21 | 可观测性和服务目标不可验收 | 04/17 | 已细化 | OpenTelemetry + 可插拔 Profile、可选 Elastic Stack、SLO、错误预算、告警和测试门禁明确 |
-| G-22 | 模型评估、本地并发和 Provider 错误语义不足 | 03/14 | 已细化 | benchmark 版本、密封防泄漏、复用、回归、单并发排队、流式中断和熔断明确 |
+| G-22 | 模型评估和 Provider 错误语义不足 | 03/14 | 已细化 | benchmark 版本、密封防泄漏、复用、回归、流式中断和熔断明确；本地 GPU 不实现 |
 | G-23 | 固定角色谱系与主控自建岗位冲突 | 06 | 已细化 | 主控不是预设 CEO 岗位；角色、能力和汇报关系动态规划 |
 | G-24 | 提供方管理端与租户控制面边界缺失 | 07 | 已细化 | 运营平台具有独立身份、数据、API、支持授权和审计 |
 | G-25 | 重复工作无法沉淀为可审查的组织流程 | 08 | 已细化 | 工作流可捕获、版本化、沿组织树向上提案、审查采纳并度量改进 |
@@ -118,6 +121,9 @@
 | G-59 | 容量基线缺少 API 延迟、队列上限、背压和 noisy neighbor 量化契约 | 44 | 已细化 | 单机聚合容量可测试，队列不静默丢弃，租户公平有门槛 |
 | G-60 | 企业合规缺少可配置策略、fail-closed、证据和商业支持边界 | 45 | 已细化 | ComplianceProfile 可执行，不宣称认证/SLA，必需项失败即拒绝 |
 | G-61 | 模型评测缺少密封集轮换、污染检测、Judge 校准、统计门槛和失败处置细则 | 46 | 已细化 | Judge 员工独立运行，校准/样本/统计可复现，失败不静默通过 |
+| G-62 | 内部 HTTP API 缺少统一 OpenAPI、认证、幂等、分页、错误和代码生成基线 | 47 | 已细化 | Tenant/Ops/Gateway 契约分离，TS Client 可生成，CI 可校验 |
+| G-63 | 两个前端缺少完整页面、路由、权限和组件映射 | 48 | 已细化 | Tenant Dashboard 与 Ops Console 路由独立，关键页面可验收 |
+| G-64 | 核心数据关系、Schema 所有权和数据字典缺少统一视图 | 49 | 已细化 | 核心 ERD、RLS、权威源、保留和不变量可追踪 |
 
 ## 3. 全局不变量
 

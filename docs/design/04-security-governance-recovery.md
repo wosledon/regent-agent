@@ -378,7 +378,7 @@ Sentinel 是纯程序算法，不调用 LLM、不是 Agent、不占编制。它�
 - 运营平台数据库：租户账户、套餐、配额、订阅、资源池、事件、SupportGrant 和运营审计。
 - RustFS：Git Bundle、工作区快照、报告、测试和发布包。
 - Postgres：工作区元数据、Git 引用和对象元数据。
-- ReleaseManifest、镜像 digest、schema/config 版本和迁移清单。
+- ReleaseManifest、基础镜像 digest、本地镜像 ID、schema/config 版本和迁移清单。
 - Postgres `keyvault` schema：由 Gateway 备份密文和包装数据密钥，不由控制面解密。
 - 配置与部署清单：镜像摘要、环境变量名称、迁移版本，不包含明文秘密。
 

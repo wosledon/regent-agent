@@ -580,5 +580,5 @@ flowchart TB
 - [x] Judge 是独立员工运行时，禁止自评和上下文共享。
 - [x] 密封集、污染检测、校准和统计门槛可复现。
 - [x] 通知只走站内，SignalR 不是唯一事实来源。
-- [x] 前端使用 TypeScript SPA + SignalR，不使用 Blazor。
+- [x] 前端使用 React 19 + TypeScript + MUI + SignalR，不使用 Blazor。
 - [x] 自托管从 Tag 源码构建，不发布镜像或自动更新。

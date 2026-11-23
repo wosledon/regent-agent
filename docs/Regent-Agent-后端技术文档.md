@@ -3,7 +3,7 @@
 - 版本：v0.1（待评审）
 - 范围：后端技术栈、术语、项目/模块划分、依赖规则、数据边界、API、运行时、安全与测试
 - 读者：后端研发、架构、QA、SRE、安全评审
-- 关联文档：[技术设计总览](./Regent-Agent-技术设计.md)、[完整架构流程图](./Regent-Agent-架构流程图.md)、[详细设计索引](./design/README.md)
+- 关联文档：[技术设计总览](./Regent-Agent-技术设计.md)、[完整架构流程图](./Regent-Agent-架构流程图.md)、[OpenAPI 基线](./design/47-openapi-baseline.md)、[核心 ERD 与数据字典](./design/49-core-data-model-and-erd.md)、[详细设计索引](./design/README.md)
 
 > 当前 `src/` 与 `tests/` 仍为空，本文是实现入口文档，不表示代码已经存在。具体 NuGet、容器和工具版本在实现时通过 lock file、基础镜像 digest 和 ReleaseManifest 固定。
 
