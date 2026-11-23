@@ -441,6 +441,8 @@ api.MapGet("/tenants", async (TenantService service, CancellationToken cancellat
 api.MapPost("/tenants", async (CreateTenantRequest request, TenantService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CreateAsync(request.Name, request.CompanyName, cancellationToken)))
     .Produces<TenantDto>().WithTags("Tenancy");
+api.MapGet("/charter/templates", async (OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ListCharterTemplatesAsync(cancellationToken))).Produces<IReadOnlyList<CharterTemplateDto>>().WithTags("Organization");
 api.MapGet("/charter", async (OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetCharterAsync(cancellationToken))).Produces<CharterDto>().WithTags("Organization");
 api.MapPut("/charter", async (CharterDto charter, OrganizationService service, CancellationToken cancellationToken) =>
@@ -486,8 +488,17 @@ api.MapPost("/employees/{employeeId:guid}/rehire", async (Guid employeeId, Rehir
     OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RehireAsync(employeeId, request.PositionId, request.ApprovalId, cancellationToken)))
     .Produces<EmployeeSummary>().WithTags("Organization");
+api.MapGet("/candidates", async (OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ListCandidatesAsync(cancellationToken))).Produces<IReadOnlyList<CandidateDto>>().WithTags("Recruitment");
 api.MapPost("/candidates", async (CreateCandidateRequest request, OrganizationService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.CreateCandidateAsync(request.PositionId, request.DisplayName, request.ModelVersion, cancellationToken)))
+    Results.Ok(await service.CreateCandidateAsync(request.PositionId, request.DisplayName, request.ModelVersion,
+        request.JobDescription, cancellationToken))).Produces<CandidateDto>().WithTags("Recruitment");
+api.MapPost("/candidates/{candidateId:guid}/reject", async (Guid candidateId, RejectCandidateRequest request,
+    OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RejectCandidateAsync(candidateId, request.Reason, cancellationToken)))
+    .Produces<CandidateDto>().WithTags("Recruitment");
+api.MapPost("/candidates/{candidateId:guid}/retry", async (Guid candidateId, OrganizationService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.RetryCandidateAsync(candidateId, cancellationToken)))
     .Produces<CandidateDto>().WithTags("Recruitment");
 api.MapPost("/candidates/{candidateId:guid}/assessment", async (Guid candidateId, CandidateAssessmentDto assessment,
     OrganizationService service, CancellationToken cancellationToken) =>
@@ -1534,7 +1545,8 @@ public sealed record SplitPositionRequest(string Name, string Responsibilities);
 public sealed record CreateDelegationRequest(Guid DelegateEmployeeId, Guid SubtreePositionId, IReadOnlyList<string> Actions, long BudgetLimitMinor, int Minutes);
 public sealed record OffboardRequest(string ApprovalId);
 public sealed record RehireRequest(Guid PositionId, string ApprovalId);
-public sealed record CreateCandidateRequest(Guid PositionId, string DisplayName, string ModelVersion);
+public sealed record CreateCandidateRequest(Guid PositionId, string DisplayName, string ModelVersion, string JobDescription);
+public sealed record RejectCandidateRequest(string Reason);
 public sealed record HireCandidateRequest(string ApprovalId);
 public sealed record DecisionRequest(string Decision, string Rationale, IReadOnlyList<Guid> EvidenceIds, int Reround, string Decider);
 public sealed record ApprovePlanRequest(string Approver, string? ApprovalId);

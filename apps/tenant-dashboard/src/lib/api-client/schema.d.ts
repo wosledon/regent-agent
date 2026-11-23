@@ -1086,6 +1086,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/charter/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CharterTemplateDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/charter": {
         parameters: {
             query?: never;
@@ -1559,7 +1594,26 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CandidateDto"][];
+                    };
+                };
+            };
+        };
         put?: never;
         post: {
             parameters: {
@@ -1573,6 +1627,84 @@ export interface paths {
                     "application/json": components["schemas"]["CreateCandidateRequest"];
                 };
             };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CandidateDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/candidates/{candidateId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    candidateId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RejectCandidateRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CandidateDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/candidates/{candidateId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    candidateId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
             responses: {
                 /** @description OK */
                 200: {
@@ -9170,6 +9302,7 @@ export interface components {
             status: string;
             assessmentJson: string;
             fairnessJson: string;
+            jobDescription: string;
         };
         CapabilityAssessment: {
             /** Format: uuid */
@@ -9219,6 +9352,11 @@ export interface components {
             };
             /** Format: int32 */
             version: number | string;
+        };
+        CharterTemplateDto: {
+            id: string;
+            name: string;
+            charter: components["schemas"]["CharterDto"];
         };
         ClaimScoreDto: {
             /** Format: uuid */
@@ -9357,6 +9495,7 @@ export interface components {
             positionId: string;
             displayName: string;
             modelVersion: string;
+            jobDescription: string;
         };
         CreateDelegationRequest: {
             /** Format: uuid */
@@ -10519,6 +10658,9 @@ export interface components {
             /** Format: uuid */
             positionId: string;
             approvalId: string;
+        };
+        RejectCandidateRequest: {
+            reason: string;
         };
         ReleaseRecord: {
             /** Format: uuid */

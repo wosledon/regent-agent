@@ -9,6 +9,7 @@ import { api } from '../../lib/api-client/api';
 export function OrganizationPage() {
   const queryClient = useQueryClient();
   const charter = useQuery({ queryKey: ['charter'], queryFn: api.charter });
+  const charterTemplates = useQuery({ queryKey: ['charter-templates'], queryFn: api.charterTemplates });
   const positions = useQuery({ queryKey: ['positions'], queryFn: api.positions });
   const employees = useQuery({ queryKey: ['employees'], queryFn: api.employees });
   const tenants = useQuery({ queryKey: ['tenants'], queryFn: api.tenants });
@@ -19,9 +20,11 @@ export function OrganizationPage() {
   const [candidateName, setCandidateName] = useState('');
   const [candidatePosition, setCandidatePosition] = useState('');
   const [candidateModel, setCandidateModel] = useState('local-cheap-v1');
+  const [candidateJobDescription, setCandidateJobDescription] = useState('');
   const [tenantName, setTenantName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [charterDraft, setCharterDraft] = useState<Awaited<ReturnType<typeof api.charter>> | null>(null);
+  const [charterTemplate, setCharterTemplate] = useState('baseline');
   const [mergeSource, setMergeSource] = useState('');
   const [mergeTarget, setMergeTarget] = useState('');
   const [splitId, setSplitId] = useState('');
@@ -54,8 +57,8 @@ export function OrganizationPage() {
   const mergePositions = useMutation({ mutationFn: () => api.mergePositions(mergeSource, mergeTarget), onSuccess: async () => { setMergeSource(''); setMergeTarget(''); await refresh(); } });
   const splitPosition = useMutation({ mutationFn: () => api.splitPosition(splitId, splitName, splitResponsibilities), onSuccess: async () => { setSplitName(''); setSplitResponsibilities(''); await refresh(); } });
   const createCandidate = useMutation({
-    mutationFn: () => api.createCandidate({ positionId: candidatePosition, displayName: candidateName, modelVersion: candidateModel }),
-    onSuccess: async () => { setCandidateName(''); await refresh(); }
+    mutationFn: () => api.createCandidate({ positionId: candidatePosition, displayName: candidateName, modelVersion: candidateModel, jobDescription: candidateJobDescription }),
+    onSuccess: async () => { setCandidateName(''); setCandidateJobDescription(''); await refresh(); }
   });
   const rehire = useMutation({ mutationFn: () => api.rehireEmployee(rehireEmployeeId, rehirePositionId, rehireApprovalId), onSuccess: async () => { setRehireApprovalId(''); await refresh(); } });
   const createTenant = useMutation({
@@ -76,7 +79,8 @@ export function OrganizationPage() {
           <FormField label="Constraints (comma separated)"><TextInput value={(charterDraft?.constraints ?? charter.data?.constraints ?? []).join(', ')} onChange={value => setCharterDraft({ ...(charterDraft ?? charter.data!), constraints: value.split(',').map(item => item.trim()).filter(Boolean) })} /></FormField>
           <FormField label="Monthly budget"><TextInput value={String(charterDraft?.monthlyBudgetMinor ?? charter.data?.monthlyBudgetMinor ?? 0)} onChange={value => setCharterDraft({ ...(charterDraft ?? charter.data!), monthlyBudgetMinor: Number(value) })} /></FormField>
           <FormField label="Currency"><TextInput value={charterDraft?.currency ?? charter.data?.currency ?? 'CNY'} onChange={currency => setCharterDraft({ ...(charterDraft ?? charter.data!), currency })} /></FormField>
-          <Stack direction="row"><Button onClick={() => saveCharter.mutate()} loading={saveCharter.isPending}>Save charter</Button><Button tone="neutral" onClick={() => start.mutate()} loading={start.isPending}>Start or verify company</Button></Stack>
+          <Select label="Charter template" value={charterTemplate} onChange={setCharterTemplate} options={(charterTemplates.data ?? []).map(template => ({ value: template.id ?? '', label: template.name ?? '' }))} />
+          <Stack direction="row"><Button tone="secondary" onClick={() => setCharterDraft(charterTemplates.data?.find(template => template.id === charterTemplate)?.charter ?? null)}>Apply template</Button><Button onClick={() => saveCharter.mutate()} loading={saveCharter.isPending}>Save charter</Button><Button tone="neutral" onClick={() => start.mutate()} loading={start.isPending}>Start or verify company</Button></Stack>
         </Card>
         <Card title="Create tenant">
           <FormField label="Tenant slug"><TextInput value={tenantName} onChange={setTenantName} placeholder="second-company" /></FormField>
@@ -144,7 +148,8 @@ export function OrganizationPage() {
             ]} />
           </FormField>
           <FormField label="Model version"><TextInput value={candidateModel} onChange={setCandidateModel} /></FormField>
-          <Button onClick={() => createCandidate.mutate()} disabled={!candidateName || !candidatePosition} loading={createCandidate.isPending}>Create candidate</Button>
+          <FormField label="Job description"><TextInput multiline minRows={2} value={candidateJobDescription} onChange={setCandidateJobDescription} placeholder="Job-related responsibilities and required evidence" /></FormField>
+          <Button onClick={() => createCandidate.mutate()} disabled={!candidateName || !candidatePosition || !candidateJobDescription} loading={createCandidate.isPending}>Create candidate</Button>
           <Text variant="caption">{employees.data?.length ?? 0} employees in the current tenant.</Text>
         </Card>
       </Grid>

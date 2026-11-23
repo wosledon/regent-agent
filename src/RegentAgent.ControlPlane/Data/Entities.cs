@@ -81,6 +81,7 @@ public sealed class CandidateRecord
     public Guid PositionId { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public string ModelVersion { get; set; } = string.Empty;
+    public string JobDescription { get; set; } = string.Empty;
     public string Status { get; set; } = "Screening";
     public string AssessmentJson { get; set; } = "{}";
     public string FairnessJson { get; set; } = "{}";

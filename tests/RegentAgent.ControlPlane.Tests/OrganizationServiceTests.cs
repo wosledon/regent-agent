@@ -127,6 +127,25 @@ public sealed class OrganizationServiceTests
         Assert.Equal(2, await db.EmploymentPeriods.CountAsync());
     }
 
+    [Fact]
+    public async Task Charter_templates_and_candidate_retry_are_available()
+    {
+        await using var db = CreateDb();
+        var tenantId = Guid.NewGuid();
+        db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "recruit-test", CompanyName = "Recruit Test" });
+        await db.SaveChangesAsync();
+        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System);
+        var templates = await service.ListCharterTemplatesAsync(CancellationToken.None);
+        Assert.Contains(templates, template => template.Id == "regulated");
+        var position = await service.CreatePositionAsync(new PositionDto(Guid.Empty, "Engineer", "Build software", [], 0, null, "Open", 1), CancellationToken.None);
+        var candidate = await service.CreateCandidateAsync(position.Id, "Candidate", "local-cheap-v1", "Implement and test job-related features", CancellationToken.None);
+        Assert.Equal("Implement and test job-related features", candidate.JobDescription);
+
+        await service.RejectCandidateAsync(candidate.Id, "Insufficient practical evidence", CancellationToken.None);
+        var retried = await service.RetryCandidateAsync(candidate.Id, CancellationToken.None);
+        Assert.Equal("Screening", retried.Status);
+    }
+
     private static RegentDbContext CreateDb() => new(
         new DbContextOptionsBuilder<RegentDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())

@@ -805,6 +805,28 @@
         }
       }
     },
+    "/v1/charter/templates": {
+      "get": {
+        "tags": [
+          "Organization"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CharterTemplateDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/charter": {
       "get": {
         "tags": [
@@ -1204,6 +1226,26 @@
       }
     },
     "/v1/candidates": {
+      "get": {
+        "tags": [
+          "Recruitment"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CandidateDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "Recruitment"
@@ -1218,6 +1260,76 @@
           },
           "required": true
         },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/candidates/{candidateId}/reject": {
+      "post": {
+        "tags": [
+          "Recruitment"
+        ],
+        "parameters": [
+          {
+            "name": "candidateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectCandidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CandidateDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/candidates/{candidateId}/retry": {
+      "post": {
+        "tags": [
+          "Recruitment"
+        ],
+        "parameters": [
+          {
+            "name": "candidateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -8192,7 +8304,8 @@
           "modelVersion",
           "status",
           "assessmentJson",
-          "fairnessJson"
+          "fairnessJson",
+          "jobDescription"
         ],
         "type": "object",
         "properties": {
@@ -8217,6 +8330,9 @@
             "type": "string"
           },
           "fairnessJson": {
+            "type": "string"
+          },
+          "jobDescription": {
             "type": "string"
           }
         }
@@ -8403,6 +8519,25 @@
               "string"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "CharterTemplateDto": {
+        "required": [
+          "id",
+          "name",
+          "charter"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "charter": {
+            "$ref": "#/components/schemas/CharterDto"
           }
         }
       },
@@ -8907,7 +9042,8 @@
         "required": [
           "positionId",
           "displayName",
-          "modelVersion"
+          "modelVersion",
+          "jobDescription"
         ],
         "type": "object",
         "properties": {
@@ -8919,6 +9055,9 @@
             "type": "string"
           },
           "modelVersion": {
+            "type": "string"
+          },
+          "jobDescription": {
             "type": "string"
           }
         }
@@ -13075,6 +13214,17 @@
             "format": "uuid"
           },
           "approvalId": {
+            "type": "string"
+          }
+        }
+      },
+      "RejectCandidateRequest": {
+        "required": [
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "reason": {
             "type": "string"
           }
         }

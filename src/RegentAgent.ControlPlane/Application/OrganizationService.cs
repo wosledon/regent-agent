@@ -10,6 +10,18 @@ namespace RegentAgent.ControlPlane.Application;
 public sealed class OrganizationService(RegentDbContext db, ITenantContext tenant, TimeProvider clock,
     AuditIntegrityService? audit = null)
 {
+    public Task<IReadOnlyList<CharterTemplateDto>> ListCharterTemplatesAsync(CancellationToken cancellationToken) =>
+        Task.FromResult<IReadOnlyList<CharterTemplateDto>>([
+            new("baseline", "Baseline autonomous company", new CharterDto(
+                "Deliver reliable software with auditable autonomous execution.",
+                ["Human approval for termination", "No external sharing without review"],
+                1_000_000, "CNY", new Dictionary<string, string> { ["approval"] = "risk-based", ["audit"] = "standard" }, 1)),
+            new("regulated", "Regulated operations", new CharterDto(
+                "Deliver compliant software with fail-closed governance.",
+                ["Region allowlist required", "All external actions require approval", "Enhanced audit retention"],
+                5_000_000, "USD", new Dictionary<string, string> { ["approval"] = "strict", ["audit"] = "anchored", ["backup"] = "required" }, 1))
+        ]);
+
     public async Task<CharterDto?> GetCharterAsync(CancellationToken cancellationToken)
     {
         var charter = await db.Charters.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenant.TenantId.Value, cancellationToken);
@@ -227,20 +239,52 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
     }
 
     public async Task<CandidateDto> CreateCandidateAsync(Guid positionId, string displayName, string modelVersion,
-        CancellationToken cancellationToken)
+        string jobDescription, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(displayName) || string.IsNullOrWhiteSpace(modelVersion))
-            throw new InvalidOperationException("Candidate name and model version are required.");
+        if (string.IsNullOrWhiteSpace(displayName) || string.IsNullOrWhiteSpace(modelVersion) || string.IsNullOrWhiteSpace(jobDescription))
+            throw new InvalidOperationException("Candidate name, model version and job description are required.");
         if (!await db.Positions.AnyAsync(x => x.TenantId == tenant.TenantId.Value && x.Id == positionId && (x.Status == "Open" || x.Status == "Frozen"), cancellationToken))
             throw new KeyNotFoundException("Position is not open for recruitment.");
         var candidate = new CandidateRecord
         {
             Id = Guid.NewGuid(), TenantId = tenant.TenantId.Value, PositionId = positionId,
-            DisplayName = displayName, ModelVersion = modelVersion, Status = "Screening", CreatedAt = clock.GetUtcNow()
+            DisplayName = displayName, ModelVersion = modelVersion, JobDescription = jobDescription,
+            Status = "Screening", CreatedAt = clock.GetUtcNow()
         };
         db.Candidates.Add(candidate);
         await db.SaveChangesAsync(cancellationToken);
         await AuditAsync("candidate.created", new { candidate_id = candidate.Id, position_id = positionId }, cancellationToken);
+        return ToCandidate(candidate);
+    }
+
+    public async Task<IReadOnlyList<CandidateDto>> ListCandidatesAsync(CancellationToken cancellationToken) =>
+        (await db.Candidates.AsNoTracking().Where(x => x.TenantId == tenant.TenantId.Value).ToListAsync(cancellationToken))
+        .Select(ToCandidate).ToArray();
+
+    public async Task<CandidateDto> RejectCandidateAsync(Guid candidateId, string reason,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(reason)) throw new InvalidOperationException("Rejection reason is required.");
+        var candidate = await db.Candidates.SingleOrDefaultAsync(x => x.TenantId == tenant.TenantId.Value && x.Id == candidateId, cancellationToken)
+            ?? throw new KeyNotFoundException("Candidate not found.");
+        if (candidate.Status == "Hired") throw new InvalidOperationException("Hired candidate cannot be rejected.");
+        candidate.Status = "Rejected";
+        candidate.AssessmentJson = JsonSerializer.Serialize(new { rejection_reason = reason });
+        await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("candidate.rejected", new { candidate_id = candidateId, reason }, cancellationToken);
+        return ToCandidate(candidate);
+    }
+
+    public async Task<CandidateDto> RetryCandidateAsync(Guid candidateId, CancellationToken cancellationToken)
+    {
+        var candidate = await db.Candidates.SingleOrDefaultAsync(x => x.TenantId == tenant.TenantId.Value && x.Id == candidateId, cancellationToken)
+            ?? throw new KeyNotFoundException("Candidate not found.");
+        if (candidate.Status != "Rejected") throw new InvalidOperationException("Only rejected candidates can be retried.");
+        candidate.Status = "Screening";
+        candidate.AssessmentJson = "{}";
+        candidate.FairnessJson = "{}";
+        await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("candidate.retry", new { candidate_id = candidateId }, cancellationToken);
         return ToCandidate(candidate);
     }
 
@@ -488,5 +532,5 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
     private static EmploymentPeriodDto ToPeriod(EmploymentPeriodRecord x) => new(x.Id, x.EmployeeId, x.PositionId, x.Kind, x.StartedAt, x.EndedAt);
     private static OrgDelegationDto ToDelegation(OrgDelegationRecord x) => new(x.Id, x.DelegateEmployeeId, x.SubtreePositionId,
         JsonSerializer.Deserialize<string[]>(x.ActionsJson) ?? [], x.BudgetLimitMinor, x.ExpiresAt, x.Status);
-    private static CandidateDto ToCandidate(CandidateRecord x) => new(x.Id, x.PositionId, x.DisplayName, x.ModelVersion, x.Status, x.AssessmentJson, x.FairnessJson);
+    private static CandidateDto ToCandidate(CandidateRecord x) => new(x.Id, x.PositionId, x.DisplayName, x.ModelVersion, x.Status, x.AssessmentJson, x.FairnessJson, x.JobDescription);
 }

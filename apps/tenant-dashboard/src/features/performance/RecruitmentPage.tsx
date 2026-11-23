@@ -9,6 +9,7 @@ export function RecruitmentPage() {
   const appeals = useQuery({ queryKey: ['recruitment-appeals'], queryFn: api.recruitmentAppeals });
   const audits = useQuery({ queryKey: ['fairness-audits'], queryFn: api.fairnessAudits });
   const positions = useQuery({ queryKey: ['positions'], queryFn: api.positions });
+  const candidates = useQuery({ queryKey: ['candidates'], queryFn: api.candidates });
   const [candidateId, setCandidateId] = useState('');
   const [stage, setStage] = useState('Screening');
   const [score, setScore] = useState('80');
@@ -21,14 +22,17 @@ export function RecruitmentPage() {
   const invalidate = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['recruitment-interviews'] }),
     queryClient.invalidateQueries({ queryKey: ['recruitment-appeals'] }),
-    queryClient.invalidateQueries({ queryKey: ['fairness-audits'] })
+    queryClient.invalidateQueries({ queryKey: ['fairness-audits'] }),
+    queryClient.invalidateQueries({ queryKey: ['candidates'] })
   ]);
   const record = useMutation({ mutationFn: () => api.recordInterview({ id: crypto.randomUUID(), candidateId, stage, status: 'Completed', score: Number(score), evidenceJson: evidence, createdAt: new Date().toISOString() }), onSuccess: invalidate });
   const appeal = useMutation({ mutationFn: () => api.createCandidateAppeal(candidateId, appealReason), onSuccess: async () => { setAppealReason(''); await invalidate(); } });
   const resolve = useMutation({ mutationFn: ({ id, resolution }: { id: string; resolution: string }) => api.resolveCandidateAppeal(id, resolution), onSuccess: invalidate });
   const audit = useMutation({ mutationFn: () => api.runFairnessAudit(positionId, period, Number(sampleSize), Number(ratio)), onSuccess: invalidate });
-  if (interviews.isLoading || appeals.isLoading || audits.isLoading || positions.isLoading) return <LoadingState />;
-  const error = interviews.error ?? appeals.error ?? audits.error ?? positions.error;
+  const rejectCandidate = useMutation({ mutationFn: (id: string) => api.rejectCandidate(id, 'Job-related evidence did not meet the bar'), onSuccess: invalidate });
+  const retryCandidate = useMutation({ mutationFn: api.retryCandidate, onSuccess: invalidate });
+  if (interviews.isLoading || appeals.isLoading || audits.isLoading || positions.isLoading || candidates.isLoading) return <LoadingState />;
+  const error = interviews.error ?? appeals.error ?? audits.error ?? positions.error ?? candidates.error;
   if (error) return <ErrorState message={error.message} />;
   return <Stack spacing={3}>
     <PageHeader title="Recruitment governance" description="Interview stages, candidate appeals and fairness audits." />
@@ -56,6 +60,17 @@ export function RecruitmentPage() {
         ]} />
       </Card>
     </Grid>
+    <Card title="Candidates">
+      <DataTable rows={candidates.data ?? []} getRowId={row => row.id ?? ''} columns={[
+        { id: 'name', header: 'Candidate', render: row => row.displayName ?? '' },
+        { id: 'jd', header: 'Job description', render: row => row.jobDescription ?? '' },
+        { id: 'status', header: 'Status', render: row => <StatusChip label={row.status ?? ''} tone={row.status === 'Rejected' ? 'error' : 'info'} /> },
+        { id: 'actions', header: 'Actions', render: row => <Stack direction="row" wrap>
+          <Button tone="danger" onClick={() => rejectCandidate.mutate(row.id ?? '')} disabled={row.status === 'Hired' || row.status === 'Rejected'}>Reject</Button>
+          <Button tone="secondary" onClick={() => retryCandidate.mutate(row.id ?? '')} disabled={row.status !== 'Rejected'}>Retry</Button>
+        </Stack> }
+      ]} />
+    </Card>
     <Card title="Fairness audit">
       <Select label="Position" value={positionId} onChange={setPositionId} options={[{ value: '', label: 'Select position' }, ...(positions.data ?? []).map(position => ({ value: position.id, label: position.name }))]} />
       <FormField label="Period"><TextInput value={period} onChange={setPeriod} /></FormField>

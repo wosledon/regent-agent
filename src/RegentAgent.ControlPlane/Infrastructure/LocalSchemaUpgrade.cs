@@ -40,7 +40,7 @@ public static class LocalSchemaUpgrade
             CREATE TABLE IF NOT EXISTS Candidates (
                 Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL,
                 PositionId TEXT NOT NULL, DisplayName TEXT NOT NULL,
-                ModelVersion TEXT NOT NULL, Status TEXT NOT NULL,
+                ModelVersion TEXT NOT NULL, JobDescription TEXT NOT NULL DEFAULT '', Status TEXT NOT NULL,
                 AssessmentJson TEXT NOT NULL, FairnessJson TEXT NOT NULL, CreatedAt TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS IX_Candidates_TenantId_PositionId_Status ON Candidates (TenantId, PositionId, Status);
@@ -98,5 +98,9 @@ public static class LocalSchemaUpgrade
             "SELECT name FROM pragma_table_info('Projects')").ToListAsync(cancellationToken);
         if (!projectColumns.Contains("Mission"))
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE Projects ADD COLUMN Mission TEXT NOT NULL DEFAULT '';", cancellationToken);
+        var candidateColumns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('Candidates')").ToListAsync(cancellationToken);
+        if (!candidateColumns.Contains("JobDescription"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Candidates ADD COLUMN JobDescription TEXT NOT NULL DEFAULT '';", cancellationToken);
     }
 }
