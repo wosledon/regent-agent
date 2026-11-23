@@ -79,6 +79,10 @@ builder.Services.AddSingleton(sp => new ImprovementService(
     new JsonDocumentStore<ImprovementProposal>("data/modules/improvements.json")));
 builder.Services.AddSingleton(sp => new AgentEvolutionService(
     new JsonDocumentStore<AgentEvolutionState>("data/modules/agent-evolution.json"), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton(sp => new AgentRuntimeService(
+    new JsonDocumentStore<AgentContextSnapshot>("data/modules/agent-contexts.json"), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton(sp => new TaskGovernanceService(
+    new JsonDocumentStore<TaskGovernanceState>("data/modules/task-governance.json"), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new ComplianceService(
     new JsonDocumentStore<ComplianceProfile>("data/modules/compliance.json")));
 builder.Services.AddSingleton<CommunicationRouter>();
@@ -846,6 +850,48 @@ api.MapPost("/improvements/{id}/review", async (string id, ReviewImprovementRequ
     HttpContext context, ImprovementService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReviewAsync(id, CurrentTenant(context), request.Approved, cancellationToken))).WithTags("Performance");
 
+api.MapPost("/agent-runtime/context", async (BuildContextRequest request, AgentRuntimeService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.BuildContextAsync(request.TaskId,
+        request.SystemPrefix, request.TenantMemory, request.TaskGrantJson, request.ToolResultRefs,
+        request.CheckpointJson, request.Compressed, cancellationToken))).Produces<AgentContextSnapshot>().WithTags("Agent Runtime");
+api.MapPost("/agent-runtime/tool-loop", async (ToolLoopRequest request, AgentRuntimeService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.RunToolLoopAsync(request, cancellationToken)))
+    .Produces<ToolLoopResult>().WithTags("Agent Runtime");
+api.MapGet("/task-governance", async (HttpContext context, TaskGovernanceService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<TaskGovernanceState>().WithTags("Task Governance");
+api.MapPost("/task-governance/task-types", async (TaskTypeDefinition definition, HttpContext context,
+    TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.RegisterTaskTypeAsync(
+        Guid.Parse(CurrentTenant(context)), definition, cancellationToken))).Produces<TaskTypeDefinition>().WithTags("Task Governance");
+api.MapPost("/task-governance/capabilities", async (CapabilityAssessment assessment, HttpContext context,
+    TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.AssessAsync(
+        Guid.Parse(CurrentTenant(context)), assessment, cancellationToken))).Produces<CapabilityAssessment>().WithTags("Task Governance");
+api.MapPost("/task-governance/claim-score", async (ClaimScoreRequest request, HttpContext context,
+    TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.ScoreClaimAsync(
+        Guid.Parse(CurrentTenant(context)), request.EmployeeId, request.TaskType, request.CurrentWip, request.WipLimit,
+        request.HistorySuccess, request.ToolFit, request.CostEfficiency, request.Independent, cancellationToken)))
+    .Produces<ClaimScoreDto>().WithTags("Task Governance");
+api.MapPost("/task-governance/ledger", async (WorkLedgerEntry entry, HttpContext context,
+    TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.RecordWorkAsync(
+        Guid.Parse(CurrentTenant(context)), entry, cancellationToken))).Produces<WorkLedgerEntry>().WithTags("Task Governance");
+api.MapPost("/task-governance/reviews", async (ReviewTaskRecord review, HttpContext context,
+    TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.CreateReviewAsync(
+        Guid.Parse(CurrentTenant(context)), review, cancellationToken))).Produces<ReviewTaskRecord>().WithTags("Task Governance");
+api.MapPost("/task-governance/reviews/{reviewId:guid}/approve", async (Guid reviewId, ApproveReviewRequest request,
+    HttpContext context, TaskGovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ApproveReviewAsync(Guid.Parse(CurrentTenant(context)), reviewId, request.Approver, cancellationToken)))
+    .Produces<ReviewTaskRecord>().WithTags("Task Governance");
+api.MapPost("/task-governance/debates", async (DebateTaskRecord debate, HttpContext context,
+    TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.CreateDebateAsync(
+        Guid.Parse(CurrentTenant(context)), debate, cancellationToken))).Produces<DebateTaskRecord>().WithTags("Task Governance");
+api.MapPost("/task-governance/debates/{debateId:guid}/decide", async (Guid debateId, DecideDebateRequest request,
+    HttpContext context, TaskGovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.DecideDebateAsync(Guid.Parse(CurrentTenant(context)), debateId, request.Decision, cancellationToken)))
+    .Produces<DebateTaskRecord>().WithTags("Task Governance");
+api.MapPost("/task-governance/adjudications", async (AdjudicationTaskRecord adjudication, HttpContext context,
+    TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.AdjudicateAsync(
+        Guid.Parse(CurrentTenant(context)), adjudication, cancellationToken))).Produces<AdjudicationTaskRecord>().WithTags("Task Governance");
+
 api.MapGet("/agent-evolution", async (HttpContext context, AgentEvolutionService service,
     CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken))).WithTags("Agent Evolution");
 api.MapPost("/agent-evolution/prompts", async (CreatePromptRequest request, HttpContext context,
@@ -1053,3 +1099,9 @@ public sealed record CreateImprovementRequest(string EmployeeId, string Category
 public sealed record ReviewImprovementRequest(bool Approved);
 public sealed record CreatePromptRequest(string Name, string Content);
 public sealed record CreateSkillRequest(string Name, Guid PromptBundleId, string ConfigJson);
+public sealed record BuildContextRequest(Guid TaskId, string SystemPrefix, string TenantMemory, string TaskGrantJson,
+    IReadOnlyList<string> ToolResultRefs, string CheckpointJson, bool Compressed);
+public sealed record ClaimScoreRequest(Guid EmployeeId, string TaskType, int CurrentWip, int WipLimit,
+    decimal HistorySuccess, decimal ToolFit, decimal CostEfficiency, bool Independent);
+public sealed record ApproveReviewRequest(string Approver);
+public sealed record DecideDebateRequest(string Decision);
