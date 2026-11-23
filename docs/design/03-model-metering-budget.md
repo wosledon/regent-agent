@@ -1,0 +1,370 @@
+# 03 模型网关、计量与预算
+
+- 版本：v0.1（待评审）
+- 范围：BYOK、模型路由、用量、账本、预算和成本异常
+- 对应缺口：G-02、G-04、G-08、G-09、G-16
+
+## 1. 核心决策
+
+1. 控制面保存模型元数据和 `key_ref`，网关单独保存密钥密文。
+2. 模型成本以网关 `llm_usage` 事件为权威源；Runner 只上报工具成本。
+3. 每次模型调用前必须获得预算预留；调用后按实际用量结算。
+4. 账本只增不改，价格更正和供应商账单差异通过新条目表达。
+5. 所有路由和重试都限制在同一租户、同一员工绑定模型和授权端点内。
+6. OpenAI 与 Anthropic 使用各自原生协议，不做请求、响应、工具调用或错误结构的跨协议转化。
+7. 控制面调用网关必须使用服务身份，不能借用员工令牌。
+8. 模型元数据和价格以 models.dev 每日快照为首选来源，BYOK 手工补价可被目录字段自动覆盖。
+9. 价格和档位均版本化；历史 usage 按请求发生时快照结算，不追溯改写。
+
+## 2. 模型与 BYOK 生命周期
+
+### 2.1 模型元数据
+
+```text
+Model:
+  id, tenant_id, provider, provider_model_id
+  protocol, endpoint_kind
+  tier, capability_tags, context_window
+  input_price_per_mtok, output_price_per_mtok
+  currency, price_version, effective_at
+  key_ref, state, health, last_test_at
+```
+
+`protocol` 取值：`openai_chat_completions`、`anthropic_messages`、`ollama_openai`。`endpoint_kind` 由协议推导，客户端必须选择对应原生端点。
+
+`key_ref` 是网关内的不透明引用，不包含密钥、密钥哈希或可逆标识。
+
+### 2.2 新增模型 saga
+
+1. 控制面创建 `Model(state=Provisioning)`，写入幂等记录。
+2. 仪表盘服务端调用网关管理 API，提交租户 ID、模型 ID、provider 和密钥。
+3. 网关加密存储密钥，返回 `key_ref`；控制面更新模型元数据。
+4. 网关执行最小测试调用，生成测试用量和审计事件。
+5. 测试成功且预算允许后，控制面将模型置为 `Ready`。
+6. 任一步失败进入 `Failed` 或 `Deleting`，由补偿任务清理未完成的密钥引用。
+
+该流程不追求跨进程分布式事务，使用幂等步骤、状态机和补偿保证最终一致。
+
+### 2.3 轮换
+
+1. 创建新密钥版本，保持当前版本可用。
+2. 新版本测试成功。
+3. 原子切换 `active_key_version`。
+4. 旧版本保留 24 小时供在途请求结束。
+5. 删除旧版本并记录审计。
+
+### 2.4 删除
+
+1. 控制面将模型置为 `Deleting`，拒绝新调用。
+2. 等待在途请求结束或达到最大等待时间。
+3. 解除员工、岗位和默认路由引用。
+4. 网关删除密钥密文及版本。
+5. 控制面归档模型元数据和历史用量，不删除账本。
+
+### 2.5 对账任务
+
+每小时检查：
+
+- `Provisioning/Rotating/Deleting` 超时项。
+- 控制面存在但网关缺少的 `key_ref`。
+- 网关存在但控制面无引用的孤立密钥。
+- 密钥版本与模型状态不一致。
+
+发现差异时停止相关模型调度并生成运维告警，不自动跨租户猜测归属。
+
+### 2.6 models.dev 模型目录
+
+- 每日下载 `https://models.dev/api.json`，保存原始快照、来源、获取时间和 checksum。
+- 校验 JSON、Provider ID、Model ID、单位、币种和价格字段后生成不可变 `CatalogSnapshot`。
+- 对比变更并原子发布；失败时保留最近有效快照并标记 `Stale`。
+- 目录只包含模型元数据和匿名价格，不包含租户密钥。
+- BYOK 从最新已发布快照预填模型、限制、能力和价格。
+- 目录同步、发布、手工补价和自动覆盖均写入审计。
+
+### 2.7 价格来源与覆盖
+
+- 每个价格字段独立记录 `models.dev` 或 `manual` 来源。
+- models.dev 已有字段优先；缺失字段由 BYOK 用户补充币种、单位、区域和生效时间。
+- 每日同步按 Provider + Model ID 精确匹配，models.dev 新增字段自动覆盖对应手工字段。
+- 手工值保留历史版本并通知管理员，不用模糊匹配覆盖其他模型。
+- 仍然缺失的价格标记为 `Unpriced`，不得按 0 结算。
+- models.dev 暂时缺价时保留最近有效价格并标记 `Stale`，进入对账而不是静默改价。
+
+## 3. 推理请求与路由
+
+### 3.1 请求身份
+
+Runner 使用 employee assignment token；管家使用 control service token。租户、员工和预算信息通过 JWT 与请求头传递，请求体保持 provider 原生结构：
+
+```text
+Authorization: Bearer <assignment|service token>
+X-Regent-Model: <tenant model alias>
+X-Regent-Task-Id: <task id，可空>
+X-Regent-Budget-Reservation-Id: <reservation id>
+X-Regent-Request-Id: <correlation id>
+
+OpenAI body: /v1/chat/completions 原生 schema
+Anthropic body: /v1/messages 原生 schema
+```
+
+- 网关不信任请求体中的 `tenant_id`，只使用已验证 JWT claim。
+- 网关只把 `X-Regent-Model` 解析为实际 `provider_model_id` 并写入该协议的原生 `model` 字段。
+- 不读取、改写或补造其他协议字段；工具调用、流式事件和错误结构保持原生形状。
+- `max_tokens`、`max_completion_tokens`、`thinking`、`tools` 等参数由对应协议客户端设置，不由统一 DTO 转换。
+
+### 3.2 路由顺序
+
+1. 验证 JWT、租户、模型权限和任务状态。
+2. 检查请求端点协议与模型 `protocol` 一致；不一致返回 422，不尝试转化。
+3. 检查模型 `Ready`、健康和租户套餐策略。
+4. 校验预算预留金额与请求最大成本匹配。
+5. 解析模型别名，注入密钥和实际 provider model id。
+6. 使用对应原生插件调用 provider。
+7. 记录 usage，结算预算预留，返回原生响应。
+
+### 3.3 同模型重试与恢复
+
+- 模型、模型版本和推理强度通过 EmployeeRuntimeBinding 与员工绑定，TaskRun 固定。
+- 只对幂等安全、可重试错误重试，如 429、5xx、网络超时。
+- 最多重试 2 次，使用指数退避和总超时。
+- 仅允许相同模型版本、推理强度、协议和租户授权的端点或区域切换。
+- 禁止自动跨模型、跨版本、跨推理强度或跨协议降级。
+- 不允许因 A 租户故障自动使用 B 租户的密钥或模型。
+- 流式响应中断后不自动重放非幂等工具调用；按原生错误响应和用量结算。
+- 上下文超限通过压缩、拆分或暂停处理，不自动换模型。
+
+### 3.4 模型不可用检测与上报
+
+- 网关按模型、租户和端点统计错误、限流和健康状态。
+- 连续 2 次调用失败或 5 分钟持续不可用时生成 `ModelUnavailableEvent`。
+- 事件包含员工、绑定模型、受影响 Task、错误、最近成功时间、重试结果和检查点引用。
+- 控制面将事件上报直接 Leader，不主动直达 Controller。
+- Leader 决定继续等待同模型、调岗或调整绑定；绑定调整只影响后续任务。
+- 没有直接 Leader 时 Controller 兜底，管理链无法解决才到 Boss。
+- 模型下架时停止新任务，在途任务在安全点暂停或完成。
+
+### 3.5 模型评估
+
+具备模型评估能力的岗位通过独立 MCP 工具面调用 benchmark，使用服务或员工评估 scope。每次评估必须：
+
+- 绑定租户、岗位、模型版本和测试套件版本。
+- 单独预留预算并生成用量事件。
+- 将结果写入能力矩阵缓存，禁止每开一个岗位重复全量评测。
+- 数据集、密封防泄漏、回归频率、评分和质量门槛详见 [14 模型评测与回归](./14-model-evaluation-and-regression.md)。
+
+### 3.6 自动模型档位
+
+- 不手工维护 cheap/mid/premium 清单，档位由 CatalogSnapshot 和 `ModelTierPolicyVersion` 计算。
+- 使用 models.dev 的 cost、limit、reasoning、tool_call、structured_output、modalities、knowledge 和 last_updated。
+- 先过滤不支持工具调用、上下文不足、价格不完整或状态不可用的模型。
+- 能力分前 20% 为 Premium；剩余模型按 `input + output × 0.25` 参考成本取最低 33% 为 Cheap；其余为 Mid。
+- 数据不足标记 Unclassified；优先级为 Premium、Cheap、Mid、Unclassified。
+- 档位只用于筛选、招聘和预算策略，不替代精确模型绑定。
+- 目录更新只影响新任务，不自动换模型或调岗。
+
+## 4. 用量事件与权威源
+
+### 4.1 模型用量事件
+
+```text
+llm_usage:
+  usage_event_id
+  tenant_id, gateway_id
+  employee_id, butler_session_id, task_id
+  model_id, provider_model_id
+  request_id, provider_request_id
+  input_tokens, output_tokens, cached_tokens, reasoning_tokens
+  catalog_snapshot_id, price_version, currency
+  effective_price_refs, pricing_tier
+  estimated_amount, provider_reported_amount
+  started_at, completed_at, status
+  idempotency_key
+```
+
+### 4.2 工具用量事件
+
+Runner 上报沙箱、浏览器、存储、GPU 等工具消耗：
+
+```text
+tool_usage:
+  usage_event_id, tenant_id, runner_id, employee_id, task_id
+  tool_type, duration_ms, cpu_ms, memory_mb_seconds
+  storage_bytes, network_bytes, gpu_ms
+  unit_price_version, amount, currency
+```
+
+### 4.3 权威规则
+
+| 成本类型 | 权威源 | Runner/控制面职责 |
+|---|---|---|
+| 模型输入/输出/缓存 token | 网关 | 只关联 task_id，不重复记账；OpenAI 与 Anthropic 按各自原生缓存字段计量 |
+| 工具执行时间与资源 | Runner | 控制面按价目版本计价 |
+| 平台订阅费 | 计费系统 | 与模型账本分账 |
+| Provider 账单差异 | 周期性对账 | 生成更正账本条目 |
+
+### 4.4 投递与去重
+
+- 网关和 Runner 批量上报，至少一次投递。
+- 控制面以 `(source, source_event_id)` 唯一约束去重。
+- 迟到事件允许入库，但按发生时间归属预算周期。
+- 同一请求重试产生多个 provider 调用时，每个调用有独立 usage_event_id，不合并。
+- 月度供应商账单对账差异超过 1% 或绝对金额阈值时告警。
+
+## 5. 账本模型
+
+### 5.1 账本条目
+
+```text
+ledger_entries:
+  id, tenant_id, usage_event_id
+  period, account_type, employee_id, position_id, project_id
+  amount, currency, price_version
+  entry_type: charge | correction | refund
+  created_at
+```
+
+- `account_type`：model、tool、butler、benchmark、platform。
+- 员工、岗位、项目和全局视图由同一权威条目投影。
+- 原始条目不可更新或删除；更正引用原条目并记录原因。
+
+### 5.2 结算顺序
+
+1. 接收 usage 事件并去重。
+2. 计算金额，绑定价目版本。
+3. 释放对应预算预留。
+4. 写入 ledger entry 和 Outbox 事件。
+5. 更新预算投影和告警状态。
+
+## 6. 预算预留与硬限制
+
+### 6.1 预算层级
+
+- 租户月度硬预算：默认 ¥8000。
+- 预警线：默认 ¥5600，即硬预算的 70%。
+- 项目、岗位和单任务预算作为预警与评审线，不自动硬终止；任务成本到 100% 时暂停并沿管理链逐级评审。
+- 模型和推理强度绑定员工，成本评审不得通过临时换模型规避。
+- BYOK 模型费用仍计入租户运营账本，但不进入平台收入。
+
+### 6.2 预留金额
+
+网关根据请求上限估算：
+
+```text
+reserved = max_input_tokens × input_price
+         + max_output_tokens × output_price
+         + safety_margin
+```
+
+`max_output_tokens` 不能超过模型上下文和预算可承担额度。缓存折扣和 reasoning token 按价目版本保守估算。
+
+### 6.3 原子预留
+
+```sql
+UPDATE budget_periods
+SET reserved_amount = reserved_amount + :amount
+WHERE tenant_id = :tenant
+  AND period = :period
+  AND committed_amount + reserved_amount + :amount <= hard_limit;
+```
+
+影响行数为 0 时返回 `429 BUDGET_HARD_LIMIT`，不调用 provider。
+
+- 预留默认有效期 10 分钟，长请求按 task lease 续期。
+- 请求完成或失败后释放预留，并按实际用量增加 committed。
+- 预留过期由后台任务释放，不能依赖客户端确认。
+- 多个预算层级必须全部通过，任一层不足即拒绝。
+
+### 6.4 硬限制边界
+
+平台能保证的是“不授权超过预算预留的调用”。Provider 实际计费与估算可能因 token 计费规则、供应商延迟或账单更正产生偏差，因此：
+
+- 单次请求设置输出上限和总超时。
+- 实际超过预留时记录 `budget_overrun` 事件并立即停止新调用。
+- 供应商账单差异通过更正条目处理，不修改原始用量。
+- 股东收到告警，并可通过升级队列调整预算或终止任务。
+
+### 6.5 预警与行动
+
+| 使用率 | 动作 |
+|---|---|
+| 70% | 生成预警事件和管家报告 |
+| 85% | 限制 benchmark、非关键 premium 调用 |
+| 100% | 拒绝新模型调用，允许已授权任务做清理和报告 |
+| 超过 100% | 生成 L3 告警和升级事项，冻结非必要任务 |
+
+## 7. 成本异常
+
+- 单任务成本超过岗位日均预算 3 倍：自动暂停并通知主控或授权经营岗位。
+- 同一模型短时间价格变化超过 20%：停止自动路由，要求重新评估。
+- 网关用量与控制面投影差异：进入对账队列。
+- 重复 source_event_id：去重并记录指标，不重复入账。
+- Butler 定时任务连续失败仍计费：在报告中单列异常项。
+
+## 8. 验收场景
+
+1. 两个并发请求同时竞争最后一份预算，只有一个获得预留。
+2. 预算达到硬线后，新调用返回 429 且 provider 无请求记录。
+3. 网关重复上报同一用量事件只生成一条账目。
+4. Runner 上报模型费用不会覆盖网关权威金额。
+5. 请求失败仍结算已发生的 provider 用量并释放预留。
+6. 轮换期间在途请求使用旧密钥，新请求使用新密钥。
+7. 删除模型后新任务无法路由，历史账本保持完整。
+8. A 租户模型故障不会路由到 B 租户。
+9. 管家和 benchmark 成本可在账本中单列。
+10. 预算预警、硬限制、对账差异均有可验证事件和审计记录。
+11. 本地模型超过单并发限制时排队，不产生隐式并发。
+12. Provider 流式中断后，已产生用量仍可结算，未完成工具调用不自动重放。
+13. OpenAI 请求进入 Anthropic 端点时返回 422，不发生协议转化。
+14. OpenAI 与 Anthropic 的工具调用、流式事件和错误结构分别保持原生形状。
+15. 任务中禁止自动跨模型、跨版本、跨推理强度和跨协议切换；换模型必须调岗或变更绑定。
+16. 运营平台可以下架 Provider 或模型，但不能读取租户密钥。
+17. Provider 目录重复或乱序同步不会覆盖更新版本。
+18. models.dev 每日同步失败保留最近有效快照。
+19. BYOK 自动预填 models.dev 已有字段。
+20. 缺失价格由用户补充并记录币种和单位。
+21. models.dev 新增同字段时自动覆盖手工值。
+22. 未定价字段不会按 0 结算。
+23. 每日消耗绑定请求发生时的价格快照。
+24. cheap/mid/premium 由目录数据自动计算。
+25. 档位变化不影响在途任务。
+26. 历史账目不会因目录更新而改写。
+
+## 9. 能力评估、本地模型与 Provider 韧性
+
+### 9.1 能力矩阵
+
+```text
+BenchmarkRun:
+  id, tenant_id, model_id, provider_model_id
+  suite_version, capability_domain
+  started_at, completed_at, status
+  score, cost, usage_event_ids, artifact_id
+```
+
+- 测试套件包含代码、推理、写作和成本域，每个套件有版本。
+- 模型版本、量化方式、上下文和提示模板不同视为不同评估对象。
+- 租户原始评测结果私有；SaaS 共享层只发布匿名聚合分数和适用条件。
+- 新岗位优先复用有效评估；模型或套件版本变化时才重测。
+- 评估失败或预算不足不会把模型标记为 `Ready`。
+
+### 9.2 本地模型并发
+
+- 本地档默认只有 1 个推理位。
+- 网关按租户公平排队，单请求设置等待超时和最大输出。
+- 排队期间不占用模型费用，只记录等待指标。
+- 超时后暂停并上报直接 Leader；不得自动回退到其他模型，调岗后由新员工按自身绑定重新执行。
+- 本地模型调用同样生成 usage、账本和审计事件。
+
+### 9.3 Provider 错误与流式语义
+
+| 情况 | 行为 |
+|---|---|
+| 连接失败且未开始生成 | 可重试，沿用同一幂等键 |
+| 429 | 遵循 Retry-After，受总超时和重试次数限制 |
+| 5xx | 指数退避，最多 2 次 |
+| 流式中断 | 结算已报告用量，返回明确错误，不自动重放工具调用 |
+| 工具调用参数不完整 | 不执行工具，交由 Agent 修复或终止 |
+| 内容策略拒绝 | 不重试，记录安全事件 |
+| Provider 持续失败 | 打开熔断器，只允许同模型重试或同版本端点切换，并上报直接 Leader |
+
+熔断器按 provider + 租户维度统计，避免一个租户的异常影响其他租户。错误响应保持对应协议的原生形状，并通过 `X-Regent-Request-Id` 响应头提供内部关联 ID；不把 Anthropic 错误转换为 OpenAI 错误，也不反向转换。
