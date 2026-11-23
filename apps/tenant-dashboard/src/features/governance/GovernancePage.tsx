@@ -23,6 +23,12 @@ export function GovernancePage() {
   const [delegate, setDelegate] = useState('Controller');
   const [scope, setScope] = useState('release.execute');
   const [expiresAt, setExpiresAt] = useState('');
+  const [contentRef, setContentRef] = useState('');
+  const [contentText, setContentText] = useState('');
+  const [appealReason, setAppealReason] = useState('');
+  const [incidentId, setIncidentId] = useState('');
+  const [evidenceText, setEvidenceText] = useState('');
+  const [verification, setVerification] = useState<Awaited<ReturnType<typeof api.verifyIncidentEvidence>> | null>(null);
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['governance'] });
 
   const registerTool = useMutation({
@@ -45,6 +51,11 @@ export function GovernancePage() {
   const contain = useMutation({ mutationFn: ({ id, action }: { id: string; action: string }) => api.containIncident(id, action), onSuccess: invalidate });
   const recover = useMutation({ mutationFn: (id: string) => api.recoverIncident(id, 'Service restored and evidence preserved'), onSuccess: invalidate });
   const close = useMutation({ mutationFn: (id: string) => api.closeIncident(id, 'Post-incident review completed'), onSuccess: invalidate });
+  const review = useMutation({ mutationFn: () => api.reviewContent(contentRef, contentText), onSuccess: async () => { setContentText(''); await invalidate(); } });
+  const appeal = useMutation({ mutationFn: (id: string) => api.appealContent(id, appealReason), onSuccess: async () => { setAppealReason(''); await invalidate(); } });
+  const resolveAppeal = useMutation({ mutationFn: ({ id, upheld }: { id: string; upheld: boolean }) => api.resolveContentAppeal(id, upheld), onSuccess: invalidate });
+  const sealEvidence = useMutation({ mutationFn: () => api.sealIncidentEvidence(incidentId, evidenceText), onSuccess: async () => { setEvidenceText(''); await invalidate(); } });
+  const verifyEvidence = useMutation({ mutationFn: () => api.verifyIncidentEvidence(incidentId), onSuccess: setVerification });
   const createDelegation = useMutation({
     mutationFn: () => api.createApprovalDelegation({
       id: crypto.randomUUID(), primaryApprover: primary, delegateApprover: delegate,
@@ -110,6 +121,33 @@ export function GovernancePage() {
             { id: 'scope', header: 'Scope', render: row => row.actionScope ?? '' },
             { id: 'expires', header: 'Expires', render: row => row.expiresAt ? new Date(row.expiresAt).toLocaleString() : '' }
           ]} />
+        </Card>
+      </Grid>
+      <Grid columns={2}>
+        <Card title="Content safety">
+          <FormField label="Content reference"><TextInput value={contentRef} onChange={setContentRef} /></FormField>
+          <FormField label="Content"><TextInput value={contentText} onChange={setContentText} multiline minRows={2} /></FormField>
+          <Button onClick={() => review.mutate()} disabled={!contentRef || !contentText} loading={review.isPending}>Review content</Button>
+          <DataTable rows={state?.contentFindings ?? []} getRowId={row => row.id ?? ''} columns={[
+            { id: 'ref', header: 'Content', render: row => row.contentRef ?? '' },
+            { id: 'category', header: 'Category', render: row => row.category ?? '' },
+            { id: 'status', header: 'Status', render: row => <StatusChip label={row.status ?? ''} tone={row.disposition === 'Block' ? 'error' : 'warning'} /> },
+            { id: 'actions', header: 'Actions', render: row => <Stack direction="row">
+              <Button tone="neutral" onClick={() => appeal.mutate(row.id ?? '')} disabled={row.status !== 'Open'}>Appeal</Button>
+              <Button tone="secondary" onClick={() => resolveAppeal.mutate({ id: row.id ?? '', upheld: true })} disabled={row.status !== 'UnderReview'}>Uphold</Button>
+              <Button tone="secondary" onClick={() => resolveAppeal.mutate({ id: row.id ?? '', upheld: false })} disabled={row.status !== 'UnderReview'}>Overturn</Button>
+            </Stack> }
+          ]} />
+          <FormField label="Appeal reason"><TextInput value={appealReason} onChange={setAppealReason} /></FormField>
+        </Card>
+        <Card title="Incident evidence">
+          <Select label="Incident" value={incidentId} onChange={setIncidentId} options={[{ value: '', label: 'Select incident' }, ...(state?.incidents ?? []).map(item => ({ value: item.id ?? '', label: item.title ?? '' }))]} />
+          <FormField label="Evidence"><TextInput value={evidenceText} onChange={setEvidenceText} multiline minRows={2} /></FormField>
+          <Stack direction="row">
+            <Button onClick={() => sealEvidence.mutate()} disabled={!incidentId || !evidenceText} loading={sealEvidence.isPending}>Sign evidence</Button>
+            <Button tone="secondary" onClick={() => verifyEvidence.mutate()} disabled={!incidentId} loading={verifyEvidence.isPending}>Verify evidence</Button>
+          </Stack>
+          {verification ? <StatusChip label={verification.message ?? ''} tone={verification.valid ? 'success' : 'error'} /> : null}
         </Card>
       </Grid>
     </Stack>
