@@ -26,11 +26,43 @@ public sealed class ProjectService(RegentDbContext db, ITenantContext tenant, Ti
         var record = new ProjectRecord
         {
             Id = Guid.NewGuid(), TenantId = tenant.TenantId.Value, Name = input.Name, Mission = input.Mission,
-            Owner = input.Owner, Stage = ProjectStage.BriefReady, Health = ProjectHealth.PendingAcceptance,
+            Owner = input.Owner, Stage = ProjectStage.Proposed, Health = ProjectHealth.PendingAcceptance,
             TargetAt = clock.GetUtcNow().AddDays(input.TargetDays), BudgetMinor = input.BudgetMinor,
             Currency = input.Currency, UpdatedAt = clock.GetUtcNow()
         };
         db.Projects.Add(record);
+        await db.SaveChangesAsync(cancellationToken);
+        return Mappings.ToDetail(record, Freshness.Live);
+    }
+
+    public async Task<ProjectDetail?> TransitionAsync(ProjectId id, ProjectTransitionDto transition,
+        CancellationToken cancellationToken)
+    {
+        var record = await db.Projects.SingleOrDefaultAsync(x => x.TenantId == tenant.TenantId.Value && x.Id == id.Value, cancellationToken);
+        if (record is null) return null;
+        var allowed = record.Stage switch
+        {
+            ProjectStage.Proposed => [ProjectStage.Approved, ProjectStage.Cancelled],
+            ProjectStage.Approved => [ProjectStage.Active, ProjectStage.Cancelled],
+            ProjectStage.Active => [ProjectStage.Paused, ProjectStage.Completed, ProjectStage.Cancelled],
+            ProjectStage.Paused => [ProjectStage.Active, ProjectStage.Cancelled],
+            ProjectStage.BriefReady => [ProjectStage.Approved, ProjectStage.Cancelled],
+            ProjectStage.Building or ProjectStage.Verifying or ProjectStage.Releasing => [ProjectStage.Live, ProjectStage.Cancelled],
+            ProjectStage.Live or ProjectStage.Iterating => [ProjectStage.Completed, ProjectStage.Cancelled],
+            _ => Array.Empty<ProjectStage>()
+        };
+        if (!allowed.Contains(transition.Stage)) throw new InvalidOperationException("Project state transition is not allowed.");
+        if (transition.Stage is ProjectStage.Completed or ProjectStage.Cancelled && string.IsNullOrWhiteSpace(transition.Evidence))
+            throw new InvalidOperationException("Completion or cancellation requires evidence.");
+        record.Stage = transition.Stage;
+        record.Health = transition.Stage switch
+        {
+            ProjectStage.Completed or ProjectStage.Live => ProjectHealth.Live,
+            ProjectStage.Cancelled => ProjectHealth.Failed,
+            ProjectStage.Paused => ProjectHealth.AtRisk,
+            _ => ProjectHealth.OnTrack
+        };
+        record.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
         return Mappings.ToDetail(record, Freshness.Live);
     }

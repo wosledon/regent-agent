@@ -85,6 +85,8 @@ export const api = {
   projects: () => request<Schema['ProjectSummary'][]>('/v1/projects'),
   createProject: (body: Schema['CreateProjectDto']) => post<Schema['ProjectDetail']>('/v1/projects', body),
   project: (id: string) => request<Schema['ProjectDetail']>(`/v1/projects/${id}`),
+  transitionProject: (id: string, stage: string, evidence: string) =>
+    post<Schema['ProjectDetail']>(`/v1/projects/${id}/transitions`, { stage, evidence }),
   employees: () => request<Schema['EmployeeSummary'][]>('/v1/employees'),
   employeeTimeline: (id: string) => request<Schema['EmployeeTimeline']>(`/v1/employees/${id}/timeline`),
   createApproval: (body: Schema['CreateApprovalDto']) => post<Schema['ApprovalDto']>('/v1/approvals', body),

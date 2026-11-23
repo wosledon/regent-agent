@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { Card, DataTable, EmptyState, ErrorState, FreshnessBadge, LoadingState, PageHeader, SemanticLink, Stack, StatusChip } from '@regent/ui-shared';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Button, Card, DataTable, EmptyState, ErrorState, FormField, FreshnessBadge, LoadingState, PageHeader, Select, SemanticLink, Stack, StatusChip, TextInput } from '@regent/ui-shared';
 import { api } from '../../lib/api-client/api';
 import type { components } from '../../lib/api-client/schema';
 
@@ -8,11 +9,25 @@ type ProjectDetail = components['schemas']['ProjectDetail'];
 
 export function ProjectDetailPage() {
   const { projectId = '' } = useParams();
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ['projects', projectId], queryFn: () => api.project(projectId) });
+  const [stage, setStage] = useState('Approved');
+  const [evidence, setEvidence] = useState('');
+  const transition = useMutation({
+    mutationFn: () => api.transitionProject(projectId, stage, evidence),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['projects', projectId] })
+  });
   if (isLoading) return <LoadingState />;
   if (error) return <ErrorState message={error.message} />;
   if (!data) return <EmptyState title="Project not found" description="Return to the project list and choose another project." />;
-  return <ProjectDetailView project={data} />;
+  return <Stack spacing={3}>
+    <Card title="Project state">
+      <Select label="Stage" value={stage} onChange={setStage} options={['Proposed', 'Approved', 'Active', 'Paused', 'Completed', 'Cancelled'].map(value => ({ value, label: value }))} />
+      <FormField label="Evidence"><TextInput value={evidence} onChange={setEvidence} multiline minRows={2} /></FormField>
+      <Button onClick={() => transition.mutate()} loading={transition.isPending}>Transition</Button>
+    </Card>
+    <ProjectDetailView project={data} />
+  </Stack>;
 }
 
 function ProjectDetailView({ project }: { project: ProjectDetail }) {

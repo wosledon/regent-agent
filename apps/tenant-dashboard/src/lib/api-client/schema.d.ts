@@ -1986,6 +1986,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{id}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProjectTransitionDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectDetail"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/employees": {
         parameters: {
             query?: never;
@@ -9048,7 +9089,7 @@ export interface components {
             acceptanceRule: string;
         };
         /** @enum {unknown} */
-        ProjectStage: "brief_ready" | "approved" | "building" | "verifying" | "releasing" | "live" | "iterating" | "terminated";
+        ProjectStage: "brief_ready" | "approved" | "building" | "verifying" | "releasing" | "live" | "iterating" | "terminated" | "proposed" | "active" | "paused" | "completed" | "cancelled";
         ProjectSummary: {
             /** Format: uuid */
             id: string;
@@ -9077,6 +9118,10 @@ export interface components {
             /** Format: int64 */
             costMinor: number | string;
             currency: string;
+        };
+        ProjectTransitionDto: {
+            stage: components["schemas"]["ProjectStage"];
+            evidence: string;
         };
         PromptBundle: {
             /** Format: uuid */

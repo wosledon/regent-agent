@@ -9,7 +9,12 @@ public enum ProjectStage
     Releasing,
     Live,
     Iterating,
-    Terminated
+    Terminated,
+    Proposed,
+    Active,
+    Paused,
+    Completed,
+    Cancelled
 }
 
 public enum ProjectHealth

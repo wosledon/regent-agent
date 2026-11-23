@@ -4,6 +4,7 @@ using RegentAgent.Contracts.Primitives;
 namespace RegentAgent.Contracts.Projects;
 
 public sealed record CreateProjectDto(string Name, string Owner, string Mission, int TargetDays, long BudgetMinor, string Currency);
+public sealed record ProjectTransitionDto(ProjectStage Stage, string Evidence);
 
 public sealed record ProjectSummary(
     Guid Id,

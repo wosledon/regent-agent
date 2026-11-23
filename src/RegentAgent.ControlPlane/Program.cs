@@ -823,6 +823,13 @@ policyApi.MapGet("/capacity/admission", async (int queueDepth, HttpContext conte
     CancellationToken cancellationToken) => Results.Ok(await service.AdmitQueueItemAsync(Guid.Parse(CurrentTenant(context)), queueDepth, cancellationToken)))
     .Produces<CapacityDecision>().WithTags("Runtime Policy");
 
+api.MapPost("/projects/{id:guid}/transitions", async (Guid id, ProjectTransitionDto transition,
+    ProjectService service, CancellationToken cancellationToken) =>
+{
+    var project = await service.TransitionAsync(new ProjectId(id), transition, cancellationToken);
+    return project is null ? Results.NotFound() : Results.Ok(project);
+}).Produces<ProjectDetail>().WithTags("Projects");
+
 api.MapGet("/employees", async (EmployeeService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(cancellationToken)))
     .Produces<IReadOnlyList<EmployeeSummary>>(StatusCodes.Status200OK).WithTags("Organization");

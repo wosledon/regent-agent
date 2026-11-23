@@ -1570,6 +1570,46 @@
         }
       }
     },
+    "/v1/projects/{id}/transitions": {
+      "post": {
+        "tags": [
+          "Projects"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProjectTransitionDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/employees": {
       "get": {
         "tags": [
@@ -10797,7 +10837,12 @@
           "releasing",
           "live",
           "iterating",
-          "terminated"
+          "terminated",
+          "proposed",
+          "active",
+          "paused",
+          "completed",
+          "cancelled"
         ]
       },
       "ProjectSummary": {
@@ -10905,6 +10950,21 @@
             "format": "int64"
           },
           "currency": {
+            "type": "string"
+          }
+        }
+      },
+      "ProjectTransitionDto": {
+        "required": [
+          "stage",
+          "evidence"
+        ],
+        "type": "object",
+        "properties": {
+          "stage": {
+            "$ref": "#/components/schemas/ProjectStage"
+          },
+          "evidence": {
             "type": "string"
           }
         }
