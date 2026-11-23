@@ -46,9 +46,9 @@ flowchart TB
     end
 
     subgraph Frontends["用户界面"]
-        TenantDashboard["Tenant Dashboard<br/>组织 / 项目 / 预算 / 治理 / 通知"]
-        OpsConsole["Ops Console<br/>租户 / 资源池 / 事件 / 支持"]
-        UIShared["UI.Shared<br/>仅共享组件，不共享会话"]
+        TenantDashboard["Tenant Dashboard<br/>React 19 + MUI + SignalR"]
+        OpsConsole["Ops Console<br/>React 19 + MUI + SignalR"]
+        UIShared["UI.Shared<br/>TypeScript 包，不共享会话"]
         TenantDashboard -.-> UIShared
         OpsConsole -.-> UIShared
     end
@@ -118,7 +118,7 @@ flowchart TB
         GatewayAPI["原生协议端点<br/>/v1/chat/completions<br/>/v1/messages"]
         PolicyBudget["鉴权 / 合规 / 预算预留 / 硬限制"]
         Metering["计量 / 用量事件"]
-        KeyVault["BYOK 密钥库<br/>模型密钥唯一持有者"]
+        KeyVault["BYOK 密钥服务<br/>信封加密 / 轮换 / 唯一解密方"]
         NativeAdapters["原生 Provider 插件<br/>不做协议转换"]
         ModelCatalog["models.dev 快照<br/>价格 / 能力 / 档位"]
 
@@ -149,6 +149,7 @@ flowchart TB
         RustFS[("RustFS<br/>快照 / 成果 / 报告 / 归档")]
         LocalWorkspace[("Runner 本地或容器目录<br/>活动 worktree / 临时缓存")]
         SealedEval[("隔离评测存储<br/>holdout / 答案 / Judge 材料")]
+        KeyVaultPG[("Postgres keyvault schema<br/>密文 / wrapped DEK / 版本")]
         BackupStore[("可选加密备份<br/>默认关闭")]
     end
 
@@ -196,7 +197,8 @@ flowchart TB
 
     PG -.-> BackupStore
     RustFS -.-> BackupStore
-    KeyVault -.-> BackupStore
+    KeyVault -->|独立 Gateway 角色| KeyVaultPG
+    KeyVaultPG -.-> BackupStore
     OpsBackup --> BackupStore
 ```
 
@@ -294,7 +296,7 @@ sequenceDiagram
     participant Caller as Runner / Butler / Judge
     participant GW as AI Gateway
     participant Policy as 鉴权 / 合规 / 预算
-    participant KV as BYOK KeyVault
+    participant KV as Postgres keyvault schema
     participant Provider as OpenAI / Anthropic
     participant Ledger as ControlPlane 钱账
     participant Cost as 成本治理
@@ -318,6 +320,7 @@ sequenceDiagram
 
 - OpenAI 使用 `/v1/chat/completions`，Anthropic 使用 `/v1/messages`。
 - 不做 OpenAI 与 Anthropic 协议转换，不支持本地 GPU 或 Ollama。
+- 模型密钥密文存 Postgres `keyvault` schema，主密钥不进入数据库。
 - 控制面、Runner 和前端不能读取模型密钥。
 - 模型费用以 Gateway 为权威源，Runner 只上报工具用量。
 - 金额只保存原币和币种，不同币种不直接相加。
@@ -528,7 +531,7 @@ flowchart TB
 | 账户与登录身份 | ControlPlane 身份服务 | GitHub 已验证邮箱可合并；OIDC 使用 issuer + sub |
 | 公司组织、项目、工作项、消息 | ControlPlane / Postgres | Runner 只读缓存，不自行改写 |
 | 员工任务身份 | ControlPlane assignment token | 与 Runner 部署身份分离 |
-| 模型密钥 | AI Gateway KeyVault | 控制面、Runner、前端和运营人员不可读取 |
+| 模型密钥 | Gateway / Postgres `keyvault` schema | 密文仅 Gateway 可解密，主密钥不进入数据库 |
 | 模型协议请求与响应 | OpenAI / Anthropic 原生端点 | 网关不转换协议，不支持本地模型 |
 | 模型用量与成本 | AI Gateway 用量事件 | Runner 不重复上报模型成本 |
 | 工具用量 | Runner 用量事件 | 控制面入账并与模型成本分开 |
@@ -577,4 +580,5 @@ flowchart TB
 - [x] Judge 是独立员工运行时，禁止自评和上下文共享。
 - [x] 密封集、污染检测、校准和统计门槛可复现。
 - [x] 通知只走站内，SignalR 不是唯一事实来源。
+- [x] 前端使用 TypeScript SPA + SignalR，不使用 Blazor。
 - [x] 自托管从 Tag 源码构建，不发布镜像或自动更新。

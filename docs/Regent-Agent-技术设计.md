@@ -6,7 +6,7 @@
 - 项目名称：**Regent-Agent**（摄政）
 - 定位：描述自主 AI 公司的架构、运行时、接口、数据、安全与交付实现
 
-> 产品目标、范围与验收标准以 [产品需求文档（PRD）](./Regent-Agent-PRD.md) 为准。本文保留架构总览和原始技术决策；可实施的契约、状态机、故障恢复、计量预算、安全治理和交付闭环见 [详细设计索引](./design/README.md)。总览与详细设计冲突时，以详细设计为准。
+> 产品目标、范围与验收标准以 [产品需求文档（PRD）](./Regent-Agent-PRD.md) 为准。本文保留架构总览和原始技术决策；可实施的契约、状态机、故障恢复、计量预算、安全治理和交付闭环见 [详细设计索引](./design/README.md)。后端项目、技术栈、术语与依赖规则见 [后端技术文档](./Regent-Agent-后端技术文档.md)；前端技术栈、设计和组件见 [前端技术文档](./Regent-Agent-前端技术文档.md)。总览与详细设计冲突时，以详细设计为准。
 
 ---
 
@@ -106,7 +106,7 @@ Regent = 摄政者：**君主（股东）长期缺席，摄政者代行统治**�
 | 公司内部 | 动态岗位与能力 | 岗位名称和职责由主控规划；CEO、CTO、HRBP 等只是可选称呼 |
 | 平台监控 | **Sentinel**（哨兵） | 纯程序算法，不调用 LLM、不占编制、不做经营决策 |
 
-命名空间与工程：`RegentAgent.*`（RegentAgent.Contracts / ControlPlane / Gateway / Providers / Agents / Runner / Sandbox / Operations / TenantDashboard / OpsConsole / UI.Shared / Storage），solution 为 `RegentAgent.slnx`。
+命名空间与工程：后端使用 `RegentAgent.*` 和 `RegentAgent.slnx`；TenantDashboard、OpsConsole 和 UI.Shared 使用独立 TypeScript workspace，不进入 .NET solution。
 
 ---
 
@@ -527,7 +527,7 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
 | 记忆系统 | 个人/组织/知识库分层；Postgres + pgvector + 全文检索 + 关系多跳；来源、版本、置信度、衰减、遗忘和删除 |
 | 公司志/审计 | 不可变事件流：每次决策、开销、升降职；日报/周报素材 |
 | 哨兵（Sentinel） | 纯程序算法：机器指标、URL/证书、Runner 心跳、预算燃烧速率；不调用 LLM、不占编制；L0 记录 / L1 日报 / L2 告警+唤醒主控 / L3 通知 Boss+预定义预案 |
-| 仪表盘 | Blazor Server + SignalR：组织架构实时图、双账本、招聘漏斗、总线流量、升级队列、模型池配置（BYOK，页面属控制面、服务端直连网关）、**管家对话面板** |
+| 仪表盘 | TypeScript SPA + SignalR：组织架构实时图、双账本、招聘漏斗、总线流量、升级队列、模型池配置（BYOK，页面属控制面、服务端直连网关）、**管家对话面板** |
 | 管家（Butler） | 控制面内置只读助手（§3.1.1）：经本模块暴露的 MCP 只读工具面（租户作用域）访问数据，模型调用经网关；持任务表（租户可定义定时报告与事件触发通知）；非公司员工，不占编制、不被调度；工具清单即安全边界 |
 | 备份 | 可选 BackupProfile：全量、PITR、RustFS、密钥库、异地和演练独立开关；默认关闭，启用后计算有效 RPO/RTO |
 
@@ -535,7 +535,7 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
 
 | 模块 | 内容 |
 |---|---|
-| 密钥托管 | 加密存储（主密钥在环境变量），轮换端点，**不落明文日志** |
+| 密钥托管 | Postgres `keyvault` schema 保存信封加密密文；主密钥在环境变量或外部密钥系统，轮换端点，**不落明文日志** |
 | Provider 插件 | OpenAI 与 Anthropic 分别实现原生协议插件。禁止 OpenAI↔Anthropic 请求或响应转化 |
 | 鉴权授权 | 验 JWT + 执行模型档位策略（如"测试岗禁用 premium"） |
 | 代理转发 | 注入 key 调 provider，回传响应 |
@@ -578,7 +578,7 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
 - 网关按 assignment token 或 control service token 解析租户 → 取该租户的密钥；不信任请求体中的 tenant_id
 - 身份、claims、密钥轮换和权限矩阵见 [01 基础契约与状态模型](./design/01-contracts-and-state.md)
 
-**BYOK 模型网关**：每租户独立密钥库（信封加密）；计量按租户入各自账本；能力矩阵的基准评测数据是 SaaS 级共享资产——集体评测知识，构成产品价值之一。
+**BYOK 模型网关**：每租户密钥密文存储在 Postgres `keyvault` schema，使用独立 Gateway 角色和信封加密，主密钥不进入数据库；计量按租户入各自账本；能力矩阵的基准评测数据是 SaaS 级共享资产——集体评测知识，构成产品价值之一。
 
 **配额与套餐**：免费档 1 公司 ≤5 员工；付费档扩编制、独占 Runner、优先调度。模型费用经 BYOK 直达租户自己的 provider，**平台不经手模型费**，只收订阅费——计费简单、责任清晰。租户账户、套餐、配额和订阅以运营平台为权威源，通过事件同步到控制面。
 
@@ -598,7 +598,7 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
 - 容器：不同租户的员工容器网络分段、卷不共享
 - 密钥：租户密钥库严格分离，无跨租户取用路径
 - 调度：公平分享，单租户满编不得饿死其他租户
-- 启用备份时可按租户分区恢复，密钥库与主密钥分离保管；数据导出按 Q-033 延后
+- 启用备份时可按租户分区恢复，Postgres `keyvault` schema 与主密钥分离保管；数据导出按 Q-033 延后
 
 **构建策略**：`tenant_id` 从第一个 migration 进入所有租户业务表，系统级实体使用显式 system scope；认证从第一天就是租户作用域——"单租户"只是第一个租户。SaaS 外壳（注册、BYOK 向导、套餐计费）是增量层而非重写，置于首个自主闭环跑通之后（§12 阶段 8）。
 
@@ -1195,8 +1195,8 @@ Position / CapabilityGrant
 | 记忆 | Postgres + vec 扩展起步，接口预留 Qdrant；租户过滤与来源标记必选 |
 | 工作区/成果 | 活动工作区使用 Runner 本地或容器隔离目录；快照和成果统一 RustFS S3 接口 |
 | 沙箱 | Docker.DotNet |
-| 体验官 | Playwright for .NET |
-| 前端 | Tenant Dashboard 与 Ops Console 均为 Blazor Server + SignalR；共享 UI.Shared，不共享会话和权限 |
+| 体验官 | Playwright（TypeScript/JavaScript） |
+| 前端 | Tenant Dashboard 与 Ops Console 均为 React 19 + TypeScript + MUI + SignalR；共享 TypeScript UI.Shared，不共享会话和权限 |
 | 韧性 | Polly（重试/退避/熔断） |
 | 可观测 | OpenTelemetry + off/local/otlp/elastic Profile；Elastic Stack 可选 |
 | 测试 | xUnit + 真实 Postgres/RustFS + Provider 契约 + Playwright + 混沌/安全/升级测试 |
@@ -1211,26 +1211,28 @@ Position / CapabilityGrant
 ## 11. 项目结构
 
 ```
-RegentAgent.slnx
-├─ RegentAgent.Contracts     # DTO / 事件 / API 契约 / 状态机
-├─ RegentAgent.ControlPlane  # ASP.NET：租户注册表、双账本、消息总线、调度、升级队列、哨兵、管家
-├─ RegentAgent.Gateway       # 模型网关：密钥托管、鉴权、provider 路由、计量（OpenAI/Anthropic 原生 API）
-├─ RegentAgent.Providers     # provider 插件：OpenAI/Anthropic 原生协议实现
-├─ RegentAgent.Agents        # MAF 粘合：Agent 工厂、工具实现、技能包（被 Runner 引用）
-├─ RegentAgent.Workflows    # 工作流定义、版本、提案审查、运行实例与度量
-├─ RegentAgent.Memory       # 分层记忆、知识库、混合召回、关系多跳、遗忘与索引维护
-├─ RegentAgent.Performance  # KPI、绩效评估、自驱动提案、组织动作、申诉与审计
-├─ RegentAgent.Projects     # 项目、需求、任务、缺陷、讨论决策、对抗评审与自动认领
-├─ RegentAgent.Communication # 岗位标签、通信画像、管理链/专业链、穿透路由与项目覆盖
-├─ RegentAgent.Chat         # 私人/群组聊天、@、委派交接、打断、加权召回与渐进披露
-├─ RegentAgent.Evaluation   # 评测集、密封数据、EvaluationRun、回归与质量门槛
-├─ RegentAgent.Runner        # Generic Host：主控/员工宿主、任务租约、沙箱编排、重任务队列
-├─ RegentAgent.Sandbox       # Docker.DotNet 封装：镜像模板、配额、启停、容器安全基线
-├─ RegentAgent.Operations    # 提供方运营 API：租户账户、套餐、资源池、事件、备份、计费、支持授权
-├─ RegentAgent.Storage       # RustFS S3 客户端、对象元数据、快照与上传状态机
-├─ RegentAgent.TenantDashboard # 租户 Blazor Server + SignalR
-├─ RegentAgent.OpsConsole    # 提供方运营 Blazor Server + SignalR
-└─ RegentAgent.UI.Shared     # 共享设计系统与基础组件，不共享会话和业务权限
+RegentAgent.slnx                     # 16 个后端 .NET 项目
+├─ RegentAgent.Contracts
+├─ RegentAgent.ControlPlane
+├─ RegentAgent.Gateway
+├─ RegentAgent.Providers
+├─ RegentAgent.Agents
+├─ RegentAgent.Workflows
+├─ RegentAgent.Memory
+├─ RegentAgent.Performance
+├─ RegentAgent.Projects
+├─ RegentAgent.Communication
+├─ RegentAgent.Chat
+├─ RegentAgent.Evaluation
+├─ RegentAgent.Runner
+├─ RegentAgent.Sandbox
+├─ RegentAgent.Operations
+└─ RegentAgent.Storage
+
+frontend/                            # 独立 TypeScript workspace
+├─ apps/tenant-dashboard             # React 19 + TypeScript + MUI + SignalR
+├─ apps/ops-console                  # React 19 + TypeScript + MUI + SignalR
+└─ packages/ui-shared                # TypeScript UI 包，不共享会话和权限
 ```
 
 单机部署：Docker Compose 运行 Postgres、RustFS、四个服务和两个前端入口，由 systemd 监管；Elasticsearch、Kibana、APM Server 和 Collector 位于可选 Compose Profile，仅 elastic Profile 启动。镜像按 digest 固定，前端保持独立认证和授权。
@@ -1273,7 +1275,7 @@ RegentAgent.slnx
 | 管家定时任务 | 租户可定义，默认每日用户设置时间（未设置时默认 09:00）的预算报告 | 只读取数 → 网关生成 → 投递通知中心；事件触发：升级创建 / 破预警线（§3.1.1） |
 | 周报 / 组织复盘 | 每周一 | 产出考核、模型迁移决策、编制调整提案 |
 | 预算审查 | 每日 + 破预警线即时 | 燃烧速率进哨兵监控 |
-| 备份快照 | 每日 | 库 + 注册表 + 工位清单 + 网关密钥库（加密） |
+| 备份快照 | 每日（启用时） | 库 + 注册表 + 工位清单 + Postgres `keyvault` schema（加密） |
 
 设计原则：**公司 7×24 运转，但员工不是 7×24 醒着。** 常驻的只有控制面、网关、Runner 宿主和当值主控；其余员工和岗位任务事件驱动。自主性体现在"有事时立刻在"，不是"没事时反复醒"。
 

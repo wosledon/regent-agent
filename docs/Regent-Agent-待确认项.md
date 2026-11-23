@@ -649,7 +649,7 @@ ClaimScore =
 
 - 单元测试使用 xUnit，集成测试使用真实 Postgres 和 RustFS。
 - Provider 使用原生契约测试，CI 不依赖真实 Provider。
-- E2E 覆盖完整交付闭环，UI 使用 Playwright for .NET。
+- E2E 覆盖完整交付闭环，UI 使用 Playwright（TypeScript/JavaScript）。
 - 整体覆盖率 ≥80%，安全、预算、账本、RLS 和状态机 ≥90%。
 - MVP 容量基线为 20 员工、40 并行任务、100 任务/小时、1000 消息/小时。
 - 故障、混沌、安全、升级和恢复测试进入发布门禁。
@@ -771,6 +771,7 @@ ClaimScore =
 ### 27.3 存储与删除
 
 - Restricted 字段和 RustFS 对象加密，对象键和索引不包含 PII。
+- Gateway 模型密钥密文、包装数据密钥和版本元数据存储在 Postgres `keyvault` schema，使用信封加密和独立 Gateway 角色；主密钥不进入数据库。
 - 向量、全文、图、缓存和派生摘要只存脱敏内容。
 - 删除通过影响图传播到 Postgres、RustFS、索引、缓存、遥测副本和令牌映射。
 - 法律保留期间禁止清除，备份按保留期到期处理并输出删除证明。

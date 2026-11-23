@@ -1222,6 +1222,8 @@ MVP 退出条件：
 | BR-163 | Judge 每版本首次使用前必须由两名独立人工盲评至少 100 条或 20% 案例，一致率 ≥85%、加权 κ ≥0.70，并每月抽检。 |
 | BR-164 | 最小样本为核心 100、安全 50、单维度 30、canary 20；每案例固定 seed 运行 3 次，核心和安全 3/3，其他至少 2/3，整体和维度使用 Wilson/McNemar 门槛。 |
 | BR-165 | 评测结果分为 Approved、Rejected、Quarantined、Inconclusive；安全失败立即隔离，复测包含失败案例 +20% 相邻回归且安全集全量，失败不自动换模型或处罚员工。 |
+| BR-166 | Gateway 的模型密钥密文、包装数据密钥和版本元数据必须存储在 Postgres `keyvault` schema，使用信封加密和独立 Gateway 数据库角色；主密钥不得进入数据库。 |
+| BR-167 | 前端必须使用 React 19、TypeScript 和 MUI（Material Design），实时通信用 SignalR TypeScript 客户端；不使用 Blazor、Razor 或 C# 前端。 |
 
 ## 9. 非功能需求
 

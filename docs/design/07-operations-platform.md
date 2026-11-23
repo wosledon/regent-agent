@@ -57,7 +57,7 @@ Regent-Agent 分为四个逻辑部分：
 | 租户账户、套餐、配额、订阅 | Operations DB | 本系统权威数据 |
 | 公司、章程、组织、任务、项目 | ControlPlane | 内部 Ops API，默认聚合或脱敏 |
 | 租户模型元数据 | ControlPlane | 内部 Ops API |
-| 模型密钥与密钥版本 | Gateway | 只获取 key_ref、状态和版本，不获取密钥 |
+| 模型密钥与密钥版本 | Gateway / Postgres `keyvault` schema | 只获取 key_ref、状态和版本，不获取密文或主密钥 |
 | 模型与工具用量 | Gateway / Runner | 聚合事件和账本投影 |
 | Runner 容量与健康 | Runner + ControlPlane | 指标和注册信息 |
 | 部署版本、镜像、配置策略 | Operations DB | 本系统权威数据 |
@@ -206,7 +206,7 @@ Pending -> Active -> Suspended -> Active
 - 备份作业记录组件、快照、哈希、加密状态和 35 天保留期。
 - 恢复需要审批，并按租户或全量执行；未配置时返回 not_configured。
 - 恢复后执行一致性校验和可选演练报告。
-- 密钥库由网关导出密文，主密钥分离保管。
+- 密钥库密文和包装数据密钥存 Postgres `keyvault` schema，由网关备份，主密钥分离保管。
 
 ### 8.5 计费与对账
 

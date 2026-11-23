@@ -2,7 +2,7 @@
 
 - 版本：v0.1（待评审）
 - 范围：BackupProfile、组件开关、有效 RPO/RTO、异地副本、恢复审批和可选演练
-- 对应需求：FR-073、BR-100、BR-101、BR-102
+- 对应需求：FR-073、BR-100、BR-101、BR-102、BR-166
 - 对应缺口：G-44
 
 ## 1. 优先级与原则
@@ -45,7 +45,7 @@ version
 | postgres_full | enabled | 每日一致性快照 |
 | postgres_pitr | enabled + postgres_full | WAL/PITR |
 | rustfs | enabled | 对象版本、清单和快照 |
-| keyvault | enabled | 加密密钥库备份 |
+| keyvault | enabled | Postgres `keyvault` schema 的密文和包装数据密钥备份 |
 | offsite | 至少一个本地备份开关 | 异地复制 |
 | restore_drills | 至少一个可恢复组件 | 恢复演练 |
 
@@ -91,7 +91,7 @@ version
 - Postgres 业务库和运营库。
 - WAL/PITR 日志。
 - RustFS 对象清单、版本和快照。
-- 网关加密密钥库。
+- Postgres `keyvault` schema 的加密密钥库。
 - ReleaseManifest、镜像 digest、Schema 和配置版本。
 - 审计检查点、签名和锚定状态。
 
@@ -102,7 +102,7 @@ Runner 本地工作区不备份，从 RustFS 快照恢复。
 - Postgres 全量默认每日一次。
 - WAL 连续归档。
 - RustFS 每日清单和版本快照。
-- 密钥库每次变更后备份，每日再快照。
+- `keyvault` schema 每次变更后备份，每日再快照；主密钥单独保管。
 - 配置和 ReleaseManifest 每次发布生成。
 - 滚动备份最长 35 天。
 - 长期保留由 Q-031 归档承担。

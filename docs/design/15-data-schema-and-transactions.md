@@ -2,7 +2,7 @@
 
 - 版本：v0.1（待评审）
 - 范围：Postgres Schema、RLS、RustFS、本地工作区、事务、Outbox/Saga、分区和状态类型
-- 对应需求：FR-057、BR-050、BR-051、BR-052
+- 对应需求：FR-057、BR-050、BR-051、BR-052、BR-166
 - 对应缺口：G-05、G-06、G-07、G-09、G-16
 
 ## 1. 存储职责
@@ -26,12 +26,15 @@ communication 会话、消息、委派、交接
 performance  KPI、评审、绩效动作、人类事后审查、工作台账
 dashboard    只读卡片投影、项目健康、行动中心
 models       模型绑定、目录、预算、用量、账本
+keyvault     Gateway 加密模型密钥、包装数据密钥、版本元数据
 evaluation   评测集、密封数据、评测运行
 platform     模型目录、运营配置
 audit        审计、Outbox、Inbox、幂等记录
 ```
 
 Schema 是模块代码边界，不是租户隔离边界。运营数据使用独立权限和访问路径。
+
+`keyvault` schema 使用 Gateway 独立数据库角色；ControlPlane、Runner、Operations 和前端角色无访问权限。该 schema 保存信封加密后的 Provider 密钥、包装数据密钥和版本元数据，主密钥不进入 Postgres。`keyvault` 表同样启用 `tenant_id` 和 RLS。
 
 ## 3. 租户隔离与 RLS
 
@@ -66,6 +69,7 @@ RLS 与复合约束必须由 Postgres 集成测试验证，SQLite 测试不能�
 | 项目交付 | `projects`、`requirements`、`tasks`、`defects`、`reviews`、`decisions` |
 | 协作容量 | `wip_slots`、`work_ledger`、`conversations`、`messages` |
 | 模型财务 | `model_bindings`、`budget_reservations`、`llm_usage`、`ledger_entries` |
+| Gateway 密钥库 | `model_keys`、`key_versions`、`wrapped_data_keys` |
 | 成本治理 | `budget_envelopes`、`budget_carryovers`、`cost_allocation_rules`、`cost_allocation_results`、`cost_anomalies`、`reconciliation_cases` |
 | 通知 | `notifications`、`notification_deliveries`、`notification_preferences`、`notification_suppressions` |
 | 容量治理 | `capacity_policies`、`queue_limits`、`capacity_reports` |

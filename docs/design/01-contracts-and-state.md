@@ -447,6 +447,7 @@ ToolInvocation:
 | Artifact | id、tenant_id、project_id、task_id、kind、object_key、hash、size、upload_state | Ready 对象不可覆盖 |
 | ObjectUpload | id、tenant_id、artifact_id、object_key、checksum、state、attempts | PendingUpload 到 Ready 显式转换 |
 | Model | id、tenant_id、provider、tier、key_ref、price_version、state | key_ref 不包含密钥内容 |
+| ModelKeyRecord | key_ref、tenant_id、provider、model_id、key_version、encrypted_key、wrapped_data_key、state | Postgres keyvault schema 密文记录 |
 | UsageEvent | id、tenant_id、source、source_event_id、task_id、amount | `(source, source_event_id)` 唯一 |
 | LedgerEntry | id、tenant_id、usage_event_id、account、amount、currency、cost_dimensions | 只增不改；更正用新条目 |
 | CostAllocationRule | id、tenant_id、source_cost_center、targets、weights、version、approval_ref | 权重合计 100%，分摊不新增费用 |
@@ -1129,6 +1130,8 @@ Outbox 发布器可以重试，消费者按 `event_id` 去重。事件顺序只�
 494. 核心、安全、单维度和 canary 最小样本分别为 100、50、30、20；每案例固定 seed 运行 3 次，核心和安全必须 3/3。
 495. 整体和单维度必须同时满足通过率与 Wilson 下界，基线比较使用 McNemar 精确检验，硬失败不可抵消。
 496. 评测结果只允许 Approved、Rejected、Quarantined、Inconclusive；安全失败立即隔离，复测包含失败案例、20% 相邻回归和完整安全集。
+497. Gateway 模型密钥密文、包装数据密钥和版本元数据必须存 Postgres `keyvault` schema，使用独立 Gateway 角色和信封加密，主密钥不得进入数据库。
+498. 前端必须使用 React 19、TypeScript 和 MUI，实时通信用 SignalR TypeScript 客户端，不使用 Blazor、Razor 或 C# 前端。
 
 ## 10. 管家会话与定时任务
 

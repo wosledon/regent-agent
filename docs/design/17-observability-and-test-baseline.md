@@ -167,7 +167,7 @@ Provider 可用性单独统计，不混入 Regent-Agent 自身 API 可用性。S
 | 集成测试 | 真实 Postgres + RustFS | RLS、事务、Outbox、上传 |
 | 契约测试 | 原生 Provider 录制 | OpenAI/Anthropic 语义 |
 | E2E | 最小完整部署 | 建岗、招聘、任务、评审、验收 |
-| UI | Playwright for .NET | 关键用户路径 |
+| UI | Playwright（TypeScript/JavaScript） | 关键用户路径 |
 | 安全 | 自动化扫描与专项用例 | 越权、SSRF、密钥、容器 |
 | 许可 | CI 许可证扫描与发布报告 | SPDX、NOTICE、SBOM、未知许可证、copyleft 兼容 |
 | 升级 | N-1/N 类生产环境 | Expand、混跑、回滚、恢复 |

@@ -6,7 +6,7 @@
 
 ## 1. 核心决策
 
-1. 控制面保存模型元数据和 `key_ref`，网关单独保存密钥密文。
+1. 控制面保存模型元数据和 `key_ref`；网关使用 Postgres `keyvault` schema 保存信封加密后的密钥密文，主密钥不进入数据库。
 2. 模型成本以网关 `llm_usage` 事件为权威源；Runner 只上报工具成本。
 3. 每次模型调用前必须获得预算预留；调用后按实际用量结算。
 4. 账本只增不改，价格更正和供应商账单差异通过新条目表达。
@@ -36,7 +36,15 @@ Model:
 
 `protocol` 取值：`openai_chat_completions`、`anthropic_messages`。`endpoint_kind` 由协议推导，客户端必须选择对应原生端点。
 
-`key_ref` 是网关内的不透明引用，不包含密钥、密钥哈希或可逆标识。
+`key_ref` 是网关内的不透明引用，不包含密钥、密钥哈希或可逆标识。Gateway 通过独立数据库角色访问 Postgres `keyvault` schema，ControlPlane 角色无权读取该 schema。
+
+```text
+ModelKeyRecord:
+  key_ref, tenant_id, provider, model_id
+  key_version, encrypted_key, wrapped_data_key
+  encryption_algorithm, state
+  created_at, activated_at, retired_at
+```
 
 ### 2.2 新增模型 saga
 

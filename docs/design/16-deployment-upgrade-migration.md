@@ -115,7 +115,7 @@ observability profile 和 Exporter 配置
 ### 6.2 Backup
 
 - 读取 BackupProfile；默认关闭，不作为升级优先项。
-- 启用时执行 Postgres 一致性备份、RustFS 版本检查、密钥库加密备份和清单校验。
+- 启用时执行 Postgres 一致性备份、RustFS 版本检查、`keyvault` schema 加密备份和清单校验。
 - 关闭时记录 `backup_step=skipped`、风险接受人、理由和时间。
 - 不得伪造备份成功或沿用旧作业状态。
 - 最近审计检查点、签名和锚定状态始终记录，不属于可选备份。
@@ -220,7 +220,7 @@ ControlPlane
 - 启动前执行 `regent-agent config validate`。
 - 旧版本忽略未知配置键并记录警告。
 - 连接串、key_ref 和 Bucket 名称保持稳定。
-- 密钥只从环境或 secret 文件读取。
+- 主密钥和运行秘密只从环境或 secret 文件读取；Provider API Key 密文从 Postgres `keyvault` schema 读取。
 - 配置校验输出必须脱敏。
 
 ## 10. 健康检查
@@ -236,7 +236,7 @@ Ready 检查：
 
 - Postgres 连接和 schema 兼容。
 - RustFS 必需 Bucket 和权限。
-- 密钥库可用。
+- Postgres `keyvault` schema、Gateway 角色和主密钥注入可用。
 - 必需配置有效。
 - 当前版本支持运行。
 
