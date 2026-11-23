@@ -4,7 +4,7 @@ namespace RegentAgent.Memory;
 
 public sealed record MemoryClaim(string Id, string TenantId, string Scope, string Content, string SourceRef, double Confidence, string Taint, string Status, int Version, string? SupersedesId = null,
     DateTimeOffset? LastAccessedAt = null, int RecallCount = 0, string? Author = null, bool Verified = false,
-    DateTimeOffset? VerifiedAt = null, DateTimeOffset? CreatedAt = null);
+    DateTimeOffset? VerifiedAt = null, DateTimeOffset? CreatedAt = null, string? DerivedFromClaimId = null);
 public sealed record CorrectionTask(string Id, string TenantId, string ClaimId, string Reason, string Status, DateTimeOffset CreatedAt,
     string? FindingId = null, string? AssigneeId = null, string? ReviewerId = null, int Weight = 2,
     string? ProposedContent = null);

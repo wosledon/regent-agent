@@ -1070,6 +1070,18 @@ api.MapGet("/memory/contexts/stale", async (HttpContext context, MemorySafetySer
 api.MapGet("/memory/review-queue", async (HttpContext context, MemoryService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListReviewQueueAsync(CurrentTenant(context), cancellationToken)))
     .Produces<IReadOnlyList<MemoryClaim>>().WithTags("Memory");
+api.MapPost("/memory/claims/{id}/nominate", async (string id, MemoryNominationRequest request,
+    HttpContext context, MemoryService memory, MemorySafetyService safety, MemoryEventService events,
+    CancellationToken cancellationToken) =>
+{
+    if (await memory.GetAsync(id, CurrentTenant(context), CurrentUser(context), cancellationToken) is null)
+        return Results.NotFound();
+    var candidate = await safety.NominateAsync(id, CurrentTenant(context), request, cancellationToken);
+    await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
+        "memory.claim.nominated", new { source_claim_id = id, candidate_claim_id = candidate.Id, scope_position_id = request.ScopePositionId },
+        cancellationToken: cancellationToken);
+    return Results.Ok(candidate);
+}).Produces<MemoryClaim>().WithTags("Memory");
 api.MapPost("/memory/claims/{id}/publish", async (string id, MemoryPublishRequest request,
     HttpContext context, MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
 {

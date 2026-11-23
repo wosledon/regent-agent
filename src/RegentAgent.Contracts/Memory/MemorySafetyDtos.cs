@@ -58,6 +58,7 @@ public sealed record MemoryImpactRequest(string TargetType, string TargetId, str
 public sealed record MemoryAppealRequest(string Reason, string SubmittedBy);
 public sealed record MemoryReviewRequest(string ReviewerId, string Resolution, bool Release);
 public sealed record MemoryPublishRequest(string ReviewerId, string Decision, string Note);
+public sealed record MemoryNominationRequest(string ScopePositionId);
 public sealed record MemoryContextRequest(string TaskId, IReadOnlyList<string> ClaimIds);
 public sealed record MemoryContextBinding(string TaskId, string TenantId, IReadOnlyList<string> ClaimIds,
     string Status, DateTimeOffset BoundAt, DateTimeOffset? InvalidatedAt = null);

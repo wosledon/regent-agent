@@ -2651,6 +2651,45 @@
         }
       }
     },
+    "/v1/memory/claims/{id}/nominate": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryNominationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryClaim"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory/claims/{id}/publish": {
       "post": {
         "tags": [
@@ -11498,6 +11537,12 @@
               "string"
             ],
             "format": "date-time"
+          },
+          "derivedFromClaimId": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -11851,6 +11896,17 @@
             "type": "string"
           },
           "requiredAction": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryNominationRequest": {
+        "required": [
+          "scopePositionId"
+        ],
+        "type": "object",
+        "properties": {
+          "scopePositionId": {
             "type": "string"
           }
         }

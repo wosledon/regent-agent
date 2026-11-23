@@ -193,6 +193,21 @@ public sealed partial class MemorySafetyService(
         return corrected;
     }
 
+    public async Task<MemoryClaim> NominateAsync(string claimId, string tenantId, MemoryNominationRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.ScopePositionId)) throw new InvalidOperationException("Scope position is required.");
+        var source = await claims.GetAsync(claimId, cancellationToken) ?? throw new KeyNotFoundException("Claim not found.");
+        if (source.TenantId != tenantId) throw new UnauthorizedAccessException();
+        if (source.Scope != "personal" || source.Status is not ("Active" or "Disputed"))
+            throw new InvalidOperationException("Only active personal claims can be nominated.");
+        var candidate = new MemoryClaim(Guid.NewGuid().ToString("N"), tenantId, "organization", source.Content,
+            source.SourceRef, source.Confidence, source.Taint, "Candidate", source.Version,
+            Author: source.Author, CreatedAt: clock.GetUtcNow(), DerivedFromClaimId: source.Id);
+        await claims.PutAsync(candidate.Id, candidate, cancellationToken);
+        return candidate;
+    }
+
     public async Task<MemoryClaim> PublishAsync(string claimId, string tenantId, MemoryPublishRequest request,
         CancellationToken cancellationToken)
     {

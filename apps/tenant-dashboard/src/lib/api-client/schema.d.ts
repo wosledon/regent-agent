@@ -3433,6 +3433,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/memory/claims/{id}/nominate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryNominationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryClaim"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/memory/claims/{id}/publish": {
         parameters: {
             query?: never;
@@ -10188,6 +10229,7 @@ export interface components {
             verifiedAt?: null | string;
             /** Format: date-time */
             createdAt?: null | string;
+            derivedFromClaimId?: null | string;
         };
         MemoryContextBinding: {
             taskId: string;
@@ -10275,6 +10317,9 @@ export interface components {
             targetId: string;
             risk: string;
             requiredAction: string;
+        };
+        MemoryNominationRequest: {
+            scopePositionId: string;
         };
         MemoryPublishRequest: {
             reviewerId: string;

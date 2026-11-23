@@ -115,6 +115,8 @@ export const api = {
     `/v1/memories/search?query=${encodeURIComponent(query)}${scope ? `&scope=${encodeURIComponent(scope)}` : ''}&maxResults=20`),
   rebuildMemoryIndex: () => post<{ indexed: number }>('/v1/memory/index/rebuild'),
   memoryReviewQueue: () => request<Schema['MemoryClaim'][]>('/v1/memory/review-queue'),
+  nominateMemory: (id: string, scopePositionId: string) =>
+    post<Schema['MemoryClaim']>(`/v1/memory/claims/${id}/nominate`, { scopePositionId }),
   publishMemory: (id: string, decision: 'Approve' | 'Reject', reviewerId = 'Boss') =>
     post<Schema['MemoryClaim']>(`/v1/memory/claims/${id}/publish`, { decision, reviewerId, note: 'Independent publication review' }),
   archiveMemory: (id: string) => post<void>(`/v1/memories/${id}/archive`),

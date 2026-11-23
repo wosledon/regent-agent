@@ -246,6 +246,26 @@ public sealed class MemorySafetyServiceTests
     }
 
     [Fact]
+    public async Task Personal_claim_nomination_creates_an_independent_organization_candidate()
+    {
+        using var fixture = new MemoryFixture();
+        var personal = await fixture.Memory.CaptureAsync(Tenant, "personal", "Reusable release lesson", "source:lesson",
+            0.8, "untrusted", "Alice", CancellationToken.None);
+
+        var candidate = await fixture.Safety.NominateAsync(personal.Id, Tenant,
+            new MemoryNominationRequest("position-release"), CancellationToken.None);
+        var beforePublication = await fixture.Index.SearchHybridAsync(Tenant, "release lesson", null, 10, "Boss", CancellationToken.None);
+
+        Assert.Equal("organization", candidate.Scope);
+        Assert.Equal("Candidate", candidate.Status);
+        Assert.Equal(personal.Id, candidate.DerivedFromClaimId);
+        Assert.Equal(personal.Confidence, candidate.Confidence);
+        Assert.Equal(personal.Taint, candidate.Taint);
+        Assert.Equal("Active", (await fixture.Claims.GetAsync(personal.Id, CancellationToken.None))!.Status);
+        Assert.DoesNotContain(beforePublication.Hits, hit => hit.ClaimId == candidate.Id);
+    }
+
+    [Fact]
     public async Task Cross_tenant_claim_access_is_rejected()
     {
         using var fixture = new MemoryFixture();

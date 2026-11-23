@@ -15,6 +15,7 @@ export function MemoryPage() {
   const [query, setQuery] = useState('Provider contract');
   const [scope, setScope] = useState('organization');
   const [selectedClaimId, setSelectedClaimId] = useState('');
+  const [nominationScope, setNominationScope] = useState('');
   const search = useQuery({
     queryKey: ['memory-search', query, scope],
     queryFn: () => api.searchMemories(query, scope || undefined),
@@ -24,6 +25,7 @@ export function MemoryPage() {
   const forget = useMutation({ mutationFn: api.forgetMemory, onSuccess: invalidate });
   const purge = useMutation({ mutationFn: api.deleteMemory, onSuccess: invalidate });
   const archive = useMutation({ mutationFn: api.archiveMemory, onSuccess: invalidate });
+  const nominate = useMutation({ mutationFn: ({ id, scope }: { id: string; scope: string }) => api.nominateMemory(id, scope), onSuccess: invalidate });
 
   async function invalidate() {
     await Promise.all([
@@ -46,6 +48,7 @@ export function MemoryPage() {
             <FormField label="Search query">
               <TextInput value={query} onChange={setQuery} placeholder="Search memory" />
             </FormField>
+            <FormField label="Nomination scope position ID"><TextInput value={nominationScope} onChange={setNominationScope} placeholder="Position ID for upward nomination" /></FormField>
             <Select label="Scope" value={scope} onChange={setScope} options={[
               { value: '', label: 'All scopes' },
               { value: 'personal', label: 'Personal' },
@@ -65,6 +68,7 @@ export function MemoryPage() {
                   {hit.conflictWithIds.length > 0 ? <StatusChip label={`Conflicts: ${hit.conflictWithIds.join(', ')}`} tone="warning" /> : null}
                   {hit.reviewRequired ? <StatusChip label={`Review: ${hit.findingRules.join(', ')}`} tone="warning" /> : null}
                   <Stack direction="row" wrap>
+                    {hit.scope === 'personal' ? <Button tone="secondary" disabled={!nominationScope} onClick={() => nominate.mutate({ id: hit.claimId, scope: nominationScope })}>Nominate</Button> : null}
                     <Button tone="secondary" onClick={() => setSelectedClaimId(hit.claimId)}>Inspect impact</Button>
                     <Button tone="neutral" onClick={() => archive.mutate(hit.claimId)} loading={archive.isPending}>Archive</Button>
                     <Button tone="neutral" onClick={() => forget.mutate(hit.claimId)} loading={forget.isPending}>Forget</Button>
