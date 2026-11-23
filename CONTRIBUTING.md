@@ -4,6 +4,7 @@ Regent Agent first-party contributions are submitted under the Apache License 2.
 
 ## Contribution requirements
 
+- Read the repository [AGENTS.md](./AGENTS.md) before making changes.
 - Sign off each commit with `Signed-off-by` (DCO).
 - Confirm that you have the right to submit the contribution.
 - Do not assign copyright by contributing.
