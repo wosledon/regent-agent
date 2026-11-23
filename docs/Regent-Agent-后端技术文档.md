@@ -5,7 +5,7 @@
 - 读者：后端研发、架构、QA、SRE、安全评审
 - 关联文档：[技术设计总览](./Regent-Agent-技术设计.md)、[完整架构流程图](./Regent-Agent-架构流程图.md)、[OpenAPI 基线](./design/47-openapi-baseline.md)、[核心 ERD 与数据字典](./design/49-core-data-model-and-erd.md)、[详细设计索引](./design/README.md)
 
-> 当前 16 个后端项目已建立，ControlPlane、Gateway、Runner、Operations 和主要领域模块可在本地 SQLite/JSON/文件模式下运行；真实 Provider、生产存储和完整身份认证仍在实现中。
+> 当前 16 个后端项目已建立，ControlPlane、Gateway、Runner、Operations 和主要领域模块可在本地 SQLite/JSON/文件模式下运行；本地密码、恢复码、会话、邀请、所有权委托和 OIDC/GitHub 适配边界已实现，真实远程 IdP、Provider 和生产存储仍未接入。
 
 ## 1. 文档定位
 
@@ -23,6 +23,9 @@
 - API、Tool、MCP 和通知均只用于系统内部。
 - GitHub 只保存源码和版本 Tag；本地用 Docker Compose 构建。
 - Q-033 数据导出、Q-046 支付/套餐/定价保持延后。
+- 本地身份使用 PBKDF2 密码哈希、一次性恢复码、持久会话和登录限流；会话撤销会在后续请求生效。
+- OIDC/GitHub 使用本地适配契约校验 `issuer + subject`，不发起远程网络请求。
+- 租户邀请、Co-Owner、限时所有权委托和 Boss 展示后缀已提供 API 与设置页面。
 
 ## 2. 技术栈总览
 

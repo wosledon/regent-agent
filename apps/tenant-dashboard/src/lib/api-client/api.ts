@@ -44,10 +44,36 @@ function put<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) });
 }
 
+export interface AuthResponse {
+  email: string;
+  display_name: string;
+  user_id: string;
+  tenant_id: string;
+  session_id: string;
+  recovery_codes: string[];
+}
+
 export const api = {
   devLogin: (email: string) => request<{ email: string; display_name: string; tenant_id: string }>('/auth/dev-login', {
     method: 'POST', body: JSON.stringify({ email } satisfies Schema['DevLoginRequest'])
   }),
+  passwordLogin: (email: string, password: string) => post<AuthResponse>('/auth/login', { email, password }),
+  register: (email: string, password: string, displayName: string, companyName: string) =>
+    post<AuthResponse>('/auth/register', { email, password, displayName, companyName }),
+  sessions: () => request<Schema['SessionDto'][]>('/auth/sessions'),
+  revokeSession: (id: string) => post<void>(`/auth/sessions/${id}/revoke`),
+  invitations: (tenantId: string) => request<Schema['InvitationDto'][]>(`/v1/tenants/${tenantId}/invitations`),
+  createInvitation: (tenantId: string, email: string, role: string) =>
+    post<Schema['InvitationDto']>(`/v1/tenants/${tenantId}/invitations`, { email, role, expiresInHours: 24 }),
+  ownershipDelegations: (tenantId: string) => request<Schema['OwnershipDelegationDto'][]>(`/v1/tenants/${tenantId}/ownership-delegations`),
+  createOwnershipDelegation: (tenantId: string, delegateUserId: string) =>
+    post<Schema['OwnershipDelegationDto']>(`/v1/tenants/${tenantId}/ownership-delegations`, { delegateUserId, expiresInHours: 24, reason: 'Planned absence' }),
+  configureIdentityProvider: (tenantId: string, provider: string, issuer: string, clientId: string) =>
+    put<Schema['IdentityProviderDto']>(`/v1/tenants/${tenantId}/identity-providers/${provider}`, {
+      tenantId, provider, issuer, clientId, enabled: true, groupMappingJson: '{}'
+    }),
+  displaySuffix: () => request<Schema['DisplaySuffixDto']>('/v1/profile/display-suffix'),
+  updateDisplaySuffix: (suffix: string) => put<Schema['DisplaySuffixDto']>('/v1/profile/display-suffix', { suffix }),
   dashboard: () => request<Schema['DashboardSummary']>('/v1/dashboard/summary'),
   projects: () => request<Schema['ProjectSummary'][]>('/v1/projects'),
   project: (id: string) => request<Schema['ProjectDetail']>(`/v1/projects/${id}`),

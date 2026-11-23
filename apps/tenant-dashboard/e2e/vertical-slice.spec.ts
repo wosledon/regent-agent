@@ -95,6 +95,23 @@ test('organization, delivery, security, lifecycle and runtime pages work end to 
   await expect(page.getByRole('cell', { name: 'e2e:usage' }).first()).toBeVisible();
 });
 
+test('password registration issues recovery codes and session controls', async ({ page }) => {
+  const email = `e2e-${Date.now()}@example.test`;
+  await page.goto('/login');
+  await page.getByRole('combobox', { name: 'Authentication mode' }).click();
+  await page.getByRole('option', { name: 'Create account' }).click();
+  await page.getByPlaceholder('owner@example.test').fill(email);
+  await page.getByPlaceholder('At least 10 characters').fill('strong-password-123');
+  await page.getByPlaceholder('Display name').fill('E2E Owner');
+  await page.getByPlaceholder('Company name').fill('E2E Identity Company');
+  await page.getByRole('button', { name: 'Create account' }).click();
+  await expect(page.getByRole('heading', { name: 'Save recovery codes' })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.goto('/settings');
+  await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Revoke' }).first()).toBeVisible();
+});
+
 test('approval can be decided once', async ({ page }) => {
   await page.goto('/login');
   await page.getByRole('button', { name: 'Sign in' }).click();

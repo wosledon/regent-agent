@@ -23,6 +23,7 @@ using RegentAgent.Contracts.Artifacts;
 using RegentAgent.Contracts.Dashboard;
 using RegentAgent.Contracts.Evaluation;
 using RegentAgent.Contracts.Governance;
+using RegentAgent.Contracts.Identity;
 using RegentAgent.Contracts.Models;
 using RegentAgent.Contracts.Operations;
 using RegentAgent.Contracts.Organization;
@@ -87,6 +88,15 @@ builder.Services.AddSingleton(sp => new EvaluationQaService(
 builder.Services.AddSingleton<IObjectStore>(sp =>
     new LocalFileObjectStore(sp.GetRequiredService<IConfiguration>()["Storage:ObjectRoot"] ?? "data/objects"));
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<LoginRateLimiter>();
+builder.Services.AddSingleton(new JsonDocumentStore<CredentialRecord>("data/modules/credentials.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<AuthSessionRecord>("data/modules/sessions.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<RecoveryCodeRecord>("data/modules/recovery-codes.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<UserTenantProfileRecord>("data/modules/profiles.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<IdentityProviderRecord>("data/modules/identity-providers.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<InvitationRecord>("data/modules/invitations.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<OwnershipDelegationRecord>("data/modules/ownership-delegations.json"));
+builder.Services.AddScoped<IdentityService>();
 
 builder.Services.AddDbContext<RegentDbContext>(options =>
 {
@@ -145,6 +155,8 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     var (status, code, message) = exception switch
     {
         KeyNotFoundException => (StatusCodes.Status404NotFound, "NOT_FOUND", "Resource not found."),
+        LoginRateExceededException => (StatusCodes.Status429TooManyRequests, "RATE_LIMITED", exception.Message),
+        Microsoft.AspNetCore.Http.BadHttpRequestException => (StatusCodes.Status400BadRequest, "INVALID_REQUEST", "Request body is invalid."),
         UnauthorizedAccessException => (StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied."),
         InvalidOperationException => (StatusCodes.Status409Conflict, "INVALID_STATE", exception.Message),
         _ => (StatusCodes.Status500InternalServerError, "INTERNAL_ERROR", "An unexpected error occurred.")
@@ -174,6 +186,22 @@ if (app.Environment.IsDevelopment())
 app.UseCors("frontend");
 app.UseAuthentication();
 app.UseAuthorization();
+app.Use(async (context, next) =>
+{
+    var sessionId = context.User.FindFirstValue("session_id");
+    if (context.User.Identity?.IsAuthenticated == true && Guid.TryParse(sessionId, out var id))
+    {
+        var store = context.RequestServices.GetRequiredService<JsonDocumentStore<AuthSessionRecord>>();
+        var session = await store.GetAsync(id.ToString(), context.RequestAborted);
+        if (session is null || session.Status != "Active" || session.ExpiresAt <= context.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow())
+        {
+            await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+    }
+    await next();
+});
 app.MapOpenApi("/openapi/{documentName}.json").AllowAnonymous();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" })).AllowAnonymous();
@@ -183,7 +211,7 @@ app.MapGet("/health/ready", async (RegentDbContext db, CancellationToken cancell
     return ready ? Results.Ok(new { status = "ready" }) : Results.StatusCode(503);
 }).AllowAnonymous();
 
-app.MapPost("/auth/dev-login", async (DevLoginRequest request, RegentDbContext db,
+app.MapPost("/auth/dev-login", async (DevLoginRequest request, RegentDbContext db, IdentityService identity,
     HttpContext context, CancellationToken cancellationToken) =>
 {
     if (!app.Environment.IsDevelopment())
@@ -203,17 +231,56 @@ app.MapPost("/auth/dev-login", async (DevLoginRequest request, RegentDbContext d
         return ApiResults.Problem(RegentAgent.Contracts.Results.Error.Unauthorized("Unknown development user."), context.TraceIdentifier);
     }
 
-    await SignInTenantAsync(context, membership.Id, membership.TenantId, membership.DisplayName, membership.Role);
-    return Results.Ok(new { email = membership.Email, display_name = membership.DisplayName, tenant_id = membership.TenantId });
+    var displayName = await identity.DisplayNameAsync(membership.Id, membership.TenantId, membership.DisplayName, cancellationToken);
+    await SignInTenantAsync(context, membership.Id, membership.TenantId, displayName, membership.Role);
+    return Results.Ok(new { email = membership.Email, display_name = displayName, tenant_id = membership.TenantId });
 }).AllowAnonymous();
 
-app.MapPost("/auth/logout", async (HttpContext context) =>
+app.MapPost("/auth/register", async (RegisterRequest request, IdentityService identity,
+    HttpContext context, CancellationToken cancellationToken) =>
+    await CompleteAuthAsync(context, await identity.RegisterAsync(request, cancellationToken))).AllowAnonymous();
+app.MapPost("/auth/login", async (LoginRequest request, IdentityService identity,
+    HttpContext context, CancellationToken cancellationToken) =>
+    await CompleteAuthAsync(context, await identity.LoginAsync(request, cancellationToken))).AllowAnonymous();
+app.MapPost("/auth/recover", async (RecoveryRequest request, IdentityService identity,
+    CancellationToken cancellationToken) =>
 {
+    await identity.RecoverAsync(request, cancellationToken);
+    return Results.NoContent();
+}).AllowAnonymous();
+app.MapPost("/auth/github/login", async (ExternalLoginRequest request, IdentityService identity,
+    HttpContext context, CancellationToken cancellationToken) =>
+    await CompleteAuthAsync(context, await identity.ExternalLoginAsync(request, "GitHub", cancellationToken))).AllowAnonymous();
+app.MapPost("/auth/oidc/login", async (ExternalLoginRequest request, IdentityService identity,
+    HttpContext context, CancellationToken cancellationToken) =>
+    await CompleteAuthAsync(context, await identity.ExternalLoginAsync(request, "Oidc", cancellationToken))).AllowAnonymous();
+
+app.MapGet("/auth/sessions", async (HttpContext context, IdentityService identity,
+    CancellationToken cancellationToken) => Results.Ok(await identity.ListSessionsAsync(
+        Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!), cancellationToken)))
+    .Produces<IReadOnlyList<SessionDto>>().RequireAuthorization();
+app.MapPost("/auth/sessions/{sessionId:guid}/revoke", async (Guid sessionId, HttpContext context,
+    IdentityService identity, CancellationToken cancellationToken) =>
+{
+    await identity.RevokeSessionAsync(Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!), sessionId, cancellationToken);
+    return Results.NoContent();
+}).RequireAuthorization();
+app.MapPost("/auth/invitations/accept", async (AcceptInvitationRequest request, HttpContext context,
+    IdentityService identity, CancellationToken cancellationToken) =>
+{
+    await identity.AcceptInvitationAsync(Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!), request.Token, cancellationToken);
+    return Results.NoContent();
+}).RequireAuthorization();
+
+app.MapPost("/auth/logout", async (HttpContext context, IdentityService identity) =>
+{
+    if (Guid.TryParse(context.User.FindFirstValue("session_id"), out var sessionId))
+        await identity.RevokeSessionAsync(Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!), sessionId, CancellationToken.None);
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.NoContent();
 }).RequireAuthorization();
 
-app.MapPost("/auth/switch-tenant", async (SwitchTenantRequest request, RegentDbContext db,
+app.MapPost("/auth/switch-tenant", async (SwitchTenantRequest request, RegentDbContext db, IdentityService identity,
     HttpContext context, CancellationToken cancellationToken) =>
 {
     var userId = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
@@ -221,11 +288,52 @@ app.MapPost("/auth/switch-tenant", async (SwitchTenantRequest request, RegentDbC
         .Join(db.Users.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new { m.TenantId, m.Role, u.Id, u.DisplayName })
         .SingleOrDefaultAsync(x => x.TenantId == request.TenantId && x.Id == userId, cancellationToken);
     if (membership is null) return Results.NotFound();
-    await SignInTenantAsync(context, userId, membership.TenantId, membership.DisplayName, membership.Role);
-    return Results.Ok(new { tenant_id = membership.TenantId });
+    if (Guid.TryParse(context.User.FindFirstValue("session_id"), out var previousSessionId))
+        await identity.RevokeSessionAsync(userId, previousSessionId, cancellationToken);
+    var session = await identity.StartTenantSessionAsync(userId, membership.TenantId, cancellationToken);
+    var displayName = await identity.DisplayNameAsync(userId, membership.TenantId, membership.DisplayName, cancellationToken);
+    await SignInTenantAsync(context, userId, membership.TenantId, displayName, membership.Role, session.Id);
+    return Results.Ok(new { tenant_id = membership.TenantId, display_name = displayName });
 }).RequireAuthorization();
 
 var api = app.MapGroup("/v1").RequireAuthorization();
+
+api.MapGet("/profile/display-suffix", async (HttpContext context, IdentityService identity,
+    CancellationToken cancellationToken) => Results.Ok(new DisplaySuffixDto(await identity.GetDisplaySuffixAsync(
+        CurrentUserId(context), Guid.Parse(CurrentTenant(context)), cancellationToken)))).WithTags("Identity");
+api.MapPut("/profile/display-suffix", async (DisplaySuffixDto request, HttpContext context,
+    IdentityService identity, CancellationToken cancellationToken) =>
+{
+    await identity.SetDisplaySuffixAsync(CurrentUserId(context), Guid.Parse(CurrentTenant(context)), request.Suffix, cancellationToken);
+    return Results.Ok(request);
+}).WithTags("Identity");
+api.MapGet("/tenants/{tenantId:guid}/invitations", async (Guid tenantId, HttpContext context,
+    IdentityService identity, CancellationToken cancellationToken) =>
+    Results.Ok(await identity.ListInvitationsAsync(CurrentUserId(context), tenantId, cancellationToken)))
+    .Produces<IReadOnlyList<InvitationDto>>().WithTags("Identity");
+api.MapPost("/tenants/{tenantId:guid}/invitations", async (Guid tenantId, InvitationRequest request,
+    HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
+    Results.Ok(await identity.CreateInvitationAsync(CurrentUserId(context), tenantId, request, cancellationToken)))
+    .Produces<InvitationDto>().WithTags("Identity");
+api.MapGet("/tenants/{tenantId:guid}/ownership-delegations", async (Guid tenantId, HttpContext context,
+    IdentityService identity, CancellationToken cancellationToken) =>
+    Results.Ok(await identity.ListOwnershipDelegationsAsync(CurrentUserId(context), tenantId, cancellationToken)))
+    .Produces<IReadOnlyList<OwnershipDelegationDto>>().WithTags("Identity");
+api.MapPost("/tenants/{tenantId:guid}/ownership-delegations", async (Guid tenantId,
+    CreateOwnershipDelegationRequest request, HttpContext context, IdentityService identity,
+    CancellationToken cancellationToken) => Results.Ok(await identity.CreateOwnershipDelegationAsync(
+        CurrentUserId(context), tenantId, request, cancellationToken)))
+    .Produces<OwnershipDelegationDto>().WithTags("Identity");
+api.MapDelete("/tenants/{tenantId:guid}/ownership-delegations/{delegationId:guid}", async (Guid tenantId,
+    Guid delegationId, HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
+{
+    await identity.RevokeOwnershipDelegationAsync(CurrentUserId(context), tenantId, delegationId, cancellationToken);
+    return Results.NoContent();
+}).WithTags("Identity");
+api.MapPut("/tenants/{tenantId:guid}/identity-providers/{provider}", async (Guid tenantId, string provider,
+    IdentityProviderDto request, HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
+    Results.Ok(await identity.ConfigureProviderAsync(CurrentUserId(context), tenantId, request with { Provider = provider }, cancellationToken)))
+    .Produces<IdentityProviderDto>().WithTags("Identity");
 
 api.MapGet("/tenants", async (TenantService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListForUserAsync(cancellationToken))).Produces<IReadOnlyList<TenantDto>>().WithTags("Tenancy");
@@ -791,15 +899,30 @@ static string CurrentTenant(HttpContext context) =>
 
 static string CurrentUser(HttpContext context) => context.User.FindFirstValue(ClaimTypes.Name) ?? "Unknown";
 
-static async Task SignInTenantAsync(HttpContext context, Guid userId, Guid tenantId, string displayName, string role)
+static Guid CurrentUserId(HttpContext context) =>
+    Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException("Missing user identity."));
+
+static async Task<IResult> CompleteAuthAsync(HttpContext context, AuthResult result)
 {
-    var claims = new[]
+    await SignInTenantAsync(context, result.UserId, result.TenantId, result.DisplayName, result.Role, result.SessionId);
+    return Results.Ok(new
     {
-        new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
-        new Claim("tenant_id", tenantId.ToString()),
-        new Claim(ClaimTypes.Name, displayName),
-        new Claim(ClaimTypes.Role, role)
+        email = result.Email, display_name = result.DisplayName, user_id = result.UserId,
+        tenant_id = result.TenantId, session_id = result.SessionId, recovery_codes = result.RecoveryCodes
+    });
+}
+
+static async Task SignInTenantAsync(HttpContext context, Guid userId, Guid tenantId, string displayName, string role,
+    Guid? sessionId = null)
+{
+    var claims = new List<Claim>
+    {
+        new(ClaimTypes.NameIdentifier, userId.ToString()),
+        new("tenant_id", tenantId.ToString()),
+        new(ClaimTypes.Name, displayName),
+        new(ClaimTypes.Role, role)
     };
+    if (sessionId is { } id) claims.Add(new Claim("session_id", id.ToString()));
     await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
         new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)));
 }

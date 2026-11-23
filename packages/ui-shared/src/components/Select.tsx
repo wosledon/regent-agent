@@ -21,6 +21,7 @@ export function Select<T extends string = string>({ label, value, options, onCha
       <MuiSelect
         labelId={`${label}-label`}
         label={label}
+        SelectDisplayProps={{ 'aria-label': label }}
         value={value}
         onChange={(event: SelectChangeEvent<T>) => onChange(event.target.value as T)}
       >

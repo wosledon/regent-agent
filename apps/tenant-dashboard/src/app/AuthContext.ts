@@ -9,6 +9,8 @@ export interface SessionSummary {
 export interface AuthContextValue {
   session: SessionSummary | null;
   login: (email: string) => Promise<void>;
+  passwordLogin: (email: string, password: string) => Promise<void>;
+  register: (email: string, password: string, displayName: string, companyName: string) => Promise<string[]>;
   logout: () => Promise<void>;
   switchTenant: (tenantId: string) => Promise<void>;
 }
