@@ -42,6 +42,9 @@ public sealed class TaskGovernanceService(JsonDocumentStore<TaskGovernanceState>
         CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
     {
         if (state.TaskTypes.All(x => x.TaskType != request.TaskType)) throw new KeyNotFoundException("Task type not found.");
+        var existing = state.Assignments.LastOrDefault(x => x.TaskId == request.TaskId && x.Status == "Assigned");
+        if (existing is not null)
+            return (false, new AutoAssignResult(true, existing.EmployeeId, existing.Score, "Task already has an active assignment."));
         var candidates = request.Candidates.Select(candidate =>
         {
             var capability = state.Capabilities.Where(x => x.EmployeeId == candidate.EmployeeId)
@@ -58,6 +61,25 @@ public sealed class TaskGovernanceService(JsonDocumentStore<TaskGovernanceState>
             Score = selected.Score, AssignedAt = clock.GetUtcNow()
         });
         return (true, new AutoAssignResult(true, selected.Candidate.EmployeeId, selected.Score, "Highest deterministic claim score."));
+    }, cancellationToken);
+
+    public Task<TaskAssignmentRecord> ReassignTaskAsync(Guid tenantId, Guid taskId, Guid employeeId,
+        string reason, string approvalId, CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        if (string.IsNullOrWhiteSpace(reason) || string.IsNullOrWhiteSpace(approvalId))
+            throw new InvalidOperationException("Reassignment reason and approval are required.");
+        var current = state.Assignments.LastOrDefault(x => x.TaskId == taskId && x.Status == "Assigned")
+            ?? throw new KeyNotFoundException("Active task assignment not found.");
+        if (current.EmployeeId == employeeId) throw new InvalidOperationException("Employee already owns the task.");
+        current.Status = "Reassigned";
+        var replacement = new TaskAssignmentRecord
+        {
+            TaskId = taskId, TaskType = current.TaskType, EmployeeId = employeeId,
+            PreviousEmployeeId = current.EmployeeId, Reason = reason, ApprovalId = approvalId,
+            AssignedAt = clock.GetUtcNow(), Status = "Assigned"
+        };
+        state.Assignments.Add(replacement);
+        return (true, replacement);
     }, cancellationToken);
 
     public Task<WorkLedgerEntry> RecordWorkAsync(Guid tenantId, WorkLedgerEntry entry,

@@ -92,7 +92,13 @@ public sealed class TaskAssignmentRecord
     public Guid EmployeeId { get; set; }
     public decimal Score { get; set; }
     public DateTimeOffset AssignedAt { get; set; }
+    public Guid? PreviousEmployeeId { get; set; }
+    public string? Reason { get; set; }
+    public string? ApprovalId { get; set; }
+    public string Status { get; set; } = "Assigned";
 }
+
+public sealed record ReassignTaskRequest(Guid EmployeeId, string Reason, string ApprovalId);
 
 public sealed record AutoAssignRequest(Guid TaskId, string TaskType, IReadOnlyList<AutoAssignCandidate> Candidates);
 public sealed record AutoAssignResult(bool Assigned, Guid? EmployeeId, decimal Score, string Reason);

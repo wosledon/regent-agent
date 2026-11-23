@@ -1221,6 +1221,10 @@ api.MapPost("/task-governance/claim-score", async (ClaimScoreRequest request, Ht
 api.MapPost("/task-governance/auto-assign", async (AutoAssignRequest request, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.AutoAssignAsync(
         Guid.Parse(CurrentTenant(context)), request, cancellationToken))).Produces<AutoAssignResult>().WithTags("Task Governance");
+api.MapPost("/task-governance/tasks/{taskId:guid}/reassign", async (Guid taskId, ReassignTaskRequest request,
+    HttpContext context, TaskGovernanceService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ReassignTaskAsync(Guid.Parse(CurrentTenant(context)), taskId, request.EmployeeId,
+        request.Reason, request.ApprovalId, cancellationToken))).Produces<TaskAssignmentRecord>().WithTags("Task Governance");
 api.MapPost("/task-governance/ledger", async (WorkLedgerEntry entry, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.RecordWorkAsync(
         Guid.Parse(CurrentTenant(context)), entry, cancellationToken))).Produces<WorkLedgerEntry>().WithTags("Task Governance");

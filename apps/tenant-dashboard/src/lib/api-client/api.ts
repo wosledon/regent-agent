@@ -265,6 +265,10 @@ export const api = {
   assessCapability: (body: Schema['CapabilityAssessment']) => post<Schema['CapabilityAssessment']>('/v1/task-governance/capabilities', body),
   scoreClaim: (body: Schema['ClaimScoreRequest']) => post<Schema['ClaimScoreDto']>('/v1/task-governance/claim-score', body),
   recordWork: (body: Schema['WorkLedgerEntry']) => post<Schema['WorkLedgerEntry']>('/v1/task-governance/ledger', body),
+  reassignTask: (taskId: string, employeeId: string, approvalId: string) =>
+    post<Schema['TaskAssignmentRecord']>(`/v1/task-governance/tasks/${taskId}/reassign`, {
+      employeeId, approvalId, reason: 'Approved workload reassignment'
+    }),
   createReviewTask: (body: Schema['ReviewTaskRecord']) => post<Schema['ReviewTaskRecord']>('/v1/task-governance/reviews', body),
   approveReviewTask: (id: string, approver: string) => post<Schema['ReviewTaskRecord']>(`/v1/task-governance/reviews/${id}/approve`, { approver }),
   agentEvolution: () => request<Schema['AgentEvolutionState']>('/v1/agent-evolution'),

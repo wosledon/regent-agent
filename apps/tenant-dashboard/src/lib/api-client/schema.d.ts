@@ -4095,6 +4095,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/task-governance/tasks/{taskId}/reassign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    taskId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ReassignTaskRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskAssignmentRecord"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/task-governance/ledger": {
         parameters: {
             query?: never;
@@ -10083,6 +10124,12 @@ export interface components {
             /** Format: int32 */
             totalWeight: number | string;
         };
+        ReassignTaskRequest: {
+            /** Format: uuid */
+            employeeId: string;
+            reason: string;
+            approvalId: string;
+        };
         RecoverIncidentRequest: {
             summary: string;
         };
@@ -10356,6 +10403,11 @@ export interface components {
             score?: number | string;
             /** Format: date-time */
             assignedAt?: string;
+            /** Format: uuid */
+            previousEmployeeId?: null | string;
+            reason?: null | string;
+            approvalId?: null | string;
+            status?: string;
         };
         TaskCheckpoint: {
             leaseToken: string;

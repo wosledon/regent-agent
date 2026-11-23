@@ -35,6 +35,11 @@ public sealed class TaskGovernanceServiceTests
             var claim = await service.ScoreClaimAsync(tenantId, employeeId, "engineering.implement", 1, 3, 0.9m, 1m, 0.8m, true, CancellationToken.None);
             var assignment = await service.AutoAssignAsync(tenantId, new AutoAssignRequest(taskId, "engineering.implement",
                 [new AutoAssignCandidate { EmployeeId = employeeId, CurrentWip = 1, WipLimit = 3, HistorySuccess = 0.9m, ToolFit = 1m, CostEfficiency = 0.8m }]), CancellationToken.None);
+            var duplicateAssignment = await service.AutoAssignAsync(tenantId, new AutoAssignRequest(taskId, "engineering.implement",
+                [new AutoAssignCandidate { EmployeeId = Guid.NewGuid(), CurrentWip = 0, WipLimit = 3, HistorySuccess = 1m, ToolFit = 1m, CostEfficiency = 1m }]), CancellationToken.None);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.ReassignTaskAsync(tenantId, taskId, Guid.NewGuid(), "Workload", "", CancellationToken.None));
+            var replacementId = Guid.NewGuid();
+            var reassigned = await service.ReassignTaskAsync(tenantId, taskId, replacementId, "Workload", "approval-1", CancellationToken.None);
             var ledger = await service.RecordWorkAsync(tenantId, new WorkLedgerEntry { EmployeeId = employeeId, TaskId = taskId, TaskType = "engineering.implement", TaskWeight = 3 }, CancellationToken.None);
             var duplicate = await service.RecordWorkAsync(tenantId, new WorkLedgerEntry { EmployeeId = employeeId, TaskId = taskId, TaskType = "engineering.implement", TaskWeight = 3 }, CancellationToken.None);
             var review = await service.CreateReviewAsync(tenantId, new ReviewTaskRecord { SubjectId = taskId, Author = "Engineer", RequiredQuorum = 2 }, CancellationToken.None);
@@ -47,6 +52,10 @@ public sealed class TaskGovernanceServiceTests
             Assert.True(claim.Eligible);
             Assert.True(assignment.Assigned);
             Assert.Equal(employeeId, assignment.EmployeeId);
+            Assert.Equal(employeeId, duplicateAssignment.EmployeeId);
+            Assert.Equal(replacementId, reassigned.EmployeeId);
+            Assert.Equal(employeeId, reassigned.PreviousEmployeeId);
+            Assert.Equal("approval-1", reassigned.ApprovalId);
             Assert.Equal(ledger.Id, duplicate.Id);
             Assert.Equal("Approved", approved.Status);
         }

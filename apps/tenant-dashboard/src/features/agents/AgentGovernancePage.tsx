@@ -20,6 +20,9 @@ export function AgentGovernancePage() {
   const [disclosed, setDisclosed] = useState<Awaited<ReturnType<typeof api.discloseTools>> | null>(null);
   const [reviewSubject, setReviewSubject] = useState('');
   const [debateQuestion, setDebateQuestion] = useState('');
+  const [reassignTaskId, setReassignTaskId] = useState('');
+  const [reassignEmployeeId, setReassignEmployeeId] = useState('');
+  const [reassignApprovalId, setReassignApprovalId] = useState('');
   const invalidate = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['task-governance'] }),
     queryClient.invalidateQueries({ queryKey: ['agent-evolution'] })
@@ -33,6 +36,7 @@ export function AgentGovernancePage() {
   const createReview = useMutation({ mutationFn: () => api.createReviewTask({ id: crypto.randomUUID(), subjectId: reviewSubject, author: 'Controller', requiredQuorum: 2, findings: [], approvers: [], status: 'Open' }), onSuccess: invalidate });
   const approveReview = useMutation({ mutationFn: ({ id, approver }: { id: string; approver: string }) => api.approveReviewTask(id, approver), onSuccess: invalidate });
   const createDebate = useMutation({ mutationFn: () => api.createDebate({ id: crypto.randomUUID(), question: debateQuestion, options: ['Approve', 'Reject'], deadline: new Date(Date.now() + 60_000).toISOString(), decision: null, status: 'Open' }), onSuccess: async () => { setDebateQuestion(''); await invalidate(); } });
+  const reassign = useMutation({ mutationFn: () => api.reassignTask(reassignTaskId, reassignEmployeeId, reassignApprovalId), onSuccess: invalidate });
   if (governance.isLoading || evolution.isLoading) return <LoadingState />;
   const error = governance.error ?? evolution.error;
   if (error) return <ErrorState message={error.message} />;
@@ -97,6 +101,14 @@ export function AgentGovernancePage() {
         ]} />
       </Card>
     </Grid>
+    <Card title="Approved task reassignment">
+      <Stack spacing={2}>
+        <FormField label="Task ID"><TextInput value={reassignTaskId} onChange={setReassignTaskId} /></FormField>
+        <FormField label="New employee ID"><TextInput value={reassignEmployeeId} onChange={setReassignEmployeeId} /></FormField>
+        <FormField label="Approval ID"><TextInput value={reassignApprovalId} onChange={setReassignApprovalId} /></FormField>
+        <Button tone="secondary" disabled={!reassignTaskId || !reassignEmployeeId || !reassignApprovalId} loading={reassign.isPending} onClick={() => reassign.mutate()}>Reassign with approval</Button>
+      </Stack>
+    </Card>
     <Card title="Work ledger">
       <DataTable rows={state?.ledger ?? []} getRowId={row => row.id ?? ''} columns={[
         { id: 'employee', header: 'Employee', render: row => row.employeeId ?? '' },

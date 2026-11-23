@@ -3200,6 +3200,46 @@
         }
       }
     },
+    "/v1/task-governance/tasks/{taskId}/reassign": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReassignTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAssignmentRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/task-governance/ledger": {
       "post": {
         "tags": [
@@ -12457,6 +12497,26 @@
           }
         }
       },
+      "ReassignTaskRequest": {
+        "required": [
+          "employeeId",
+          "reason",
+          "approvalId"
+        ],
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "approvalId": {
+            "type": "string"
+          }
+        }
+      },
       "RecoverIncidentRequest": {
         "required": [
           "summary"
@@ -13340,6 +13400,28 @@
           "assignedAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "previousEmployeeId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "approvalId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "status": {
+            "type": "string"
           }
         }
       },
