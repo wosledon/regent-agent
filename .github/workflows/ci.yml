@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore RegentAgent.slnx
+      - run: dotnet build RegentAgent.slnx --no-restore --configuration Release
+      - run: dotnet test RegentAgent.slnx --no-build --no-restore --configuration Release --collect:"XPlat Code Coverage"
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+      - run: corepack pnpm lint
+      - run: corepack pnpm typecheck
+      - run: corepack pnpm test
+      - run: corepack pnpm build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: corepack pnpm install --frozen-lockfile
+      - run: dotnet build src/RegentAgent.ControlPlane/RegentAgent.ControlPlane.csproj --configuration Release
+      - run: dotnet build src/RegentAgent.Operations/RegentAgent.Operations.csproj --configuration Release
+      - run: |
+          ASPNETCORE_ENVIRONMENT=Development \
+          ASPNETCORE_URLS=http://localhost:5080 \
+          Storage__UseInMemory=true \
+          dotnet run --project src/RegentAgent.ControlPlane/RegentAgent.ControlPlane.csproj --no-build --configuration Release &
+          echo $! > /tmp/controlplane.pid
+      - run: |
+          ASPNETCORE_ENVIRONMENT=Development \
+          ASPNETCORE_URLS=http://localhost:5082 \
+          dotnet run --project src/RegentAgent.Operations/RegentAgent.Operations.csproj --no-build --configuration Release &
+          echo $! > /tmp/operations.pid
+      - run: corepack pnpm --filter @regent/tenant-dashboard exec playwright install --with-deps chromium
+      - run: corepack pnpm --filter @regent/tenant-dashboard dev &
+      - run: corepack pnpm --filter @regent/ops-console dev &
+      - run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:5080/health/ready >/dev/null && \
+               curl -fsS http://localhost:5082/health/ready >/dev/null && \
+               curl -fsS http://localhost:5173 >/dev/null && \
+               curl -fsS http://localhost:4173 >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - run: corepack pnpm test:e2e
+      - if: always()
+        run: kill $(cat /tmp/controlplane.pid) $(cat /tmp/operations.pid) || true
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/validate-docs.py

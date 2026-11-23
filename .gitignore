@@ -488,3 +488,13 @@ $RECYCLE.BIN/
 
 # StepCode session/workflow data
 .stepcode/
+
+# Local runtime data
+data/
+
+# Node / frontend
+node_modules/
+dist/
+playwright-report/
+test-results/
+*.tsbuildinfo

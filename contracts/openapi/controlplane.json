@@ -1,0 +1,1600 @@
+{
+  "openapi": "3.1.1",
+  "info": {
+    "title": "RegentAgent.ControlPlane | v1",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5080/"
+    }
+  ],
+  "paths": {
+    "/health/live": {
+      "get": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/auth/dev-login": {
+      "post": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DevLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/internal/tasks/claim": {
+      "post": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/internal/tasks/{id}/checkpoint": {
+      "post": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskCheckpoint"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/internal/tasks/{id}/complete": {
+      "post": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskCompletion"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/dashboard/summary": {
+      "get": {
+        "tags": [
+          "Dashboard"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardSummary"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "tags": [
+          "Projects"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProjectSummary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{id}": {
+      "get": {
+        "tags": [
+          "Projects"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/v1/employees": {
+      "get": {
+        "tags": [
+          "Organization"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EmployeeSummary"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/employees/{id}/timeline": {
+      "get": {
+        "tags": [
+          "Organization"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmployeeTimeline"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/v1/approvals/{id}": {
+      "get": {
+        "tags": [
+          "Governance"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalDto"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/v1/approvals/{id}/decision": {
+      "post": {
+        "tags": [
+          "Governance"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalDecision"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/notifications": {
+      "get": {
+        "tags": [
+          "Notifications"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/notifications/{id}/read": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/notifications/{id}/acknowledge": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/notifications/{id}/archive": {
+      "post": {
+        "tags": [
+          "Notifications"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/compliance/profile": {
+      "get": {
+        "tags": [
+          "Compliance"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Compliance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComplianceProfile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/workflows": {
+      "get": {
+        "tags": [
+          "Workflows"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/workflows/{id}/runs": {
+      "post": {
+        "tags": [
+          "Workflows"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/workflow-runs/{id}/advance": {
+      "post": {
+        "tags": [
+          "Workflows"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/memories": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/memories/{id}/correct": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectMemoryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/kpis": {
+      "get": {
+        "tags": [
+          "Performance"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/performance-reviews": {
+      "post": {
+        "tags": [
+          "Performance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/communication/routes": {
+      "get": {
+        "tags": [
+          "Communication"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/conversations": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{id}/messages": {
+      "get": {
+        "tags": [
+          "Chat"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/evaluation-suites": {
+      "get": {
+        "tags": [
+          "Evaluation"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/evaluations/runs": {
+      "get": {
+        "tags": [
+          "Evaluation"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Evaluation"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunEvaluationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/internal/runners/register": {
+      "post": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunnerRegistration"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/internal/runners/heartbeat": {
+      "post": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunnerHeartbeat"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ActionCenterItem": {
+        "required": [
+          "id",
+          "sourceType",
+          "title",
+          "severity",
+          "owner",
+          "createdAt",
+          "slaDueAt",
+          "requiresBossDecision",
+          "nextAction",
+          "href"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sourceType": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "slaDueAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "requiresBossDecision": {
+            "type": "boolean"
+          },
+          "nextAction": {
+            "type": "string"
+          },
+          "href": {
+            "type": "string"
+          }
+        }
+      },
+      "ApprovalDecision": {
+        "required": [
+          "decision",
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "decision": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "ApprovalDto": {
+        "required": [
+          "id",
+          "actionType",
+          "title",
+          "impact",
+          "severity",
+          "state",
+          "requester",
+          "createdAt",
+          "expiresAt",
+          "options",
+          "evidenceRefs"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actionType": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "impact": {
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ApprovalState"
+          },
+          "requester": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ApprovalState": {
+        "enum": [
+          "pending",
+          "approved",
+          "rejected",
+          "expired"
+        ]
+      },
+      "ComplianceProfile": {
+        "required": [
+          "tenantId",
+          "preset",
+          "allowedProviders",
+          "allowedRegions",
+          "onlineRetentionDays",
+          "auditProfile",
+          "backupRequired",
+          "externalSharingAllowed",
+          "version",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "tenantId": {
+            "type": "string"
+          },
+          "preset": {
+            "type": "string"
+          },
+          "allowedProviders": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowedRegions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "onlineRetentionDays": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "auditProfile": {
+            "type": "string"
+          },
+          "backupRequired": {
+            "type": "boolean"
+          },
+          "externalSharingAllowed": {
+            "type": "boolean"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "CorrectMemoryRequest": {
+        "required": [
+          "content",
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateReviewRequest": {
+        "required": [
+          "employeeId",
+          "conclusion",
+          "evidenceJson"
+        ],
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string"
+          },
+          "conclusion": {
+            "type": "string"
+          },
+          "evidenceJson": {
+            "type": "string"
+          }
+        }
+      },
+      "DashboardCard": {
+        "required": [
+          "id",
+          "title",
+          "summary",
+          "metric",
+          "severity",
+          "freshness",
+          "dataAt",
+          "href"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "metric": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "severity": {
+            "$ref": "#/components/schemas/Severity"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/Freshness"
+          },
+          "dataAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "href": {
+            "type": "string"
+          }
+        }
+      },
+      "DashboardSummary": {
+        "required": [
+          "companyName",
+          "companyStatus",
+          "cards",
+          "actions",
+          "generatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "companyName": {
+            "type": "string"
+          },
+          "companyStatus": {
+            "type": "string"
+          },
+          "cards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DashboardCard"
+            }
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ActionCenterItem"
+            }
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DevLoginRequest": {
+        "required": [
+          "email"
+        ],
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          }
+        }
+      },
+      "EmployeeState": {
+        "enum": [
+          "active",
+          "busy",
+          "sleeping",
+          "rate_limited",
+          "degraded",
+          "unavailable",
+          "pending_review",
+          "frozen",
+          "terminated"
+        ]
+      },
+      "EmployeeSummary": {
+        "required": [
+          "id",
+          "employeeNo",
+          "displayName",
+          "position",
+          "state",
+          "stateReason",
+          "freshness"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "employeeNo": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "position": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/EmployeeState"
+          },
+          "stateReason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/Freshness"
+          }
+        }
+      },
+      "EmployeeTimeline": {
+        "required": [
+          "employee",
+          "entries",
+          "generatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "employee": {
+            "$ref": "#/components/schemas/EmployeeSummary"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EmployeeWorkEntry"
+            }
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "EmployeeWorkEntry": {
+        "required": [
+          "id",
+          "occurredAt",
+          "taskId",
+          "title",
+          "eventType",
+          "status",
+          "nextAction",
+          "costMinor",
+          "currency",
+          "evidenceRefs"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "taskId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "nextAction": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "costMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "Freshness": {
+        "enum": [
+          "live",
+          "fresh",
+          "stale",
+          "unknown"
+        ]
+      },
+      "ProjectDetail": {
+        "required": [
+          "project",
+          "milestones",
+          "tasks"
+        ],
+        "type": "object",
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/ProjectSummary"
+          },
+          "milestones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectMilestone"
+            }
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProjectTaskSummary"
+            }
+          }
+        }
+      },
+      "ProjectHealth": {
+        "enum": [
+          "on_track",
+          "at_risk",
+          "blocked",
+          "pending_acceptance",
+          "live",
+          "failed"
+        ]
+      },
+      "ProjectMilestone": {
+        "required": [
+          "id",
+          "name",
+          "targetAt",
+          "status",
+          "acceptanceRule"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "targetAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "status": {
+            "type": "string"
+          },
+          "acceptanceRule": {
+            "type": "string"
+          }
+        }
+      },
+      "ProjectStage": {
+        "enum": [
+          "brief_ready",
+          "approved",
+          "building",
+          "verifying",
+          "releasing",
+          "live",
+          "iterating",
+          "terminated"
+        ]
+      },
+      "ProjectSummary": {
+        "required": [
+          "id",
+          "name",
+          "stage",
+          "health",
+          "owner",
+          "targetAt",
+          "budgetMinor",
+          "spentMinor",
+          "currency",
+          "freshness"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/ProjectStage"
+          },
+          "health": {
+            "$ref": "#/components/schemas/ProjectHealth"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "targetAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "budgetMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "spentMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/Freshness"
+          }
+        }
+      },
+      "ProjectTaskSummary": {
+        "required": [
+          "id",
+          "title",
+          "taskType",
+          "status",
+          "assignee",
+          "weight",
+          "costMinor",
+          "currency"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "taskType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "assignee": {
+            "type": "string"
+          },
+          "weight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "costMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          }
+        }
+      },
+      "RunEvaluationRequest": {
+        "required": [
+          "suiteId",
+          "candidateEmployeeId",
+          "seed"
+        ],
+        "type": "object",
+        "properties": {
+          "suiteId": {
+            "type": "string"
+          },
+          "candidateEmployeeId": {
+            "type": "string"
+          },
+          "seed": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "RunnerHeartbeat": {
+        "required": [
+          "runnerId",
+          "status",
+          "activeTasks"
+        ],
+        "type": "object",
+        "properties": {
+          "runnerId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "activeTasks": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "RunnerRegistration": {
+        "required": [
+          "runnerId",
+          "capabilities"
+        ],
+        "type": "object",
+        "properties": {
+          "runnerId": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "SendMessageRequest": {
+        "required": [
+          "body",
+          "priority"
+        ],
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          }
+        }
+      },
+      "Severity": {
+        "enum": [
+          "low",
+          "medium",
+          "high",
+          "critical"
+        ]
+      },
+      "TaskCheckpoint": {
+        "required": [
+          "leaseToken",
+          "checkpointJson"
+        ],
+        "type": "object",
+        "properties": {
+          "leaseToken": {
+            "type": "string"
+          },
+          "checkpointJson": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskCompletion": {
+        "required": [
+          "leaseToken",
+          "output",
+          "status",
+          "evidenceRefs"
+        ],
+        "type": "object",
+        "properties": {
+          "leaseToken": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "RegentAgent.ControlPlane"
+    },
+    {
+      "name": "Dashboard"
+    },
+    {
+      "name": "Projects"
+    },
+    {
+      "name": "Organization"
+    },
+    {
+      "name": "Governance"
+    },
+    {
+      "name": "Notifications"
+    },
+    {
+      "name": "Compliance"
+    },
+    {
+      "name": "Workflows"
+    },
+    {
+      "name": "Memory"
+    },
+    {
+      "name": "Performance"
+    },
+    {
+      "name": "Communication"
+    },
+    {
+      "name": "Chat"
+    },
+    {
+      "name": "Evaluation"
+    }
+  ]
+}

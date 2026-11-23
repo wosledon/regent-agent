@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+**/playwright-report/
+**/test-results/
+.git/
+.stepcode/
+docs/
+contracts/
+tests/
+*.md

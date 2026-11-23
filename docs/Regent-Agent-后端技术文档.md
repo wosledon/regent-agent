@@ -5,7 +5,7 @@
 - 读者：后端研发、架构、QA、SRE、安全评审
 - 关联文档：[技术设计总览](./Regent-Agent-技术设计.md)、[完整架构流程图](./Regent-Agent-架构流程图.md)、[OpenAPI 基线](./design/47-openapi-baseline.md)、[核心 ERD 与数据字典](./design/49-core-data-model-and-erd.md)、[详细设计索引](./design/README.md)
 
-> 当前 `src/` 与 `tests/` 仍为空，本文是实现入口文档，不表示代码已经存在。具体 NuGet、容器和工具版本在实现时通过 lock file、基础镜像 digest 和 ReleaseManifest 固定。
+> 当前 16 个后端项目已建立，ControlPlane、Gateway、Runner、Operations 和主要领域模块可在本地 SQLite/JSON/文件模式下运行；真实 Provider、生产存储和完整身份认证仍在实现中。
 
 ## 1. 文档定位
 

@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-regent}
+      POSTGRES_USER: ${POSTGRES_USER:-regent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-regent_dev_only}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-regent} -d ${POSTGRES_DB:-regent}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  controlplane:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+      args:
+        PROJECT: RegentAgent.ControlPlane
+    command: ["RegentAgent.ControlPlane.dll"]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+      Storage__Provider: "Postgres"
+      Storage__UseInMemory: "false"
+      ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-regent};Username=${POSTGRES_USER:-regent};Password=${POSTGRES_PASSWORD:-regent_dev_only}"
+      Frontend__Origins__0: "http://localhost:5173"
+      Frontend__Origins__1: "http://localhost:4173"
+    ports:
+      - "5080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+      args:
+        PROJECT: RegentAgent.Gateway
+    command: ["RegentAgent.Gateway.dll"]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+    ports:
+      - "5081:8080"
+    depends_on:
+      - controlplane
+
+  runner:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+      args:
+        PROJECT: RegentAgent.Runner
+    command: ["RegentAgent.Runner.dll"]
+    environment:
+      ControlPlane__BaseUrl: "http://controlplane:8080"
+      Gateway__BaseUrl: "http://gateway:8080"
+    depends_on:
+      - controlplane
+      - gateway
+
+  operations:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.backend
+      args:
+        PROJECT: RegentAgent.Operations
+    command: ["RegentAgent.Operations.dll"]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+    ports:
+      - "5082:8080"
+    depends_on:
+      - postgres
+
+  tenant-dashboard:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        APP: "@regent/tenant-dashboard"
+        HTML_DIR: apps/tenant-dashboard/dist
+    ports:
+      - "5173:80"
+    depends_on:
+      - controlplane
+
+  ops-console:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.frontend
+      args:
+        APP: "@regent/ops-console"
+        HTML_DIR: apps/ops-console/dist
+    ports:
+      - "4173:80"
+    depends_on:
+      - operations
+
+volumes:
+  postgres-data:

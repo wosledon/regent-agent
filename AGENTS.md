@@ -11,7 +11,7 @@
 - 数据：Postgres + 强制 RLS + pgvector，RustFS 存对象。
 - 模型：只支持 OpenAI 与 Anthropic 云端原生端点。
 - 部署：GitHub Tag 源码 + 本地 Docker Compose + systemd。
-- `src/`、`tests/` 当前为空，不要把设计文档描述成已实现能力。
+- `src/`、`tests/` 已实现主要本地模块；真实 Provider、生产存储、完整身份认证和部分治理能力仍在实现中，不要把其余设计文档描述成已实现能力。
 
 ## 2. 文档查阅顺序
 

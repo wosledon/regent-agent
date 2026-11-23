@@ -5,7 +5,7 @@
 - 读者：前端研发、设计、QA、架构
 - 关联文档：[后端技术文档](./Regent-Agent-后端技术文档.md)、[租户仪表盘信息架构](./design/35-tenant-dashboard-information-architecture.md)、[国际化与本地化](./design/37-internationalization-and-localization.md)、[内部通知中心](./design/41-internal-notification-center.md)、[前端页面与路由地图](./design/48-frontend-route-map.md)
 
-> 当前前端代码尚未实现。本文定义工程结构、设计系统和组件契约，具体依赖补丁版本通过 lock file 固定。
+> 当前 React workspace、UI.Shared、组件展示页、Tenant Dashboard 主要页面和 Ops Console 主要页面已实现；完整无障碍、真实 Provider 状态和生产发布仍在后续阶段。
 
 ## 1. 范围与原则
 
