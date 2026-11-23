@@ -73,10 +73,35 @@ public sealed class AdjudicationTaskRecord
     public string DissentRefsJson { get; set; } = "[]";
 }
 
+public sealed class AutoAssignCandidate
+{
+    public Guid EmployeeId { get; set; }
+    public int CurrentWip { get; set; }
+    public int WipLimit { get; set; }
+    public decimal HistorySuccess { get; set; }
+    public decimal ToolFit { get; set; }
+    public decimal CostEfficiency { get; set; }
+    public bool Independent { get; set; } = true;
+}
+
+public sealed class TaskAssignmentRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TaskId { get; set; }
+    public string TaskType { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public decimal Score { get; set; }
+    public DateTimeOffset AssignedAt { get; set; }
+}
+
+public sealed record AutoAssignRequest(Guid TaskId, string TaskType, IReadOnlyList<AutoAssignCandidate> Candidates);
+public sealed record AutoAssignResult(bool Assigned, Guid? EmployeeId, decimal Score, string Reason);
+
 public sealed class TaskGovernanceState
 {
     public List<TaskTypeDefinition> TaskTypes { get; set; } = [];
     public List<CapabilityAssessment> Capabilities { get; set; } = [];
+    public List<TaskAssignmentRecord> Assignments { get; set; } = [];
     public List<WorkLedgerEntry> Ledger { get; set; } = [];
     public List<ReviewTaskRecord> Reviews { get; set; } = [];
     public List<DebateTaskRecord> Debates { get; set; } = [];

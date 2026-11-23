@@ -33,12 +33,31 @@ public sealed class TaskGovernanceService(JsonDocumentStore<TaskGovernanceState>
             ?? throw new KeyNotFoundException("Task type not found.");
         var capability = state.Capabilities.Where(x => x.EmployeeId == employeeId)
             .Average(x => (decimal?)x.EffectiveScore) ?? 0m;
-        var eligible = currentWip < wipLimit && independent;
-        var score = eligible ? capability * 0.4m + historySuccess * 0.2m + toolFit * 0.1m
-            + costEfficiency * 0.1m + (1m - (decimal)currentWip / Math.Max(1, wipLimit)) * 0.1m
-            + (independent ? 0.1m : 0m) : 0m;
-        return (false, new ClaimScoreDto(employeeId, score, eligible,
-            !independent ? "Conflict of interest." : currentWip >= wipLimit ? "WIP limit reached." : "Eligible."));
+        var (score, eligible, reason) = CalculateClaimScore(capability, currentWip, wipLimit,
+            historySuccess, toolFit, costEfficiency, independent);
+        return (false, new ClaimScoreDto(employeeId, score, eligible, reason));
+    }, cancellationToken);
+
+    public Task<AutoAssignResult> AutoAssignAsync(Guid tenantId, AutoAssignRequest request,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+    {
+        if (state.TaskTypes.All(x => x.TaskType != request.TaskType)) throw new KeyNotFoundException("Task type not found.");
+        var candidates = request.Candidates.Select(candidate =>
+        {
+            var capability = state.Capabilities.Where(x => x.EmployeeId == candidate.EmployeeId)
+                .Average(x => (decimal?)x.EffectiveScore) ?? 0m;
+            var (score, eligible, reason) = CalculateClaimScore(capability, candidate.CurrentWip, candidate.WipLimit,
+                candidate.HistorySuccess, candidate.ToolFit, candidate.CostEfficiency, candidate.Independent);
+            return (Candidate: candidate, Score: score, Eligible: eligible, Reason: reason);
+        }).Where(x => x.Eligible).OrderByDescending(x => x.Score).ToArray();
+        if (candidates.Length == 0) return (false, new AutoAssignResult(false, null, 0m, "No eligible candidate."));
+        var selected = candidates[0];
+        state.Assignments.Add(new TaskAssignmentRecord
+        {
+            TaskId = request.TaskId, TaskType = request.TaskType, EmployeeId = selected.Candidate.EmployeeId,
+            Score = selected.Score, AssignedAt = clock.GetUtcNow()
+        });
+        return (true, new AutoAssignResult(true, selected.Candidate.EmployeeId, selected.Score, "Highest deterministic claim score."));
     }, cancellationToken);
 
     public Task<WorkLedgerEntry> RecordWorkAsync(Guid tenantId, WorkLedgerEntry entry,
@@ -119,6 +138,16 @@ public sealed class TaskGovernanceService(JsonDocumentStore<TaskGovernanceState>
             return result;
         }
         finally { gate.Release(); }
+    }
+
+    private static (decimal Score, bool Eligible, string Reason) CalculateClaimScore(decimal capability,
+        int currentWip, int wipLimit, decimal historySuccess, decimal toolFit, decimal costEfficiency, bool independent)
+    {
+        var eligible = currentWip < wipLimit && independent;
+        var score = eligible ? capability * 0.4m + historySuccess * 0.2m + toolFit * 0.1m
+            + costEfficiency * 0.1m + (1m - (decimal)currentWip / Math.Max(1, wipLimit)) * 0.1m
+            + (independent ? 0.1m : 0m) : 0m;
+        return (score, eligible, !independent ? "Conflict of interest." : currentWip >= wipLimit ? "WIP limit reached." : "Eligible.");
     }
 
     private static T Find<T>(IEnumerable<T> items, Guid id) where T : class =>

@@ -1001,6 +1001,9 @@ api.MapPost("/task-governance/claim-score", async (ClaimScoreRequest request, Ht
         Guid.Parse(CurrentTenant(context)), request.EmployeeId, request.TaskType, request.CurrentWip, request.WipLimit,
         request.HistorySuccess, request.ToolFit, request.CostEfficiency, request.Independent, cancellationToken)))
     .Produces<ClaimScoreDto>().WithTags("Task Governance");
+api.MapPost("/task-governance/auto-assign", async (AutoAssignRequest request, HttpContext context,
+    TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.AutoAssignAsync(
+        Guid.Parse(CurrentTenant(context)), request, cancellationToken))).Produces<AutoAssignResult>().WithTags("Task Governance");
 api.MapPost("/task-governance/ledger", async (WorkLedgerEntry entry, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.RecordWorkAsync(
         Guid.Parse(CurrentTenant(context)), entry, cancellationToken))).Produces<WorkLedgerEntry>().WithTags("Task Governance");
