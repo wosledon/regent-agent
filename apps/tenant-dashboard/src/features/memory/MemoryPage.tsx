@@ -7,6 +7,7 @@ import {
 import { api } from '../../lib/api-client/api';
 import { MemoryCaptureForm } from './MemoryCaptureForm';
 import { MemoryImpactPanel } from './MemoryImpactPanel';
+import { MemoryReviewQueue } from './MemoryReviewQueue';
 import { MemorySafetyPanel } from './MemorySafetyPanel';
 
 export function MemoryPage() {
@@ -22,13 +23,15 @@ export function MemoryPage() {
   const rebuild = useMutation({ mutationFn: api.rebuildMemoryIndex, onSuccess: invalidate });
   const forget = useMutation({ mutationFn: api.forgetMemory, onSuccess: invalidate });
   const purge = useMutation({ mutationFn: api.deleteMemory, onSuccess: invalidate });
+  const archive = useMutation({ mutationFn: api.archiveMemory, onSuccess: invalidate });
 
   async function invalidate() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['memory-search'] }),
       queryClient.invalidateQueries({ queryKey: ['memory-findings'] }),
       queryClient.invalidateQueries({ queryKey: ['memory-corrections'] }),
-      queryClient.invalidateQueries({ queryKey: ['memory-impact'] })
+      queryClient.invalidateQueries({ queryKey: ['memory-impact'] }),
+      queryClient.invalidateQueries({ queryKey: ['memory-review-queue'] })
     ]);
   }
 
@@ -63,6 +66,7 @@ export function MemoryPage() {
                   {hit.reviewRequired ? <StatusChip label={`Review: ${hit.findingRules.join(', ')}`} tone="warning" /> : null}
                   <Stack direction="row" wrap>
                     <Button tone="secondary" onClick={() => setSelectedClaimId(hit.claimId)}>Inspect impact</Button>
+                    <Button tone="neutral" onClick={() => archive.mutate(hit.claimId)} loading={archive.isPending}>Archive</Button>
                     <Button tone="neutral" onClick={() => forget.mutate(hit.claimId)} loading={forget.isPending}>Forget</Button>
                     <Button tone="danger" onClick={() => purge.mutate(hit.claimId)} loading={purge.isPending}>Delete</Button>
                   </Stack>
@@ -72,6 +76,7 @@ export function MemoryPage() {
           </Stack>
         </Card>
       </Grid>
+      <MemoryReviewQueue onChanged={invalidate} />
       <MemorySafetyPanel onChanged={invalidate} />
       <MemoryImpactPanel claimId={selectedClaimId} onChanged={invalidate} />
     </Stack>

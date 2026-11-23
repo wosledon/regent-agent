@@ -190,6 +190,31 @@ public sealed partial class MemorySafetyService(
         return corrected;
     }
 
+    public async Task<MemoryClaim> PublishAsync(string claimId, string tenantId, MemoryPublishRequest request,
+        CancellationToken cancellationToken)
+    {
+        var claim = await claims.GetAsync(claimId, cancellationToken) ?? throw new KeyNotFoundException("Claim not found.");
+        if (claim.TenantId != tenantId) throw new UnauthorizedAccessException();
+        if (claim.Status != "Candidate") throw new InvalidOperationException("Only candidate claims can be reviewed for publication.");
+        if (request.Decision is not ("Approve" or "Reject")) throw new InvalidOperationException("Publication decision must be Approve or Reject.");
+        if (string.IsNullOrWhiteSpace(request.ReviewerId) || string.IsNullOrWhiteSpace(request.Note))
+            throw new InvalidOperationException("Reviewer and review note are required.");
+        if (request.ReviewerId == claim.Author) throw new InvalidOperationException("Claim author cannot publish their own candidate.");
+        if (request.Decision == "Approve" && (await findings.GetAllAsync(cancellationToken)).Any(x =>
+                x.TenantId == tenantId && x.ClaimId == claimId && x.RiskLevel == "High"
+                && x.Status is not ("Corrected" or "Released")))
+            throw new InvalidOperationException("Candidate has unresolved high-risk findings.");
+        var reviewed = claim with
+        {
+            Status = request.Decision == "Approve" ? "Active" : "Rejected",
+            Verified = request.Decision == "Approve", VerifiedAt = request.Decision == "Approve" ? clock.GetUtcNow() : null
+        };
+        await claims.PutAsync(claimId, reviewed, cancellationToken);
+        if (request.Decision == "Approve") await index.IndexClaimAsync(reviewed, cancellationToken);
+        else await index.RemoveFromRecallAsync(tenantId, claimId, cancellationToken);
+        return reviewed;
+    }
+
     public async Task<MemoryImpactRecord> RecordImpactAsync(string claimId, string tenantId,
         MemoryImpactRequest request, CancellationToken cancellationToken)
     {

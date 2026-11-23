@@ -2351,6 +2351,89 @@
         }
       }
     },
+    "/v1/memory/review-queue": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryClaim"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/claims/{id}/publish": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryPublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryClaim"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memories/{id}/archive": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/v1/memory/index/rebuild": {
       "post": {
         "tags": [
@@ -11222,6 +11305,25 @@
             "type": "string"
           },
           "requiredAction": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryPublishRequest": {
+        "required": [
+          "reviewerId",
+          "decision",
+          "note"
+        ],
+        "type": "object",
+        "properties": {
+          "reviewerId": {
+            "type": "string"
+          },
+          "decision": {
+            "type": "string"
+          },
+          "note": {
             "type": "string"
           }
         }

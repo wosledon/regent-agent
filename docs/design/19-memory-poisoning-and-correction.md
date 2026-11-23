@@ -237,5 +237,6 @@ memory.correction.published
 - CorrectionTask 必须有拟纠正内容，复核者不能是原始作者或任务执行者；批准后生成 Verified 新版本、旧版本置为 Superseded，并替换向量和图关系。
 - 影响记录支持 Task、Summary、Decision、Review、Release、ExternalAction 和 Context；查询按租户和 claim 隔离。
 - 捕获、检测、隔离、申诉、复核、纠错和影响记录写入哈希审计与 Outbox；高风险检测和隔离写入站内通知。`memory.correction.published` 事件携带新旧 claim ID。
-- 索引重建、隔离复核、纠错批准、遗忘/删除和图关系变更要求 Owner 或 Co-Owner 的 `MemoryGovernor` 策略；普通认证用户仍可捕获、检索、报告 Finding 和提交申诉。
+- 索引重建、隔离复核、纠错批准、发布复核、遗忘/归档/删除和图关系变更要求 Owner 或 Co-Owner 的 `MemoryGovernor` 策略；普通认证用户仍可捕获、检索、报告 Finding 和提交申诉。
+- 个人 claim 的检索、详情、影响和图查询按作者过滤；组织/知识库候选必须由非作者独立复核发布。
 - 当前本地实现覆盖 claim 级检测、隔离、申诉、独立纠错、影响记录和索引传播；在途任务自动失效、已完成任务自动回归和外部动作自动进入安全事件仍待跨模块联动。

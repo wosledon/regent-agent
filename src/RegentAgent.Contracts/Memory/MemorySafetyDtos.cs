@@ -57,3 +57,4 @@ public sealed record MemoryCorrectionApprovalRequest(string ReviewerId);
 public sealed record MemoryImpactRequest(string TargetType, string TargetId, string Risk, string RequiredAction);
 public sealed record MemoryAppealRequest(string Reason, string SubmittedBy);
 public sealed record MemoryReviewRequest(string ReviewerId, string Resolution, bool Release);
+public sealed record MemoryPublishRequest(string ReviewerId, string Decision, string Note);

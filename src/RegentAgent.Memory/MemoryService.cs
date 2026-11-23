@@ -23,7 +23,7 @@ public sealed class MemoryService(JsonDocumentStore<MemoryClaim> claims, JsonDoc
     }
 
     public async Task<MemoryClaim> CaptureAsync(string tenantId, string scope, string content, string sourceRef,
-        double confidence, string taint, string author, CancellationToken cancellationToken)
+        double confidence, string taint, string author, CancellationToken cancellationToken, bool requireReview = false)
     {
         if (string.IsNullOrWhiteSpace(content) || string.IsNullOrWhiteSpace(sourceRef) || string.IsNullOrWhiteSpace(author))
             throw new InvalidOperationException("Memory content, source and author are required.");
@@ -32,27 +32,51 @@ public sealed class MemoryService(JsonDocumentStore<MemoryClaim> claims, JsonDoc
         if (taint is not ("trusted" or "untrusted" or "poisoned"))
             throw new InvalidOperationException("Invalid memory taint.");
         if (confidence is < 0 or > 1) throw new InvalidOperationException("Confidence must be in [0, 1].");
+        var status = requireReview && scope != "personal" ? "Candidate" : "Active";
         var claim = new MemoryClaim(Guid.NewGuid().ToString("N"), tenantId, scope, content, sourceRef,
-            confidence, taint, "Active", 1, Author: author, CreatedAt: DateTimeOffset.UtcNow);
+            confidence, taint, status, 1, Author: author, CreatedAt: DateTimeOffset.UtcNow);
         await claims.PutAsync(claim.Id, claim, cancellationToken);
         if (index is not null) await index.IndexClaimAsync(claim, cancellationToken);
         if (safety is not null) await safety.DetectAsync(claim.Id, tenantId, cancellationToken);
         return await claims.GetAsync(claim.Id, cancellationToken) ?? claim;
     }
 
-    public async Task<MemoryClaim?> GetAsync(string claimId, string tenantId, CancellationToken cancellationToken)
+    public async Task<MemoryClaim?> GetAsync(string claimId, string tenantId, string? viewer,
+        CancellationToken cancellationToken)
     {
         var claim = await claims.GetAsync(claimId, cancellationToken);
-        return claim is not null && claim.TenantId == tenantId ? claim : null;
+        return claim is not null && claim.TenantId == tenantId
+            && (claim.Scope != "personal" || claim.Author == viewer) ? claim : null;
     }
 
-    public async Task<IReadOnlyList<MemoryClaim>> SearchAsync(string tenantId, string? query, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<MemoryClaim>> SearchAsync(string tenantId, string? query, string? viewer,
+        CancellationToken cancellationToken)
     {
-        var matches = (await claims.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId && x.Status == "Active" &&
-            (string.IsNullOrWhiteSpace(query) || x.Content.Contains(query, StringComparison.OrdinalIgnoreCase))).ToArray();
+        var matches = (await claims.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId && x.Status == "Active"
+            && (x.Scope != "personal" || x.Author == viewer)
+            && (string.IsNullOrWhiteSpace(query) || x.Content.Contains(query, StringComparison.OrdinalIgnoreCase))).ToArray();
         foreach (var claim in matches)
             await claims.PutAsync(claim.Id, claim with { LastAccessedAt = DateTimeOffset.UtcNow, RecallCount = claim.RecallCount + 1 }, cancellationToken);
         return matches;
+    }
+
+    public Task<MemoryClaim?> GetAsync(string claimId, string tenantId, CancellationToken cancellationToken) =>
+        GetAsync(claimId, tenantId, null, cancellationToken);
+
+    public Task<IReadOnlyList<MemoryClaim>> SearchAsync(string tenantId, string? query,
+        CancellationToken cancellationToken) => SearchAsync(tenantId, query, null, cancellationToken);
+
+    public async Task<IReadOnlyList<MemoryClaim>> ListReviewQueueAsync(string tenantId,
+        CancellationToken cancellationToken) =>
+        (await claims.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId && x.Status == "Candidate")
+            .OrderByDescending(x => x.CreatedAt).ToArray();
+
+    public async Task ArchiveAsync(string claimId, string tenantId, CancellationToken cancellationToken)
+    {
+        var claim = await claims.GetAsync(claimId, cancellationToken) ?? throw new KeyNotFoundException("Memory claim not found.");
+        if (claim.TenantId != tenantId) throw new UnauthorizedAccessException();
+        await claims.PutAsync(claimId, claim with { Status = "Archived" }, cancellationToken);
+        if (index is not null) await index.RemoveFromRecallAsync(tenantId, claimId, cancellationToken);
     }
 
     public async Task DecayAsync(string tenantId, CancellationToken cancellationToken)

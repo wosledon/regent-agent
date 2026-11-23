@@ -99,13 +99,18 @@ public sealed class MemoryIndexService(
         return conflicts;
     }
 
+    public Task<MemorySearchResult> SearchHybridAsync(string tenantId, string query, string? scope,
+        int maxResults, CancellationToken cancellationToken) =>
+        SearchHybridAsync(tenantId, query, scope, maxResults, null, cancellationToken);
+
     public async Task<MemorySearchResult> SearchHybridAsync(string tenantId, string query, string? scope,
-        int maxResults, CancellationToken cancellationToken)
+        int maxResults, string? viewer, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new InvalidOperationException("Search query is required.");
         if (maxResults is < 1 or > 50) throw new InvalidOperationException("maxResults must be between 1 and 50.");
         var candidates = (await claims.GetAllAsync(cancellationToken))
             .Where(x => x.TenantId == tenantId && x.Status is "Active" or "Disputed"
+                && (x.Scope != "personal" || x.Author == viewer)
                 && (scope is null || x.Scope == scope))
             .OrderBy(x => x.Id, StringComparer.Ordinal).Take(200).ToArray();
         foreach (var claim in candidates) await IndexClaimAsync(claim, cancellationToken);

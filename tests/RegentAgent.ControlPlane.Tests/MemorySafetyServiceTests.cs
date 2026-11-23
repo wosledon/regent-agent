@@ -163,6 +163,56 @@ public sealed class MemorySafetyServiceTests
     }
 
     [Fact]
+    public async Task Personal_memory_is_visible_only_to_its_author()
+    {
+        using var fixture = new MemoryFixture();
+        var personal = await fixture.Memory.CaptureAsync(Tenant, "personal", "Private launch notes", "source:private",
+            0.8, "trusted", "Alice", CancellationToken.None);
+        await fixture.Memory.CaptureAsync(Tenant, "organization", "Public launch checklist", "source:public",
+            0.8, "trusted", "Bob", CancellationToken.None);
+
+        var alice = await fixture.Index.SearchHybridAsync(Tenant, "launch", null, 10, "Alice", CancellationToken.None);
+        var bob = await fixture.Index.SearchHybridAsync(Tenant, "launch", null, 10, "Bob", CancellationToken.None);
+
+        Assert.Contains(alice.Hits, hit => hit.ClaimId == personal.Id);
+        Assert.DoesNotContain(bob.Hits, hit => hit.ClaimId == personal.Id);
+        Assert.Null(await fixture.Memory.GetAsync(personal.Id, Tenant, "Bob", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Organization_candidate_requires_independent_publication_review()
+    {
+        using var fixture = new MemoryFixture();
+        var candidate = await fixture.Memory.CaptureAsync(Tenant, "organization", "Reviewed release policy", "source:policy",
+            0.9, "trusted", "Controller", CancellationToken.None, requireReview: true);
+        Assert.Equal("Candidate", candidate.Status);
+        Assert.Empty((await fixture.Index.SearchHybridAsync(Tenant, "release policy", null, 10, "Boss", CancellationToken.None)).Hits);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Safety.PublishAsync(candidate.Id, Tenant,
+            new MemoryPublishRequest("Controller", "Approve", "Self publication"), CancellationToken.None));
+        var published = await fixture.Safety.PublishAsync(candidate.Id, Tenant,
+            new MemoryPublishRequest("Boss", "Approve", "Evidence verified"), CancellationToken.None);
+        var result = await fixture.Index.SearchHybridAsync(Tenant, "release policy", null, 10, "Boss", CancellationToken.None);
+
+        Assert.True(published.Verified);
+        Assert.Single(result.Hits);
+    }
+
+    [Fact]
+    public async Task Archive_stops_recall_but_preserves_the_claim()
+    {
+        using var fixture = new MemoryFixture();
+        var claim = await fixture.Memory.CaptureAsync(Tenant, "organization", "Old operating guideline", "source:old",
+            0.8, "trusted", "Boss", CancellationToken.None);
+
+        await fixture.Memory.ArchiveAsync(claim.Id, Tenant, CancellationToken.None);
+        var result = await fixture.Index.SearchHybridAsync(Tenant, "operating guideline", null, 10, "Boss", CancellationToken.None);
+
+        Assert.Empty(result.Hits);
+        Assert.Equal("Archived", (await fixture.Claims.GetAsync(claim.Id, CancellationToken.None))!.Status);
+    }
+
+    [Fact]
     public async Task Cross_tenant_claim_access_is_rejected()
     {
         using var fixture = new MemoryFixture();
