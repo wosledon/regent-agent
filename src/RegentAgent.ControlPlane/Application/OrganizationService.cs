@@ -7,7 +7,8 @@ using RegentAgent.ControlPlane.Identity;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class OrganizationService(RegentDbContext db, ITenantContext tenant, TimeProvider clock)
+public sealed class OrganizationService(RegentDbContext db, ITenantContext tenant, TimeProvider clock,
+    AuditIntegrityService? audit = null)
 {
     public async Task<CharterDto?> GetCharterAsync(CancellationToken cancellationToken)
     {
@@ -17,6 +18,9 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
 
     public async Task<CharterDto> UpdateCharterAsync(CharterDto input, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(input.Mission)) throw new InvalidOperationException("Company mission is required.");
+        if (input.MonthlyBudgetMinor < 0 || input.Currency.Length != 3)
+            throw new InvalidOperationException("Budget and ISO currency are invalid.");
         var id = tenant.TenantId.Value;
         var charter = await db.Charters.SingleOrDefaultAsync(x => x.TenantId == id, cancellationToken);
         if (charter is null)
@@ -32,12 +36,14 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         charter.Version += 1;
         charter.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("charter.updated", new { version = charter.Version, budget_minor = charter.MonthlyBudgetMinor, currency = charter.Currency }, cancellationToken);
         return ToCharter(charter);
     }
 
     public async Task<EmployeeSummary> StartCompanyAsync(CancellationToken cancellationToken)
     {
         var tenantId = tenant.TenantId.Value;
+        var started = false;
         var controllerPosition = await db.Positions.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Name == "Controller", cancellationToken);
         if (controllerPosition is null)
         {
@@ -49,6 +55,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
                 BudgetMinor = 1_000_000, Status = "Filled"
             };
             db.Positions.Add(controllerPosition);
+            started = true;
         }
 
         var controller = await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.DisplayName == "Controller", cancellationToken);
@@ -60,6 +67,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
                 DisplayName = "Controller", Position = "Controller", State = EmployeeState.Active
             };
             db.Employees.Add(controller);
+            started = true;
         }
         if (!await db.EmploymentPeriods.AnyAsync(x => x.TenantId == tenantId && x.EmployeeId == controller.Id && x.EndedAt == null, cancellationToken))
         {
@@ -70,6 +78,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
             });
         }
         await db.SaveChangesAsync(cancellationToken);
+        if (started) await AuditAsync("company.started", new { controller_employee_id = controller.Id, controller_position_id = controllerPosition.Id }, cancellationToken);
         return Mappings.ToSummary(controller, Freshness.Fresh);
     }
 
@@ -81,11 +90,14 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
 
     public async Task<PositionDto> CreatePositionAsync(PositionDto input, CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Responsibilities) || input.BudgetMinor < 0)
+            throw new InvalidOperationException("Position name, responsibilities and a valid budget are required.");
         var tenantId = tenant.TenantId.Value;
         if (input.ParentPositionId is { } parentId)
         {
             var parent = await db.Positions.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == parentId, cancellationToken)
                 ?? throw new KeyNotFoundException("Parent position not found.");
+            if (parent.Status is "Closed" or "Frozen") throw new InvalidOperationException("Cannot create a child under a closed or frozen position.");
             if (await GetDepthAsync(parent, tenantId, cancellationToken) >= 4)
                 throw new InvalidOperationException("Organization depth cannot exceed 4.");
         }
@@ -97,6 +109,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         };
         db.Positions.Add(record);
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("position.created", new { position_id = record.Id, parent_position_id = record.ParentPositionId }, cancellationToken);
         return ToPosition(record);
     }
 
@@ -107,6 +120,8 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
             ?? throw new KeyNotFoundException("Employee not found.");
         var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken)
             ?? throw new KeyNotFoundException("Position not found.");
+        if (employee.State != EmployeeState.Active) throw new InvalidOperationException("Only active employees can be assigned.");
+        if (position.Status is "Closed" or "Frozen") throw new InvalidOperationException("Position is not available for assignment.");
         var current = await db.EmploymentPeriods.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.EmployeeId == employeeId && x.Kind == "Primary" && x.EndedAt == null, cancellationToken);
         if (current is not null) current.EndedAt = clock.GetUtcNow();
         var period = new EmploymentPeriodRecord
@@ -116,23 +131,34 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         };
         db.EmploymentPeriods.Add(period);
         employee.Position = position.Name;
+        position.Status = "Filled";
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("employment.assigned", new { employee_id = employeeId, position_id = positionId, period_id = period.Id }, cancellationToken);
         return ToPeriod(period);
     }
 
     public async Task<OrgDelegationDto> DelegateAsync(Guid delegateEmployeeId, Guid subtreePositionId,
         IReadOnlyList<string> actions, long budgetLimitMinor, int minutes, CancellationToken cancellationToken)
     {
+        if (actions.Count == 0 || actions.Any(string.IsNullOrWhiteSpace) || budgetLimitMinor < 0 || minutes <= 0)
+            throw new InvalidOperationException("Delegation actions, budget and duration are invalid.");
         var tenantId = tenant.TenantId.Value;
+        var delegator = await db.Employees.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.DisplayName == "Controller" && x.State == EmployeeState.Active, cancellationToken)
+            ?? throw new KeyNotFoundException("Controller not found.");
+        if (!await db.Employees.AnyAsync(x => x.TenantId == tenantId && x.Id == delegateEmployeeId && x.State == EmployeeState.Active, cancellationToken))
+            throw new KeyNotFoundException("Delegate employee not found.");
+        if (!await db.Positions.AnyAsync(x => x.TenantId == tenantId && x.Id == subtreePositionId && x.Status != "Closed", cancellationToken))
+            throw new KeyNotFoundException("Delegation subtree not found.");
         var record = new OrgDelegationRecord
         {
             Id = Guid.NewGuid(), TenantId = tenantId,
-            DelegatorEmployeeId = Guid.Empty, DelegateEmployeeId = delegateEmployeeId,
+            DelegatorEmployeeId = delegator.Id, DelegateEmployeeId = delegateEmployeeId,
             SubtreePositionId = subtreePositionId, ActionsJson = JsonSerializer.Serialize(actions),
             BudgetLimitMinor = budgetLimitMinor, ExpiresAt = clock.GetUtcNow().AddMinutes(minutes)
         };
         db.OrgDelegations.Add(record);
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("org.delegated", new { delegation_id = record.Id, delegate_employee_id = delegateEmployeeId, subtree_position_id = subtreePositionId }, cancellationToken);
         return ToDelegation(record);
     }
 
@@ -142,6 +168,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
             ?? throw new KeyNotFoundException("Delegation not found.");
         record.Status = "Revoked";
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("org.delegation.revoked", new { delegation_id = id }, cancellationToken);
     }
 
     public async Task OffboardAsync(Guid employeeId, string approvalId, CancellationToken cancellationToken)
@@ -156,12 +183,26 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         employee.StateReason = "Offboarded after Boss approval";
         var periods = await db.EmploymentPeriods.Where(x => x.TenantId == tenantId && x.EmployeeId == employeeId && x.EndedAt == null).ToListAsync(cancellationToken);
         foreach (var period in periods) period.EndedAt = clock.GetUtcNow();
+        foreach (var positionId in periods.Select(x => x.PositionId).Distinct())
+        {
+            if (!await db.EmploymentPeriods.AnyAsync(x => x.TenantId == tenantId && x.PositionId == positionId
+                    && x.EmployeeId != employeeId && x.EndedAt == null, cancellationToken))
+            {
+                var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken);
+                if (position is not null) position.Status = "Open";
+            }
+        }
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("employee.offboarded", new { employee_id = employeeId, approval_id = approvalId }, cancellationToken);
     }
 
     public async Task<CandidateDto> CreateCandidateAsync(Guid positionId, string displayName, string modelVersion,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(displayName) || string.IsNullOrWhiteSpace(modelVersion))
+            throw new InvalidOperationException("Candidate name and model version are required.");
+        if (!await db.Positions.AnyAsync(x => x.TenantId == tenant.TenantId.Value && x.Id == positionId && (x.Status == "Open" || x.Status == "Frozen"), cancellationToken))
+            throw new KeyNotFoundException("Position is not open for recruitment.");
         var candidate = new CandidateRecord
         {
             Id = Guid.NewGuid(), TenantId = tenant.TenantId.Value, PositionId = positionId,
@@ -169,6 +210,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         };
         db.Candidates.Add(candidate);
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("candidate.created", new { candidate_id = candidate.Id, position_id = positionId }, cancellationToken);
         return ToCandidate(candidate);
     }
 
@@ -196,6 +238,10 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         var tenantId = tenant.TenantId.Value;
         var candidate = await db.Candidates.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == candidateId, cancellationToken)
             ?? throw new KeyNotFoundException("Candidate not found.");
+        if (candidate.Status is not ("Assessed" or "Offered")) throw new InvalidOperationException("Candidate must be assessed or offered before hiring.");
+        var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == candidate.PositionId, cancellationToken)
+            ?? throw new KeyNotFoundException("Candidate position not found.");
+        if (position.Status is "Closed" or "Frozen") throw new InvalidOperationException("Candidate position is not available.");
         var approval = await db.Approvals.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == Guid.Parse(approvalId), cancellationToken);
         if (approval is null || approval.State != ApprovalState.Approved || approval.ActionType != "hiring.hire" || !approval.Title.Contains(candidate.DisplayName, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Human Boss approval is required for hiring.");
@@ -205,7 +251,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         var employee = new EmployeeRecord
         {
             Id = Guid.NewGuid(), TenantId = tenantId, EmployeeNo = $"EMP-{number:D4}",
-            DisplayName = candidate.DisplayName, Position = "Candidate", State = EmployeeState.Active
+            DisplayName = candidate.DisplayName, Position = position.Name, State = EmployeeState.Active
         };
         db.Employees.Add(employee);
         db.EmploymentPeriods.Add(new EmploymentPeriodRecord
@@ -214,7 +260,9 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
             PositionId = candidate.PositionId, Kind = "Primary", StartedAt = clock.GetUtcNow()
         });
         candidate.Status = "Hired";
+        position.Status = "Filled";
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("candidate.hired", new { candidate_id = candidateId, employee_id = employee.Id, position_id = position.Id, approval_id = approvalId }, cancellationToken);
         return Mappings.ToSummary(employee, Freshness.Fresh);
     }
 
@@ -225,9 +273,12 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         var tenantId = tenant.TenantId.Value;
         var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken)
             ?? throw new KeyNotFoundException("Position not found.");
+        if (status == "Closed" && await db.EmploymentPeriods.AnyAsync(x => x.TenantId == tenantId && x.PositionId == positionId && x.EndedAt == null, cancellationToken))
+            throw new InvalidOperationException("Cannot close a filled position before offboarding its employee.");
         position.Status = status;
         position.Version++;
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("position.status_changed", new { position_id = positionId, status }, cancellationToken);
         return ToPosition(position);
     }
 
@@ -240,21 +291,28 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         var target = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == targetId, cancellationToken)
             ?? throw new KeyNotFoundException("Target position not found.");
         if (source.Id == target.Id) throw new InvalidOperationException("Cannot merge a position into itself.");
+        if (await IsDescendantAsync(sourceId, targetId, tenantId, cancellationToken))
+            throw new InvalidOperationException("Cannot merge a position into its descendant.");
         var periods = await db.EmploymentPeriods.Where(x => x.TenantId == tenantId && x.PositionId == sourceId && x.EndedAt == null).ToListAsync(cancellationToken);
         foreach (var period in periods) period.PositionId = targetId;
         var employees = await db.Employees.Where(x => x.TenantId == tenantId && x.Position == source.Name).ToListAsync(cancellationToken);
         foreach (var employee in employees) employee.Position = target.Name;
+        foreach (var child in await db.Positions.Where(x => x.TenantId == tenantId && x.ParentPositionId == sourceId).ToListAsync(cancellationToken))
+            child.ParentPositionId = targetId;
         source.Status = "Closed";
         source.Version++;
         target.Status = "Filled";
         target.Version++;
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("position.merged", new { source_position_id = sourceId, target_position_id = targetId }, cancellationToken);
         return ToPosition(target);
     }
 
     public async Task<PositionDto> SplitPositionAsync(Guid positionId, string name, string responsibilities,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(responsibilities))
+            throw new InvalidOperationException("Split position name and responsibilities are required.");
         var tenantId = tenant.TenantId.Value;
         var source = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken)
             ?? throw new KeyNotFoundException("Position not found.");
@@ -268,6 +326,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         source.Version++;
         db.Positions.Add(split);
         await db.SaveChangesAsync(cancellationToken);
+        await AuditAsync("position.split", new { source_position_id = positionId, split_position_id = split.Id }, cancellationToken);
         return ToPosition(split);
     }
 
@@ -359,6 +418,21 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
     private static FairnessAuditDto ToFairnessDto(Data.FairnessAuditRecord x) =>
         new() { Id = x.Id, TenantId = x.TenantId, PositionId = x.PositionId, Period = x.Period, SampleSize = x.SampleSize, SelectionRateRatio = x.SelectionRateRatio, Status = x.Status, DetailsJson = x.DetailsJson };
 
+    private async Task<bool> IsDescendantAsync(Guid ancestorId, Guid candidateId, Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var currentId = candidateId;
+        var visited = new HashSet<Guid>();
+        while (visited.Add(currentId))
+        {
+            var current = await db.Positions.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == currentId, cancellationToken);
+            if (current is null || current.ParentPositionId is not { } parentId) return false;
+            if (parentId == ancestorId) return true;
+            currentId = parentId;
+        }
+        throw new InvalidOperationException("Organization hierarchy contains a cycle.");
+    }
+
     private async Task<int> GetDepthAsync(PositionRecord position, Guid tenantId, CancellationToken cancellationToken)
     {
         var depth = 1;
@@ -370,6 +444,10 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         }
         return depth;
     }
+
+    private Task AuditAsync(string eventType, object payload, CancellationToken cancellationToken) =>
+        audit?.AppendAsync(tenant.TenantId.Value, eventType, tenant.DisplayName, payload, cancellationToken)
+            ?? Task.CompletedTask;
 
     private static CharterDto ToCharter(CharterRecord x) => new(x.Mission,
         JsonSerializer.Deserialize<string[]>(x.ConstraintsJson) ?? [],

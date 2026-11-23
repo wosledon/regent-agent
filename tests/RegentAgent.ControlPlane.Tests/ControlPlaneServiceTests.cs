@@ -56,6 +56,32 @@ public sealed class ControlPlaneServiceTests
         Assert.Single(await db.AuditRecords.Where(x => x.EventType == "approval.decided").ToListAsync());
     }
 
+    [Fact]
+    public async Task Expired_approvals_default_to_rejected_and_are_audited()
+    {
+        await using var db = CreateDb();
+        await DbInitializer.InitializeAsync(db, CancellationToken.None);
+        var clock = new FixedTimeProvider();
+        var approval = new ApprovalRecord
+        {
+            Id = Guid.NewGuid(), TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            ActionType = "release.execute", Title = "Expired release", Impact = "No decision", Severity = Severity.High,
+            Requester = "Controller", CreatedAt = clock.GetUtcNow().AddHours(-2), ExpiresAt = clock.GetUtcNow().AddMinutes(-1)
+        };
+        db.Approvals.Add(approval);
+        await db.SaveChangesAsync();
+        var audit = new AuditIntegrityService(db, clock);
+        await audit.BackfillAsync(CancellationToken.None);
+        var service = new ApprovalExpiryService(db, audit, clock);
+
+        var expired = await service.ExpireDueAsync(CancellationToken.None);
+
+        Assert.Equal(1, expired);
+        Assert.Equal(ApprovalState.Expired, (await db.Approvals.FindAsync(approval.Id))!.State);
+        Assert.Contains(await db.AuditRecords.ToListAsync(), item => item.EventType == "approval.expired" && item.PayloadJson.Contains(approval.Id.ToString()));
+        Assert.Contains(await db.Notifications.ToListAsync(), item => item.Title.EndsWith("Expired"));
+    }
+
     private static RegentDbContext CreateDb() => new(
         new DbContextOptionsBuilder<RegentDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())

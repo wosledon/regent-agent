@@ -51,6 +51,7 @@ builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<ApprovalService>();
+builder.Services.AddScoped<ApprovalExpiryService>();
 builder.Services.AddScoped<ArtifactService>();
 builder.Services.AddScoped<TaskExecutionService>();
 builder.Services.AddScoped<TenantService>();
@@ -183,6 +184,7 @@ builder.Services.AddScoped<IdempotencyService>();
 builder.Services.AddScoped<OutboxService>();
 builder.Services.AddScoped<SchemaVersionService>();
 builder.Services.AddHostedService<OutboxWorker>();
+builder.Services.AddHostedService<ApprovalExpiryWorker>();
 builder.Services.AddHostedService<EvaluationRegressionWorker>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -867,6 +869,8 @@ api.MapGet("/schema/version", async (SchemaVersionService service, CancellationT
 api.MapPost("/approvals", async (CreateApprovalDto input, ApprovalService service,
     CancellationToken cancellationToken) => Results.Ok(await service.CreateAsync(input, cancellationToken)))
     .Produces<ApprovalDto>().WithTags("Approvals");
+api.MapPost("/approvals/expire-due", async (ApprovalExpiryService service, CancellationToken cancellationToken) =>
+    Results.Ok(new { expired = await service.ExpireDueAsync(cancellationToken) })).WithTags("Approvals");
 api.MapGet("/audit/verify", async (HttpContext context, AuditIntegrityService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.VerifyAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<AuditVerificationDto>().WithTags("Audit");
