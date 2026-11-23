@@ -575,6 +575,9 @@ api.MapGet("/employees/{id:guid}/timeline", async (Guid id, EmployeeService serv
     return timeline is null ? Results.NotFound() : Results.Ok(timeline);
 }).Produces<EmployeeTimeline>(StatusCodes.Status200OK).Produces(StatusCodes.Status404NotFound).WithTags("Organization");
 
+api.MapPost("/approvals", async (CreateApprovalDto input, ApprovalService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.CreateAsync(input, cancellationToken)))
+    .Produces<ApprovalDto>().WithTags("Approvals");
 api.MapGet("/audit/verify", async (HttpContext context, AuditIntegrityService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.VerifyAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<AuditVerificationDto>().WithTags("Audit");

@@ -11,6 +11,28 @@ namespace RegentAgent.ControlPlane.Application;
 
 public sealed class ApprovalService(RegentDbContext db, ITenantContext tenant, TimeProvider clock, AuditIntegrityService audit)
 {
+    public async Task<ApprovalDto> CreateAsync(CreateApprovalDto input, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(input.Title) || string.IsNullOrWhiteSpace(input.ActionType))
+            throw new InvalidOperationException("Approval title and action type are required.");
+        if (input.ExpiresInMinutes <= 0) throw new InvalidOperationException("Approval expiry must be positive.");
+        var tenantId = tenant.TenantId.Value;
+        var record = new ApprovalRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ActionType = input.ActionType,
+            Title = input.Title, Impact = input.Impact, Severity = input.Severity,
+            Requester = input.Requester, CreatedAt = clock.GetUtcNow(),
+            ExpiresAt = clock.GetUtcNow().AddMinutes(input.ExpiresInMinutes),
+            OptionsJson = JsonSerializer.Serialize(new[] { "Approve", "Reject" }),
+            EvidenceJson = JsonSerializer.Serialize(input.EvidenceRefs)
+        };
+        db.Approvals.Add(record);
+        await audit.AppendAsync(tenantId, "approval.created", tenant.DisplayName,
+            new { approval_id = record.Id, action_type = record.ActionType }, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        return Mappings.ToDto(record);
+    }
+
     public async Task<ApprovalDto?> GetAsync(ApprovalId id, CancellationToken cancellationToken)
     {
         var tenantId = tenant.TenantId.Value;

@@ -19,7 +19,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<SessionSummary | null>(readSession);
   const login = useCallback(async (email: string) => {
     const result = await api.devLogin(email);
-    const next = { email: result.email, displayName: result.display_name };
+    const next = { email: result.email, displayName: result.display_name, tenantId: result.tenant_id };
     sessionStorage.setItem(storageKey, JSON.stringify(next));
     setSession(next);
   }, []);
@@ -28,6 +28,14 @@ export function AuthProvider({ children }: PropsWithChildren) {
     sessionStorage.removeItem(storageKey);
     setSession(null);
   }, []);
-  const value = useMemo(() => ({ session, login, logout }), [session, login, logout]);
+  const switchTenant = useCallback(async (tenantId: string) => {
+    await api.switchTenant(tenantId);
+    setSession(current => {
+      const next = current ? { ...current, tenantId } : current;
+      if (next) sessionStorage.setItem(storageKey, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+  const value = useMemo(() => ({ session, login, logout, switchTenant }), [session, login, logout, switchTenant]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -10,11 +10,24 @@ const navigation = [
   { key: 'dashboard', path: '/', icon: 'dashboard' as const },
   { key: 'projects', path: '/projects', icon: 'evaluation' as const },
   { key: 'organization', path: '/organization', icon: 'organization' as const },
+  { key: 'organizationManage', path: '/organization/manage', icon: 'organization' as const },
   { key: 'messages', path: '/messages', icon: 'notification' as const },
-  { key: 'models', path: '/models', icon: 'evaluation' as const },
+  { key: 'workflows', path: '/workflows', icon: 'evaluation' as const },
   { key: 'knowledge', path: '/knowledge', icon: 'evaluation' as const },
+  { key: 'journal', path: '/journal', icon: 'evaluation' as const },
+  { key: 'performance', path: '/performance', icon: 'evaluation' as const },
+  { key: 'evaluations', path: '/evaluations', icon: 'evaluation' as const },
+  { key: 'models', path: '/models', icon: 'evaluation' as const },
+  { key: 'budget', path: '/budget', icon: 'evaluation' as const },
+  { key: 'runtimePolicy', path: '/budget/runtime', icon: 'evaluation' as const },
   { key: 'governance', path: '/governance/approvals', icon: 'notification' as const },
-  { key: 'settings', path: '/settings', icon: 'settings' as const }
+  { key: 'actionCenter', path: '/governance/action-center', icon: 'notification' as const },
+  { key: 'notifications', path: '/governance/notifications', icon: 'notification' as const },
+  { key: 'security', path: '/governance/security', icon: 'notification' as const },
+  { key: 'lifecycle', path: '/governance/lifecycle', icon: 'notification' as const },
+  { key: 'compliance', path: '/governance/compliance', icon: 'notification' as const },
+  { key: 'settings', path: '/settings', icon: 'settings' as const },
+  { key: 'components', path: '/dev/components', icon: 'dashboard' as const }
 ];
 
 export function AppShell() {

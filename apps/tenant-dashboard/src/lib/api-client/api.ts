@@ -36,8 +36,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? undefined as T : await response.json() as T;
 }
 
+function post<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+}
+
+function put<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, { method: 'PUT', body: body === undefined ? undefined : JSON.stringify(body) });
+}
+
 export const api = {
-  devLogin: (email: string) => request<{ email: string; display_name: string }>('/auth/dev-login', {
+  devLogin: (email: string) => request<{ email: string; display_name: string; tenant_id: string }>('/auth/dev-login', {
     method: 'POST', body: JSON.stringify({ email } satisfies Schema['DevLoginRequest'])
   }),
   dashboard: () => request<Schema['DashboardSummary']>('/v1/dashboard/summary'),
@@ -45,6 +53,7 @@ export const api = {
   project: (id: string) => request<Schema['ProjectDetail']>(`/v1/projects/${id}`),
   employees: () => request<Schema['EmployeeSummary'][]>('/v1/employees'),
   employeeTimeline: (id: string) => request<Schema['EmployeeTimeline']>(`/v1/employees/${id}/timeline`),
+  createApproval: (body: Schema['CreateApprovalDto']) => post<Schema['ApprovalDto']>('/v1/approvals', body),
   approval: (id: string) => request<Schema['ApprovalDto']>(`/v1/approvals/${id}`),
   decideApproval: (id: string, decision: Schema['ApprovalDecision'], idempotencyKey: string) =>
     request<Schema['ApprovalDto']>(`/v1/approvals/${id}/decision`, {
@@ -72,5 +81,74 @@ export const api = {
     request<ComplianceProfile>('/v1/compliance/profile', { method: 'PUT', body: JSON.stringify(profile) }),
   notifications: () => request<NotificationItem[]>('/v1/notifications'),
   notificationAction: (id: string, action: 'read' | 'acknowledge' | 'archive') =>
-    request<void>(`/v1/notifications/${id}/${action}`, { method: 'POST' })
+    request<void>(`/v1/notifications/${id}/${action}`, { method: 'POST' }),
+  tenants: () => request<Schema['TenantDto'][]>('/v1/tenants'),
+  createTenant: (body: Schema['CreateTenantRequest']) => post<Schema['TenantDto']>('/v1/tenants', body),
+  switchTenant: (tenantId: string) => post<{ tenant_id: string }>('/auth/switch-tenant', { tenantId }),
+  charter: () => request<Schema['CharterDto']>('/v1/charter'),
+  updateCharter: (charter: Schema['CharterDto']) => put<Schema['CharterDto']>('/v1/charter', charter),
+  startCompany: () => post<Schema['EmployeeSummary']>('/v1/company/start'),
+  positions: () => request<Schema['PositionDto'][]>('/v1/positions'),
+  createPosition: (position: Schema['PositionDto']) => post<Schema['PositionDto']>('/v1/positions', position),
+  createCandidate: (body: Schema['CreateCandidateRequest']) => post<Schema['CandidateDto']>('/v1/candidates', body),
+  assessCandidate: (id: string, assessment: Schema['CandidateAssessmentDto']) =>
+    post<Schema['CandidateDto']>(`/v1/candidates/${id}/assessment`, assessment),
+  delivery: (projectId: string) => request<Schema['ProjectDeliveryState']>(`/v1/projects/${projectId}/delivery`),
+  addFinding: (projectId: string, finding: Schema['ResearchFinding']) =>
+    post<Schema['ResearchFinding']>(`/v1/projects/${projectId}/delivery/findings`, finding),
+  createBrief: (projectId: string, brief: Schema['ProductBrief']) =>
+    post<Schema['ProductBrief']>(`/v1/projects/${projectId}/delivery/briefs`, brief),
+  createRequirement: (projectId: string, requirement: Schema['DeliveryRequirement']) =>
+    post<Schema['DeliveryRequirement']>(`/v1/projects/${projectId}/delivery/requirements`, requirement),
+  readyRequirement: (projectId: string, requirementId: string, totalWeight: number) =>
+    post<Schema['DeliveryRequirement']>(`/v1/projects/${projectId}/delivery/requirements/${requirementId}/ready`, { totalWeight }),
+  proposePlan: (projectId: string, plan: Schema['DecompositionPlan']) =>
+    post<Schema['DecompositionPlan']>(`/v1/projects/${projectId}/delivery/plans`, plan),
+  approvePlan: (projectId: string, planId: string) =>
+    post<Schema['DecompositionPlan']>(`/v1/projects/${projectId}/delivery/plans/${planId}/approve`),
+  reportDefect: (projectId: string, defect: Schema['Defect']) =>
+    post<Schema['Defect']>(`/v1/projects/${projectId}/delivery/defects`, defect),
+  addReview: (projectId: string, review: Schema['Review']) =>
+    post<Schema['Review']>(`/v1/projects/${projectId}/delivery/reviews`, review),
+  addAcceptanceReport: (projectId: string, report: Schema['AcceptanceReport']) =>
+    post<Schema['AcceptanceReport']>(`/v1/projects/${projectId}/delivery/acceptance-reports`, report),
+  releaseProject: (projectId: string, version: string, artifactRef: string) =>
+    post<Schema['ReleaseRecord']>(`/v1/projects/${projectId}/delivery/releases`, { version, artifactRef }),
+  governance: () => request<Schema['GovernanceState']>('/v1/governance'),
+  registerTool: (tool: Schema['ToolManifest']) => post<Schema['ToolManifest']>('/v1/governance/tools', tool),
+  admitTool: (id: string, reviewer: string) => post<Schema['ToolAdmissionReview']>(`/v1/governance/tools/${id}/admit`, { reviewer }),
+  authorizeTool: (body: Schema['ToolAuthorizationRequest']) => post<Schema['ToolAuthorizationResult']>('/v1/governance/tool-calls/authorize', body),
+  scanInjection: (content: string) => post<Schema['InjectionScanResult']>('/v1/governance/injections/scan', { content }),
+  redactDlp: (content: string) => post<Schema['DlpRedactionResult']>('/v1/governance/dlp/redact', { content }),
+  createIncident: (incident: Schema['SecurityIncident']) => post<Schema['SecurityIncident']>('/v1/governance/incidents', incident),
+  containIncident: (id: string, action: string) => post<Schema['SecurityIncident']>(`/v1/governance/incidents/${id}/contain`, { action }),
+  recoverIncident: (id: string, summary: string) => post<Schema['SecurityIncident']>(`/v1/governance/incidents/${id}/recover`, { summary }),
+  closeIncident: (id: string, retrospective: string) => post<Schema['SecurityIncident']>(`/v1/governance/incidents/${id}/close`, { retrospective }),
+  createApprovalDelegation: (body: Schema['ApprovalDelegation']) => post<Schema['ApprovalDelegation']>('/v1/governance/approval-delegations', body),
+  lifecycle: () => request<Schema['DataLifecycleState']>('/v1/lifecycle'),
+  softDelete: (body: Schema['SoftDeleteRequest']) => post<Schema['DeletionRequestRecord']>('/v1/lifecycle/deletions', body),
+  restoreDeletion: (id: string) => post<Schema['DeletionRequestRecord']>(`/v1/lifecycle/deletions/${id}/restore`),
+  purgeDeletion: (id: string, confirmation: string) => post<Schema['DeletionProof']>(`/v1/lifecycle/deletions/${id}/purge`, { confirmation }),
+  createLegalHold: (hold: Schema['LegalHoldRecord']) => post<Schema['LegalHoldRecord']>('/v1/lifecycle/legal-holds', hold),
+  releaseLegalHold: (id: string) => post<Schema['LegalHoldRecord']>(`/v1/lifecycle/legal-holds/${id}/release`),
+  createRetentionPolicy: (policy: Schema['RetentionPolicyRecord']) => post<Schema['RetentionPolicyRecord']>('/v1/lifecycle/retention-policies', policy),
+  createArchive: (period: string, tier: string, recordCount: number) => post<Schema['ArchiveManifest']>('/v1/lifecycle/archives', { period, tier, recordCount }),
+  restoreArchive: (id: string) => post<Schema['ArchiveManifest']>(`/v1/lifecycle/archives/${id}/restore`),
+  createBackup: (profile: string, rpoMinutes: number, rtoMinutes: number) => post<Schema['BackupRunRecord']>('/v1/lifecycle/backups', { profile, rpoMinutes, rtoMinutes }),
+  verifyRestore: (id: string) => post<Schema['BackupRunRecord']>(`/v1/lifecycle/backups/${id}/verify-restore`),
+  recordRights: (rights: Schema['RightsRecord']) => post<Schema['RightsRecord']>('/v1/lifecycle/rights', rights),
+  recordLicense: (license: Schema['LicenseRecord']) => post<Schema['LicenseRecord']>('/v1/lifecycle/licenses', license),
+  modelPool: () => request<Schema['ModelPoolState']>('/v1/models/pool'),
+  setManualPrice: (price: Schema['ManualModelPrice']) => post<Schema['ManualModelPrice']>('/v1/models/prices', price),
+  assignModelTier: (assignment: Schema['ModelTierAssignment']) => post<Schema['ModelTierAssignment']>('/v1/models/tiers', assignment),
+  bindModel: (binding: Schema['EmployeeModelBinding']) => post<Schema['EmployeeModelBinding']>('/v1/models/bindings', binding),
+  testModel: (provider: string, modelId: string) => post<Schema['ModelTestResult']>('/v1/models/test', { provider, modelId }),
+  runtimePolicy: () => request<Schema['RuntimePolicyState']>('/v1/runtime-policy'),
+  recordCost: (cost: Schema['CostEntry']) => post<Schema['CostEntry']>('/v1/runtime-policy/costs', cost),
+  costSummary: (projectId?: string) => request<Schema['CostSummaryDto']>(`/v1/runtime-policy/costs/summary${projectId ? `?projectId=${projectId}` : ''}`),
+  setBudget: (budget: Schema['BudgetPolicy']) => post<Schema['BudgetPolicy']>('/v1/runtime-policy/budgets', budget),
+  updateSchedule: (schedule: Schema['WorkSchedule']) => put<Schema['WorkSchedule']>('/v1/runtime-policy/schedule', schedule),
+  updateCapacity: (capacity: Schema['CapacityPolicy']) => put<Schema['CapacityPolicy']>('/v1/runtime-policy/capacity', capacity),
+  evaluationQa: () => request<Schema['EvaluationQaState']>('/v1/evaluation/qa'),
+  runQaGate: (body: Schema['EvaluationGateRequest']) => post<Schema['EvaluationQaGate']>('/v1/evaluation/qa/gate', body)
 };

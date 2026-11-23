@@ -9,8 +9,8 @@ test('login, dashboard, project and employee timeline', async ({ page }) => {
 
   await page.goto('/projects');
   await page.getByRole('link', { name: 'Open project' }).first().click();
-  await expect(page.getByText('Milestones')).toBeVisible();
-  await expect(page.getByText('Tasks')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Milestones' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Tasks' })).toBeVisible();
 
   await page.goto('/organization');
   await page.getByRole('link', { name: 'View work timeline' }).nth(1).click();
@@ -51,11 +51,62 @@ test('operations console supports tenant and grant views', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Support Grants' })).toBeVisible();
 });
 
+test('organization, delivery, security, lifecycle and runtime pages work end to end', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+
+  await page.goto('/organization/manage');
+  await expect(page.getByRole('heading', { name: 'Organization' })).toBeVisible();
+  await expect(page.getByText('Company charter')).toBeVisible();
+  await page.screenshot({ path: '/tmp/regent-organization.png', fullPage: true });
+
+  await page.goto('/projects');
+  const projectHref = await page.getByRole('link', { name: 'Open project' }).first().getAttribute('href');
+  await page.goto(`${projectHref}/delivery`);
+  await expect(page.getByRole('heading', { name: 'Delivery lifecycle' })).toBeVisible();
+  await page.getByPlaceholder('Users need deterministic approval').fill('E2E evidence finding');
+  await page.getByPlaceholder('interview:owner-1').fill('e2e:source');
+  await page.getByRole('button', { name: 'Add finding' }).click();
+  await expect(page.getByRole('cell', { name: 'E2E evidence finding' }).first()).toBeVisible();
+
+  await page.goto('/governance/security');
+  await expect(page.getByRole('heading', { name: 'Security & governance' })).toBeVisible();
+  await page.screenshot({ path: '/tmp/regent-governance.png', fullPage: true });
+  await page.getByPlaceholder('research.search').fill('e2e.research');
+  await page.getByPlaceholder('research.execute').fill('research.execute');
+  await page.getByRole('button', { name: 'Register immutable tool' }).click();
+  await expect(page.getByRole('cell', { name: 'e2e.research@1.0.0' }).first()).toBeVisible();
+
+  await page.goto('/governance/lifecycle');
+  await expect(page.getByRole('heading', { name: 'Data lifecycle' })).toBeVisible();
+  await page.getByRole('button', { name: 'Create archive manifest' }).click();
+  await expect(page.getByText('2026-11').first()).toBeVisible();
+
+  await page.goto('/models');
+  await expect(page.getByRole('heading', { name: 'Models' })).toBeVisible();
+  await expect(page.getByText('local-cheap').first()).toBeVisible();
+  await page.screenshot({ path: '/tmp/regent-models.png', fullPage: true });
+
+  await page.goto('/budget/runtime');
+  await expect(page.getByRole('heading', { name: 'Budget, cost & scheduling' })).toBeVisible();
+  await page.screenshot({ path: '/tmp/regent-runtime.png', fullPage: true });
+  await page.getByPlaceholder('usage:unique-event').fill('e2e:usage');
+  await page.getByRole('button', { name: 'Record cost once' }).click();
+  await expect(page.getByRole('cell', { name: 'e2e:usage' }).first()).toBeVisible();
+});
+
 test('approval can be decided once', async ({ page }) => {
   await page.goto('/login');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.goto('/governance/approvals');
-  await page.getByRole('link', { name: 'Review approval' }).first().click();
+  const created = await page.request.post('/v1/approvals', {
+    data: {
+      actionType: 'e2e.approval', title: 'E2E approval', impact: 'Repeatable E2E decision',
+      severity: 'high', requester: 'E2E', expiresInMinutes: 60, evidenceRefs: ['e2e:evidence']
+    }
+  });
+  expect(created.ok()).toBeTruthy();
+  const approval = await created.json() as { id: string };
+  await page.goto(`/governance/approvals/${approval.id}`);
   await page.getByRole('button', { name: 'Approve' }).click();
   await expect(page.getByText('approved')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approve' })).toBeDisabled();

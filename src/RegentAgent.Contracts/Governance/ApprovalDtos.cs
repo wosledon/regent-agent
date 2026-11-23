@@ -17,3 +17,12 @@ public sealed record ApprovalDto(
     IReadOnlyList<string> EvidenceRefs);
 
 public sealed record ApprovalDecision(string Decision, string Reason);
+
+public sealed record CreateApprovalDto(
+    string ActionType,
+    string Title,
+    string Impact,
+    Severity Severity,
+    string Requester,
+    int ExpiresInMinutes,
+    IReadOnlyList<string> EvidenceRefs);

@@ -1,7 +1,6 @@
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, CircularProgress } from '@mui/material';
-import { Card, DataTable, FreshnessBadge, StatusChip, Text } from '@regent/ui-shared';
+import { Card, DataTable, EmptyState, ErrorState, FreshnessBadge, LoadingState, PageHeader, SemanticLink, Stack, StatusChip } from '@regent/ui-shared';
 import { api } from '../../lib/api-client/api';
 import type { components } from '../../lib/api-client/schema';
 
@@ -10,18 +9,20 @@ type ProjectDetail = components['schemas']['ProjectDetail'];
 export function ProjectDetailPage() {
   const { projectId = '' } = useParams();
   const { data, isLoading, error } = useQuery({ queryKey: ['projects', projectId], queryFn: () => api.project(projectId) });
-  if (isLoading) return <CircularProgress aria-label="Loading project" />;
-  if (error) return <Alert severity="error">Failed to load project: {error.message}</Alert>;
-  if (!data) return <Alert severity="warning">Project not found.</Alert>;
+  if (isLoading) return <LoadingState />;
+  if (error) return <ErrorState message={error.message} />;
+  if (!data) return <EmptyState title="Project not found" description="Return to the project list and choose another project." />;
   return <ProjectDetailView project={data} />;
 }
 
 function ProjectDetailView({ project }: { project: ProjectDetail }) {
   return (
-    <div>
-      <Text variant="h1">{project.project.name}</Text>
-      <StatusChip label={project.project.stage} tone="info" />
-      <FreshnessBadge freshness={project.project.freshness} />
+    <Stack spacing={3}>
+      <PageHeader title={project.project.name} description="Project milestones, tasks and evidence-gated delivery." actions={<SemanticLink href={`/projects/${project.project.id}/delivery`}>Open delivery lifecycle</SemanticLink>} />
+      <Stack direction="row" spacing={1}>
+        <StatusChip label={project.project.stage} tone="info" />
+        <FreshnessBadge freshness={project.project.freshness} />
+      </Stack>
       <Card title="Milestones">
         <DataTable rows={project.milestones} getRowId={row => row.id} columns={[
           { id: 'name', header: 'Milestone', render: row => row.name },
@@ -37,6 +38,6 @@ function ProjectDetailView({ project }: { project: ProjectDetail }) {
           { id: 'status', header: 'Status', render: row => row.status }
         ]} />
       </Card>
-    </div>
+    </Stack>
   );
 }
