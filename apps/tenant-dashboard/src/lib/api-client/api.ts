@@ -168,6 +168,10 @@ export const api = {
     post<Schema['DecompositionPlan']>(`/v1/projects/${projectId}/delivery/plans/${planId}/approve`),
   reportDefect: (projectId: string, defect: Schema['Defect']) =>
     post<Schema['Defect']>(`/v1/projects/${projectId}/delivery/defects`, defect),
+  fixDefect: (projectId: string, defectId: string, fixer = 'Engineer') =>
+    post<Schema['Defect']>(`/v1/projects/${projectId}/delivery/defects/${defectId}/fix`, {
+      fixer, evidence: { id: `fix:${defectId}`, kind: 'test', location: 'local:fix-evidence' }
+    }),
   addReview: (projectId: string, review: Schema['Review']) =>
     post<Schema['Review']>(`/v1/projects/${projectId}/delivery/reviews`, review),
   addAcceptanceReport: (projectId: string, report: Schema['AcceptanceReport']) =>

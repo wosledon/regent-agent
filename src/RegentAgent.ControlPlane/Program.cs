@@ -582,6 +582,10 @@ delivery.MapPost("/defects", async (Guid projectId, Defect defect, HttpContext c
     DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReportDefectAsync(Guid.Parse(CurrentTenant(context)), projectId, defect, cancellationToken)))
     .Produces<Defect>().WithTags("Delivery");
+delivery.MapPost("/defects/{defectId:guid}/fix", async (Guid projectId, Guid defectId, FixDefectRequest request,
+    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.FixDefectAsync(Guid.Parse(CurrentTenant(context)), projectId, defectId,
+        request.Fixer, request.Evidence, cancellationToken))).Produces<Defect>().WithTags("Delivery");
 delivery.MapPost("/defects/{defectId:guid}/retest", async (Guid projectId, Guid defectId, RetestDefectRequest request,
     HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RetestDefectAsync(Guid.Parse(CurrentTenant(context)), projectId, defectId,
@@ -1388,6 +1392,7 @@ public sealed record DecisionRequest(string Decision, string Rationale, IReadOnl
 public sealed record ReadyRequirementRequest(int TotalWeight);
 public sealed record ClaimTaskRequest(string Assignee);
 public sealed record SubmitTaskRequest(string Author);
+public sealed record FixDefectRequest(string Fixer, EvidenceRef Evidence);
 public sealed record RetestDefectRequest(bool Passed, string Retester);
 public sealed record ReleaseRequest(string Version, string ArtifactRef);
 public sealed record RollbackRequest(string TargetVersion);

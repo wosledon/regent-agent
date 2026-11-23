@@ -4152,6 +4152,55 @@
         }
       }
     },
+    "/v1/projects/{projectId}/delivery/defects/{defectId}/fix": {
+      "post": {
+        "tags": [
+          "Delivery"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "defectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FixDefectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Defect"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/projects/{projectId}/delivery/defects/{defectId}/retest": {
       "post": {
         "tags": [
@@ -8880,6 +8929,20 @@
               "string"
             ]
           },
+          "retestRound": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "fixEvidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRef"
+            }
+          },
           "evidence": {
             "type": "array",
             "items": {
@@ -9932,6 +9995,21 @@
               "string"
             ],
             "format": "double"
+          }
+        }
+      },
+      "FixDefectRequest": {
+        "required": [
+          "fixer",
+          "evidence"
+        ],
+        "type": "object",
+        "properties": {
+          "fixer": {
+            "type": "string"
+          },
+          "evidence": {
+            "$ref": "#/components/schemas/EvidenceRef"
           }
         }
       },

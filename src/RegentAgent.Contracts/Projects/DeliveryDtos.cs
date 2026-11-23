@@ -97,6 +97,8 @@ public sealed class Defect
     public string ReportedBy { get; set; } = string.Empty;
     public string? Fixer { get; set; }
     public string? Retester { get; set; }
+    public int RetestRound { get; set; }
+    public IReadOnlyList<EvidenceRef> FixEvidence { get; set; } = [];
     public IReadOnlyList<EvidenceRef> Evidence { get; set; } = [];
 }
 

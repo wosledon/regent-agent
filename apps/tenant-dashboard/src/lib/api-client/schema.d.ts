@@ -5252,6 +5252,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/projects/{projectId}/delivery/defects/{defectId}/fix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    projectId: string;
+                    defectId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["FixDefectRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Defect"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/projects/{projectId}/delivery/defects/{defectId}/retest": {
         parameters: {
             query?: never;
@@ -8866,6 +8908,9 @@ export interface components {
             reportedBy?: string;
             fixer?: null | string;
             retester?: null | string;
+            /** Format: int32 */
+            retestRound?: number | string;
+            fixEvidence?: components["schemas"]["EvidenceRef"][];
             evidence?: components["schemas"]["EvidenceRef"][];
         };
         DeleteDlpTokensRequest: {
@@ -9171,6 +9216,10 @@ export interface components {
             sampleSize: number | string;
             /** Format: double */
             selectionRateRatio: number | string;
+        };
+        FixDefectRequest: {
+            fixer: string;
+            evidence: components["schemas"]["EvidenceRef"];
         };
         /** @enum {unknown} */
         Freshness: "live" | "fresh" | "stale" | "unknown";

@@ -109,6 +109,7 @@ export function DeliveryPage() {
   const release = useMutation({
     mutationFn: () => api.releaseProject(projectId, version, artifactRef), onSuccess: invalidate
   });
+  const fixDefect = useMutation({ mutationFn: (id: string) => api.fixDefect(projectId, id), onSuccess: invalidate });
   const retest = useMutation({ mutationFn: (id: string) => api.retestDefect(projectId, id, true, 'Quality Reviewer'), onSuccess: invalidate });
   const acceptance = useMutation({
     mutationFn: () => api.addAcceptanceReport(projectId, {
@@ -201,7 +202,11 @@ export function DeliveryPage() {
           { id: 'title', header: 'Defect', render: row => row.title ?? '' },
           { id: 'severity', header: 'Severity', render: row => row.severity ?? '' },
           { id: 'status', header: 'Status', render: row => row.status ?? '' },
-          { id: 'actions', header: 'Actions', render: row => <Button tone="neutral" onClick={() => retest.mutate(row.id ?? '')} disabled={row.status === 'Closed'}>Retest</Button> }
+          { id: 'round', header: 'Retest round', render: row => row.retestRound ?? 0 },
+          { id: 'actions', header: 'Actions', render: row => <Stack direction="row">
+            <Button tone="secondary" onClick={() => fixDefect.mutate(row.id ?? '')} disabled={row.status !== 'New' && row.status !== 'Reopened'}>Mark fixed</Button>
+            <Button tone="neutral" onClick={() => retest.mutate(row.id ?? '')} disabled={row.status !== 'ReadyForRetest' || Number(row.retestRound ?? 0) >= 2}>Retest</Button>
+          </Stack> }
         ]} />
       </Card>
       <Card title="Independent acceptance">

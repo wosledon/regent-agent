@@ -96,6 +96,96 @@ public sealed class DeliveryServiceTests
     }
 
     [Fact]
+    public async Task Decision_evidence_and_reround_limits_are_enforced()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"delivery-decision-{Guid.NewGuid():N}.json");
+        try
+        {
+            var service = new DeliveryService(new JsonDocumentStore<ProjectDeliveryState>(path), TimeProvider.System);
+            var tenantId = Guid.NewGuid();
+            var projectId = Guid.NewGuid();
+            var finding = await service.AddFindingAsync(tenantId, projectId,
+                new ResearchFinding { Claim = "A sourced fact", Sources = [new("source", "web", "local")] }, CancellationToken.None);
+            var brief = await service.CreateBriefAsync(tenantId, projectId, new ProductBrief
+            {
+                Title = "Brief", Problem = "Problem", MvpScope = ["MVP"], SuccessMetrics = new Dictionary<string, string> { ["success"] = "1" },
+                FindingIds = [finding.Id]
+            }, CancellationToken.None);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.DecideAsync(tenantId, projectId, brief.Id,
+                "Go", "Rationale", [Guid.NewGuid()], 0, "Controller", CancellationToken.None));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.DecideAsync(tenantId, projectId, brief.Id,
+                "Go", "Rationale", [finding.Id], 3, "Controller", CancellationToken.None));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateRequirementAsync(tenantId, projectId,
+                new DeliveryRequirement { Title = "Too early" }, CancellationToken.None));
+
+            var decision = await service.DecideAsync(tenantId, projectId, brief.Id, "Go", "Rationale", [finding.Id], 2, "Controller", CancellationToken.None);
+            Assert.True(decision.Forced);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Defect_retest_is_limited_to_two_rounds()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"delivery-retest-{Guid.NewGuid():N}.json");
+        try
+        {
+            var service = new DeliveryService(new JsonDocumentStore<ProjectDeliveryState>(path), TimeProvider.System);
+            var tenantId = Guid.NewGuid();
+            var projectId = Guid.NewGuid();
+            var defect = await service.ReportDefectAsync(tenantId, projectId, new Defect
+            {
+                Title = "Repeatable defect", ReproductionSteps = "Steps", Severity = "P1"
+            }, CancellationToken.None);
+            var evidence = new EvidenceRef($"fix:{defect.Id}", "test", "local");
+
+            await service.FixDefectAsync(tenantId, projectId, defect.Id, "Engineer", evidence, CancellationToken.None);
+            await service.RetestDefectAsync(tenantId, projectId, defect.Id, false, "Reviewer", CancellationToken.None);
+            await service.FixDefectAsync(tenantId, projectId, defect.Id, "Engineer", evidence, CancellationToken.None);
+            await service.RetestDefectAsync(tenantId, projectId, defect.Id, false, "Reviewer", CancellationToken.None);
+            await service.FixDefectAsync(tenantId, projectId, defect.Id, "Engineer", evidence, CancellationToken.None);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.RetestDefectAsync(tenantId, projectId, defect.Id, true, "Reviewer", CancellationToken.None));
+            Assert.Equal(2, (await service.GetAsync(tenantId, projectId, CancellationToken.None)).Defects.Single().RetestRound);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Task_executor_cannot_perform_independent_acceptance()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"delivery-acceptance-{Guid.NewGuid():N}.json");
+        try
+        {
+            var tenantId = Guid.NewGuid();
+            var projectId = Guid.NewGuid();
+            var requirementId = Guid.NewGuid();
+            var store = new JsonDocumentStore<ProjectDeliveryState>(path);
+            await store.PutAsync(projectId.ToString(), new ProjectDeliveryState
+            {
+                TenantId = tenantId, ProjectId = projectId,
+                Requirements = [new DeliveryRequirement { Id = requirementId, TenantId = tenantId, ProjectId = projectId, Title = "Requirement" }],
+                Tasks = [new DeliveryTask { Id = Guid.NewGuid(), TenantId = tenantId, ProjectId = projectId, RequirementId = requirementId, Author = "Engineer", Assignee = "Engineer" }]
+            }, CancellationToken.None);
+            var service = new DeliveryService(store, TimeProvider.System);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.AddAcceptanceReportAsync(tenantId, projectId,
+                new AcceptanceReport { RequirementId = requirementId, Reviewer = "Engineer", Evidence = [new("report", "report", "local")] }, CancellationToken.None));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Self_review_and_unverified_key_claims_are_rejected()
     {
         var path = Path.Combine(Path.GetTempPath(), $"delivery-{Guid.NewGuid():N}.json");

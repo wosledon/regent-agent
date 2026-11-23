@@ -28,7 +28,8 @@ public static class DeliveryPolicy
         var errors = new List<string>();
         if (plan.RequirementVersion != requirement.Version) errors.Add("Requirement version changed; create a revised plan.");
         if (plan.Tasks.Count is < 3 or > 12) errors.Add("A plan requires 3 to 12 tasks.");
-        if (plan.Tasks.Sum(x => x.Weight) > requirement.TotalWeight) errors.Add("Child task weight exceeds requirement weight.");
+        if (requirement.TotalWeight <= 0 || plan.Tasks.Sum(x => x.Weight) != requirement.TotalWeight)
+            errors.Add("Child task weight must exactly match requirement weight.");
         if (plan.Tasks.Select(x => x.Id).Distinct().Count() != plan.Tasks.Count) errors.Add("Task identifiers must be unique.");
         if (plan.Tasks.Any(x => string.IsNullOrWhiteSpace(x.Title) || x.Weight <= 0)) errors.Add("Every task needs a title and positive weight.");
         foreach (var dependency in plan.Tasks.SelectMany(x => x.DependsOn))
@@ -47,6 +48,8 @@ public static class DeliveryPolicy
         if (evidence.Validator == task.Assignee || string.IsNullOrWhiteSpace(evidence.Validator))
             errors.Add("An independent validator is required.");
         if (evidence.CriteriaResults.Any(x => !x.Value)) errors.Add("One or more completion criteria failed.");
+        if (task.AcceptanceCriteria.Any(criterion => !evidence.CriteriaResults.Keys.Contains(criterion, StringComparer.OrdinalIgnoreCase)))
+            errors.Add("DoneEvidence does not cover every task acceptance criterion.");
         if (evidence.Artifacts.Count == 0) errors.Add("At least one artifact is required.");
         if (evidence.TestResults.Count == 0) errors.Add("At least one test result is required.");
         if (evidence.SecurityChecks.Count == 0) errors.Add("Security checks are required.");
@@ -68,9 +71,10 @@ public static class DeliveryPolicy
         var requirementIds = requirements.Select(x => x.Id).ToHashSet();
         foreach (var requirementId in requirementIds)
         {
-            var reports = state.AcceptanceReports.Where(x => x.RequirementId == requirementId).ToArray();
-            if (reports.Length is < 2 or > 3 || reports.Any(x => !x.Passed))
-                errors.Add("Each requirement needs two to three passing independent acceptance reports.");
+            var reports = state.AcceptanceReports.Where(x => x.RequirementId == requirementId)
+                .GroupBy(x => x.Reviewer, StringComparer.OrdinalIgnoreCase).Select(x => x.Last()).ToArray();
+            if (reports.Length is < 2 or > 3 || reports.Any(x => !x.Passed || x.Evidence.Count == 0))
+                errors.Add("Each requirement needs two to three passing independent acceptance reports with evidence.");
         }
         if (state.Defects.Any(x => x.ProjectId == projectId && x.Severity is "P0" or "P1" && x.Status != "Closed"))
             errors.Add("Open P0/P1 defects block release.");

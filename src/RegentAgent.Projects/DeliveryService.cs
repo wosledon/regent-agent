@@ -39,7 +39,10 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
         {
             if (state.Briefs.All(x => x.Id != briefId)) throw new KeyNotFoundException("Brief not found.");
             if (decision is not ("Go" or "NoGo")) throw new InvalidOperationException("Decision must be Go or NoGo.");
-            if (evidenceIds.Count == 0) throw new InvalidOperationException("Evidence is required.");
+            if (string.IsNullOrWhiteSpace(rationale) || string.IsNullOrWhiteSpace(decider)) throw new InvalidOperationException("Decision rationale and decider are required.");
+            if (reround is < 0 or > 2) throw new InvalidOperationException("Reround must be between 0 and 2.");
+            if (evidenceIds.Count == 0 || evidenceIds.Any(id => state.Findings.All(x => x.Id != id)))
+                throw new InvalidOperationException("Decision evidence must reference existing findings.");
             var record = new GoNoGoDecision
             {
                 TenantId = tenantId, ProjectId = projectId, BriefId = briefId, Decision = decision,
@@ -53,6 +56,7 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
     public Task<DeliveryRequirement> CreateRequirementAsync(Guid tenantId, Guid projectId,
         DeliveryRequirement requirement, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
         {
+            if (state.Decisions.All(x => x.Decision != "Go")) throw new InvalidOperationException("A Go decision is required before development requirements.");
             requirement.TenantId = tenantId;
             requirement.ProjectId = projectId;
             state.Requirements.Add(requirement);
@@ -63,6 +67,7 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
         int totalWeight, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
         {
             var requirement = Find(state.Requirements, tenantId, requirementId);
+            if (totalWeight <= 0) throw new InvalidOperationException("Total requirement weight must be positive.");
             requirement.TotalWeight = totalWeight;
             RequireValid(DeliveryPolicy.ValidateRequirementReady(requirement));
             requirement.Status = "Ready";
@@ -112,7 +117,7 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
         CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
         {
             var task = Find(state.Tasks, tenantId, taskId);
-            if (task.Author != author || task.Assignee != author) throw new InvalidOperationException("Only the task author can submit.");
+            if (task.Assignee != author) throw new InvalidOperationException("Only the assigned employee can submit.");
             task.Status = "InReview";
             return (true, task);
         }, cancellationToken);
@@ -142,14 +147,29 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
             return (true, defect);
         }, cancellationToken);
 
+    public Task<Defect> FixDefectAsync(Guid tenantId, Guid projectId, Guid defectId, string fixer,
+        EvidenceRef evidence, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+    {
+        var defect = Find(state.Defects, tenantId, defectId);
+        if (defect.Status is not ("New" or "Reopened")) throw new InvalidOperationException("Defect is not awaiting a fix.");
+        if (string.IsNullOrWhiteSpace(fixer) || string.IsNullOrWhiteSpace(evidence.Id) || string.IsNullOrWhiteSpace(evidence.Location))
+            throw new InvalidOperationException("Fixer and fix evidence are required.");
+        defect.Fixer = fixer;
+        defect.FixEvidence = [evidence];
+        defect.Status = "ReadyForRetest";
+        return (true, defect);
+    }, cancellationToken);
+
     public Task<Defect> RetestDefectAsync(Guid tenantId, Guid projectId, Guid defectId, bool passed,
         string retester, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
         {
             var defect = Find(state.Defects, tenantId, defectId);
-            if (defect.Retester == defect.Fixer || retester == defect.Fixer)
+            if (defect.Status != "ReadyForRetest") throw new InvalidOperationException("Defect is not ready for retest.");
+            if (defect.RetestRound >= 2) throw new InvalidOperationException("Defect retest limit of two rounds reached.");
+            if (string.IsNullOrWhiteSpace(retester) || retester == defect.Fixer)
                 throw new InvalidOperationException("Fixer cannot close their own defect.");
-            if (defect.Status is not ("ReadyForRetest" or "Closed")) throw new InvalidOperationException("Defect is not ready for retest.");
             defect.Retester = retester;
+            defect.RetestRound++;
             defect.Status = passed ? "Closed" : "Reopened";
             return (true, defect);
         }, cancellationToken);
@@ -160,6 +180,9 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
             if (review.Reviewer == review.Author || string.IsNullOrWhiteSpace(review.Author))
                 throw new InvalidOperationException("Reviewer and author must be different.");
             if (review.Verdict is not ("Approved" or "Rejected")) throw new InvalidOperationException("Verdict must be Approved or Rejected.");
+            if (review.SubjectType == "Task" && state.Tasks.FirstOrDefault(x => x.Id == review.SubjectId) is { } task
+                && (review.Reviewer == task.Assignee || review.Reviewer == task.Author))
+                throw new InvalidOperationException("Task executor or author cannot independently review the task.");
             review.TenantId = tenantId;
             review.ProjectId = projectId;
             state.Reviews.Add(review);
@@ -170,13 +193,19 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
         AcceptanceReport report, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
         {
             var requirement = Find(state.Requirements, tenantId, report.RequirementId);
+            if (string.IsNullOrWhiteSpace(report.Reviewer) || report.Evidence.Count == 0)
+                throw new InvalidOperationException("Acceptance reviewer and evidence are required.");
+            if (new[] { report.FunctionalScore, report.UsabilityScore, report.DesignScore, report.AccessibilityScore }.Any(score => score is < 0 or > 100))
+                throw new InvalidOperationException("Acceptance scores must be between 0 and 100.");
             if (report.AuthorEmployeeId == report.Reviewer) throw new InvalidOperationException("Author cannot perform independent acceptance.");
+            var tasks = state.Tasks.Where(x => x.RequirementId == requirement.Id).ToArray();
+            if (tasks.Any(x => x.Assignee == report.Reviewer || x.Author == report.Reviewer))
+                throw new InvalidOperationException("Task executor or author cannot perform independent acceptance.");
             report.TenantId = tenantId;
             report.ProjectId = projectId;
             state.AcceptanceReports.Add(report);
             var reports = state.AcceptanceReports.Where(x => x.RequirementId == requirement.Id)
                 .GroupBy(x => x.Reviewer, StringComparer.OrdinalIgnoreCase).Select(x => x.Last()).ToArray();
-            var tasks = state.Tasks.Where(x => x.RequirementId == requirement.Id).ToArray();
             if (reports.Length is >= 2 and <= 3 && reports.All(x => x.Passed)
                 && tasks.Length > 0 && tasks.All(x => x.Status == "Done")) requirement.Status = "Accepted";
             return (true, report);
