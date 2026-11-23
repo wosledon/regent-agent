@@ -21,7 +21,10 @@ using RegentAgent.Projects;
 using RegentAgent.Workflows;
 using RegentAgent.Contracts.Artifacts;
 using RegentAgent.Contracts.Dashboard;
+using RegentAgent.Contracts.Evaluation;
 using RegentAgent.Contracts.Governance;
+using RegentAgent.Contracts.Models;
+using RegentAgent.Contracts.Operations;
 using RegentAgent.Contracts.Organization;
 using RegentAgent.Contracts.Primitives;
 using RegentAgent.Contracts.Projects;
@@ -56,6 +59,10 @@ builder.Services.AddSingleton(sp => new GovernanceService(
     sp.GetRequiredService<LocalArtifactSigner>(), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(new JsonDocumentStore<DataLifecycleState>("data/modules/lifecycle.json"));
 builder.Services.AddScoped<DataLifecycleService>();
+builder.Services.AddSingleton(sp => new ModelOperationsService(
+    new JsonDocumentStore<ModelPoolState>("data/modules/model-pool.json"), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddSingleton(sp => new RuntimePolicyService(
+    new JsonDocumentStore<RuntimePolicyState>("data/modules/runtime-policy.json"), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new WorkflowService(
     new JsonDocumentStore<WorkflowDefinition>("data/modules/workflows.json"),
     new JsonDocumentStore<WorkflowRun>("data/modules/workflow-runs.json")));
@@ -75,6 +82,8 @@ builder.Services.AddSingleton(sp => new EvaluationService(
     new JsonDocumentStore<BenchmarkSuite>("data/modules/suites.json"),
     new JsonDocumentStore<EvaluationRun>("data/modules/evaluations.json"),
     new JsonDocumentStore<JudgeAssignment>("data/modules/judges.json")));
+builder.Services.AddSingleton(sp => new EvaluationQaService(
+    new JsonDocumentStore<EvaluationQaState>("data/modules/evaluation-qa.json")));
 builder.Services.AddSingleton<IObjectStore>(sp =>
     new LocalFileObjectStore(sp.GetRequiredService<IConfiguration>()["Storage:ObjectRoot"] ?? "data/objects"));
 builder.Services.AddSingleton(TimeProvider.System);
@@ -158,6 +167,8 @@ if (app.Environment.IsDevelopment())
     await scope.ServiceProvider.GetRequiredService<ChatService>().SeedAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<EvaluationService>().SeedAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<ComplianceService>().SeedAsync(CancellationToken.None);
+    foreach (var tenantId in await db.Tenants.Select(x => x.Id).ToListAsync(CancellationToken.None))
+        await scope.ServiceProvider.GetRequiredService<ModelOperationsService>().SeedAsync(tenantId, CancellationToken.None);
 }
 
 app.UseCors("frontend");
@@ -494,6 +505,66 @@ lifecycle.MapGet("/evaluation", async (HttpContext context, DataLifecycleService
     CancellationToken cancellationToken) => Results.Ok(await service.EvaluateAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<LifecycleEvaluation>().WithTags("Lifecycle");
 
+var modelApi = api.MapGroup("/models");
+modelApi.MapGet("/pool", async (HttpContext context, ModelOperationsService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken))).Produces<ModelPoolState>().WithTags("Models");
+modelApi.MapPost("/snapshots/refresh", async (RefreshSnapshotRequest request, HttpContext context,
+    ModelOperationsService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RefreshSnapshotAsync(Guid.Parse(CurrentTenant(context)), request.Date, cancellationToken)))
+    .Produces<ModelPoolState>().WithTags("Models");
+modelApi.MapPost("/prices", async (ManualModelPrice price, HttpContext context, ModelOperationsService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.SetManualPriceAsync(Guid.Parse(CurrentTenant(context)), price, cancellationToken)))
+    .Produces<ManualModelPrice>().WithTags("Models");
+modelApi.MapPost("/tiers", async (ModelTierAssignment assignment, HttpContext context, ModelOperationsService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.AssignTierAsync(Guid.Parse(CurrentTenant(context)), assignment, cancellationToken)))
+    .Produces<ModelTierAssignment>().WithTags("Models");
+modelApi.MapPost("/bindings", async (EmployeeModelBinding binding, HttpContext context, ModelOperationsService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.BindEmployeeAsync(Guid.Parse(CurrentTenant(context)), binding, cancellationToken)))
+    .Produces<EmployeeModelBinding>().WithTags("Models");
+modelApi.MapPost("/bindings/{employeeId:guid}/restore", async (Guid employeeId, EmployeeModelBinding checkpoint,
+    HttpContext context, ModelOperationsService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.RestoreBindingAsync(Guid.Parse(CurrentTenant(context)), employeeId, checkpoint, cancellationToken)))
+    .Produces<EmployeeModelBinding>().WithTags("Models");
+modelApi.MapPost("/unavailable", async (ModelUnavailableRequest request, HttpContext context, ModelOperationsService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ReportUnavailableAsync(Guid.Parse(CurrentTenant(context)),
+        request.EmployeeId, request.Provider, request.ModelId, request.ConsecutiveFailures, request.UnavailableMinutes, cancellationToken)))
+    .Produces<ModelUnavailableEvent>().WithTags("Models");
+modelApi.MapPost("/test", async (TestModelRequest request, HttpContext context, ModelOperationsService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.TestModelAsync(Guid.Parse(CurrentTenant(context)),
+        request.Provider, request.ModelId, cancellationToken))).Produces<ModelTestResult>().WithTags("Models");
+
+var policyApi = api.MapGroup("/runtime-policy");
+policyApi.MapGet("", async (HttpContext context, RuntimePolicyService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken))).Produces<RuntimePolicyState>().WithTags("Runtime Policy");
+policyApi.MapPost("/costs", async (CostEntry cost, HttpContext context, RuntimePolicyService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.RecordCostAsync(Guid.Parse(CurrentTenant(context)), cost, cancellationToken)))
+    .Produces<CostEntry>().WithTags("Runtime Policy");
+policyApi.MapPost("/costs/{costId:guid}/corrections", async (Guid costId, CorrectCostRequest request,
+    HttpContext context, RuntimePolicyService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.CorrectCostAsync(Guid.Parse(CurrentTenant(context)), costId, request.Delta, request.Reason, cancellationToken)))
+    .Produces<CostEntry>().WithTags("Runtime Policy");
+policyApi.MapGet("/costs/summary", async (Guid? projectId, HttpContext context, RuntimePolicyService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.SummaryAsync(Guid.Parse(CurrentTenant(context)), projectId, cancellationToken)))
+    .Produces<CostSummaryDto>().WithTags("Runtime Policy");
+policyApi.MapPost("/budgets", async (BudgetPolicy budget, HttpContext context, RuntimePolicyService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.SetBudgetAsync(Guid.Parse(CurrentTenant(context)), budget, cancellationToken)))
+    .Produces<BudgetPolicy>().WithTags("Runtime Policy");
+policyApi.MapPost("/allocation-rules", async (AllocationRule rule, HttpContext context, RuntimePolicyService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.AddAllocationRuleAsync(Guid.Parse(CurrentTenant(context)), rule, cancellationToken)))
+    .Produces<AllocationRule>().WithTags("Runtime Policy");
+policyApi.MapPut("/schedule", async (WorkSchedule schedule, HttpContext context, RuntimePolicyService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.UpdateScheduleAsync(Guid.Parse(CurrentTenant(context)), schedule, cancellationToken)))
+    .Produces<WorkSchedule>().WithTags("Runtime Policy");
+policyApi.MapPost("/dispatch", async (DispatchRequest request, HttpContext context, RuntimePolicyService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.DecideDispatchAsync(Guid.Parse(CurrentTenant(context)), request.Now, request.Emergency, cancellationToken)))
+    .Produces<DispatchDecision>().WithTags("Runtime Policy");
+policyApi.MapPut("/capacity", async (CapacityPolicy capacity, HttpContext context, RuntimePolicyService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.UpdateCapacityAsync(Guid.Parse(CurrentTenant(context)), capacity, cancellationToken)))
+    .Produces<CapacityPolicy>().WithTags("Runtime Policy");
+policyApi.MapGet("/capacity/admission", async (int queueDepth, HttpContext context, RuntimePolicyService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.AdmitQueueItemAsync(Guid.Parse(CurrentTenant(context)), queueDepth, cancellationToken)))
+    .Produces<CapacityDecision>().WithTags("Runtime Policy");
+
 api.MapGet("/employees", async (EmployeeService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(cancellationToken)))
     .Produces<IReadOnlyList<EmployeeSummary>>(StatusCodes.Status200OK).WithTags("Organization");
@@ -652,6 +723,32 @@ api.MapPost("/evaluations/runs", async (RunEvaluationRequest request, HttpContex
         request.SuiteId, request.CandidateEmployeeId, CurrentTenant(context), request.Seed, cancellationToken)))
     .WithTags("Evaluation");
 
+var evaluationQa = api.MapGroup("/evaluation/qa");
+evaluationQa.MapGet("", async (HttpContext context, EvaluationQaService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken))).Produces<EvaluationQaState>().WithTags("Evaluation QA");
+evaluationQa.MapPost("/cases", async (EvaluationCaseRecord record, HttpContext context, EvaluationQaService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.RegisterCaseAsync(Guid.Parse(CurrentTenant(context)), record, cancellationToken)))
+    .Produces<EvaluationCaseRecord>().WithTags("Evaluation QA");
+evaluationQa.MapPost("/cases/{caseId:guid}/seal", async (Guid caseId, HttpContext context, EvaluationQaService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.SealCaseAsync(Guid.Parse(CurrentTenant(context)), caseId, cancellationToken)))
+    .Produces<EvaluationCaseRecord>().WithTags("Evaluation QA");
+evaluationQa.MapPost("/cases/{caseId:guid}/contamination", async (Guid caseId, ContaminationRequest request,
+    HttpContext context, EvaluationQaService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AssessContaminationAsync(Guid.Parse(CurrentTenant(context)), caseId, request.Similarity, cancellationToken)))
+    .Produces<EvaluationCaseRecord>().WithTags("Evaluation QA");
+evaluationQa.MapPost("/judges/assign", async (JudgeAssignmentRequest request, HttpContext context, EvaluationQaService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.AssignJudgeAsync(Guid.Parse(CurrentTenant(context)),
+        request.CandidateEmployeeId, request.CandidateModel, request.CandidateRuntime, request.Judge, cancellationToken)))
+    .Produces<JudgeAssignmentResult>().WithTags("Evaluation QA");
+evaluationQa.MapPost("/calibration", async (CalibrationRequest request, HttpContext context, EvaluationQaService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.CalibrateAsync(Guid.Parse(CurrentTenant(context)),
+        request.SuiteId, request.SuiteSize, request.Samples, cancellationToken))).Produces<CalibrationReport>().WithTags("Evaluation QA");
+evaluationQa.MapPost("/gate", async (EvaluationGateRequest request, HttpContext context, EvaluationQaService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.EvaluateGateAsync(Guid.Parse(CurrentTenant(context)),
+        request.SuiteId, request.CandidateEmployeeId, request.Repeats, request.SampleCount, request.Successes,
+        request.BaselineSuccesses, request.DiscordantA, request.DiscordantB, request.CalibrationPassed, cancellationToken)))
+    .Produces<EvaluationQaGate>().WithTags("Evaluation QA");
+
 var runnerApi = app.MapGroup("/internal/runners").AllowAnonymous();
 runnerApi.MapPost("/register", (RunnerRegistration registration) => Results.Ok(new { runner_id = registration.RunnerId, status = "registered" }));
 runnerApi.MapPost("/heartbeat", (RunnerHeartbeat heartbeat) => Results.Ok(new { runner_id = heartbeat.RunnerId, status = heartbeat.Status }));
@@ -731,6 +828,16 @@ public sealed record SoftDeleteRequest(string ResourceType, string ResourceId, s
 public sealed record PurgeRequest(string Confirmation);
 public sealed record ArchiveRequest(string Period, string Tier, int RecordCount);
 public sealed record BackupRequest(string Profile, int RpoMinutes, int RtoMinutes);
+public sealed record RefreshSnapshotRequest(DateOnly Date);
+public sealed record ModelUnavailableRequest(Guid EmployeeId, string Provider, string ModelId, int ConsecutiveFailures, int UnavailableMinutes);
+public sealed record TestModelRequest(string Provider, string ModelId);
+public sealed record CorrectCostRequest(decimal Delta, string Reason);
+public sealed record DispatchRequest(DateTimeOffset Now, bool Emergency);
+public sealed record ContaminationRequest(double Similarity);
+public sealed record JudgeAssignmentRequest(Guid CandidateEmployeeId, string CandidateModel, string CandidateRuntime, JudgeProfile Judge);
+public sealed record CalibrationRequest(string SuiteId, int SuiteSize, IReadOnlyList<CalibrationSample> Samples);
+public sealed record EvaluationGateRequest(string SuiteId, Guid CandidateEmployeeId, int Repeats, int SampleCount,
+    int Successes, int BaselineSuccesses, int DiscordantA, int DiscordantB, bool CalibrationPassed);
 public sealed record CorrectMemoryRequest(string Content, string Reason);
 public sealed record CreateReviewRequest(string EmployeeId, string Conclusion, string EvidenceJson);
 public sealed record SendMessageRequest(string Body, string Priority);

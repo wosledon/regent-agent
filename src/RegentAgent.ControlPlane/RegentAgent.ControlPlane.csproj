@@ -9,6 +9,7 @@
     <ProjectReference Include="..\RegentAgent.Chat\RegentAgent.Chat.csproj" />
     <ProjectReference Include="..\RegentAgent.Evaluation\RegentAgent.Evaluation.csproj" />
     <ProjectReference Include="..\RegentAgent.Storage\RegentAgent.Storage.csproj" />
+    <ProjectReference Include="..\RegentAgent.Providers\RegentAgent.Providers.csproj" />
   </ItemGroup>
 
   <ItemGroup>
