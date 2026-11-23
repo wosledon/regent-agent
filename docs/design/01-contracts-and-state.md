@@ -134,7 +134,7 @@ scopes: space-separated permissions
 
 ### 4.1 协议
 
-- 基础路径：`/v1`；JSON over HTTPS。
+- 基础路径：`/v1`；JSON over HTTPS。`/v1` 仅用于系统内部调用，不构成公共 API 或兼容性承诺。
 - 每个响应带 `request_id`；服务日志和审计使用同一 ID。
 - 创建类接口必须带 `Idempotency-Key`。
 - 更新类接口必须带 `If-Match: "<row_version>"`。
@@ -173,7 +173,7 @@ scopes: space-separated permissions
 | 域 | 主要端点 |
 |---|---|
 | 认证 | `/auth/login`、`/auth/refresh`、`/auth/logout` |
-| 租户 | `/tenants`、`/tenants/{id}/members`、`/tenants/{id}/export` |
+| 租户 | `/tenants`、`/tenants/{id}/members`；`/tenants/{id}/export` 按 Q-033 延后 |
 | 公司 | `/companies`、`/charters`、`/charters/{id}/activate` |
 | 组织 | `/controllers/{id}/self-position`、`/positions`、`/positions/{id}/assignments`、`/org-delegations`、`/org-changes`、`/successions`、`/employees`、`/employees/{id}/heartbeat` |
 | Tool | `/tools/discover`、`/tools/expand`、`/tools/activate`、`/tools/{name}/invoke`、`/tools/grants`、`/tools/grants/{id}/revoke` |
@@ -250,6 +250,8 @@ ToolInvocation:
 | OrgManagementGrant | id、tenant_id、employee_id、scope_position_id、allowed_actions、expires_at | 按子树、动作、预算和期限授权，可撤销 |
 | Employee Agent | id、tenant_id、employee_no、runtime_kind、controller_id?、state、assigned_runner | 独立 Agent 运行时；工号永久唯一；通过任职关系绑定岗位 |
 | CapabilityGrant | id、tenant_id、employee_id、capability、scope | 权限按能力授予，不按岗位名称 |
+| InternalApiClient | id、kind、audience、scopes、tenant_scope、status | 内部服务身份，不是公共 OAuth Client |
+| McpToolSurface | id、kind、audience、tool_names、scopes、status | 仅 Butler 只读或模型评测工具面 |
 | ToolPolicy | tool_name、required_capabilities、side_effect、scope_rules、approval_requirement | 发现和执行共用同一策略来源 |
 | ToolProfile | id、tenant_id、position_id?、task_type?、primary_tools、auxiliary_tools、restricted_tools | 当前任务默认披露集合，不扩大权限上限 |
 | ToolActivation | id、tenant_id、employee_id、task_id、tool_name、reason、status、expires_at? | 激活不得突破 Authorized Tools |
@@ -308,11 +310,28 @@ ToolInvocation:
 | CaseResult | id、run_id、case_id、verdict、score_vector、evidence_refs、judge_ref、latency、cost | 案例结果 |
 | EvaluationSummary | id、run_id、metrics、confidence_intervals、gate_results、baseline_run_id | 汇总与门槛判断 |
 | EvaluationApproval | id、run_id、approver_id、decision、reason、expires_at | 审批记录 |
-| ReleaseManifest | release_version、image_digests、schema_version、api_versions、compatible_versions、backup_required | 版本集发布事实 |
+| JudgeAssignment | id、run_id、judge_employee_id、model_binding_id、independence、status | Judge 员工与模型独立性 |
+| JudgeCalibration | id、judge_version、human_sample_refs、agreement、weighted_kappa、status | Judge 人工校准 |
+| ContaminationFinding | id、dataset_version_id、case_id、detector、similarity、status、resolution_ref | 污染检测与隔离 |
+| StatisticalGate | id、run_id、metric、estimate、ci_lower、margin、test、result | 统计门槛证据 |
+| EvaluationRetest | id、run_id、failed_case_ids、regression_case_ids、safety_full、status | 复测范围 |
+| ReleaseManifest | release_version、version_tag、source_commit、base_image_digests、schema_version、api_versions、compatible_versions | 版本 Tag 发布事实 |
+| CiRun | id、repository、commit_sha、workflow_ref、status、test_refs、scan_refs | GitHub Actions 检查事实 |
+| LocalBuild | id、host_ref、version_tag、source_commit、base_image_digests、built_image_ids、sbom_ref、status | 本地 Tag 源码构建记录 |
+| LocalDeployment | id、host_ref、version_tag、built_image_ids、config_version、operator_id、status | 本地 Compose 部署记录 |
+| InstallRun | id、host_ref、version_tag、source_commit、preflight_ref、steps、status | 自托管安装记录 |
+| OfflineCacheManifest | id、host_ref、source_ref、image_refs、dependency_refs、checksums、status | 离线缓存校验 |
+| UpgradeRun | id、host_ref、from_tag、to_tag、backup_policy、migration_ref、smoke_ref、status | 升级与恢复记录 |
+| CapacityPolicy | id、scope、metric、limit、burst_limit、action、version | 容量与背压策略 |
+| QueueLimit | id、scope、queue_name、limit、high_watermark、action | 队列上限和告警水位 |
+| CapacityReport | id、version_tag、hardware_profile、load_profile、latency、fairness、resources、result | 容量验收证据 |
 | MigrationRecord | id、from_schema、to_schema、checksum、status、started_at、completed_at | 不可静默改写的迁移记录 |
 | UpgradeRun | id、from_version、to_version、phase、backup_refs、migration_status、rollback_decision | 升级与回滚审计 |
 | SloDefinition | id、service、sli、target、window、error_budget_policy、version | 可版本化服务目标 |
 | AlertEvent | id、level、service、slo_ref、status、ack_by、runbook_ref、created_at | 告警与处置记录 |
+| DashboardSnapshot | id、tenant_id、card_type、subject_ref、status、data_at、freshness、evidence_ref | 仪表盘只读投影 |
+| ProjectHealth | id、project_id、phase、health、rule_version、input_refs、calculated_at | 项目阶段与确定性健康分开 |
+| ActionCenterItem | id、tenant_id、source_type、source_id、severity、owner_id、sla_due_at、dedupe_key、status | 风险聚合和去重 |
 | TestEvidence | id、release_version、test_type、result_ref、coverage、flaky_items、created_at | 发布测试证据 |
 | ObservabilityProfile | id、profile、signals、sampling、redaction、version | off/local/otlp/elastic 密封引用类型 |
 | ObservabilityConfig | profile、metrics_enabled、logs_enabled、traces_enabled、endpoint_ref、retention、config_version | 启动时遥测配置 |
@@ -329,9 +348,27 @@ ToolInvocation:
 | ArtifactRevocation | id、artifact_id、digest、reason、effective_at、propagation_status | 按版本撤销 |
 | ArtifactImpactRecord | id、artifact_id、target_type、target_id、used_at、risk、required_action | 制品影响 |
 | SensitiveDataPolicy | id、tenant_id、version、data_classes、pii_rules、secret_rules、model_egress_policy | 版本化敏感数据政策 |
+| ComplianceProfile | id、tenant_id、preset、jurisdictions、allowed_regions、required_controls、version、status | 可配置合规策略 |
+| ComplianceControl | id、profile_id、control_key、requirement、required、evidence_ref、status | 单项控制与证据 |
+| ComplianceEvaluation | id、profile_id、subject_ref、action、result、policy_version | 动作前合规评估 |
+| ComplianceViolation | id、profile_id、control_id、subject_ref、impact、status、appeal_ref | 违规与处置 |
 | DlpFinding | id、tenant_id、source_type、source_ref、policy_version、rule_id、data_class、risk_level、action、status | 脱敏发现与处置 |
 | TokenMapping | token_id、tenant_id、scope、data_type、encrypted_value_ref、policy_version、expires_at | PII 令牌映射 |
 | DeletionProof | id、subject_ref、scope、completed_steps、retained_items、created_at | 删除传播证明 |
+| DeletionRequest | id、subject_type、subject_id、status、deleted_at、restore_due_at、purged_at | 软删除与清除请求 |
+| DeletionTombstone | id、subject_type、subject_id、scope、deleted_at、purged_at、result_hash | 防恢复复活的最小记录 |
+| RetentionPolicy | id、tenant_id、data_type、retention_class、online_days、archive_days、version | 版本化保留策略 |
+| ArchiveManifest | id、tenant_id、data_type、policy_version、watermark、record_count、status | 归档清单与验证 |
+| ArchiveObject | id、archive_id、object_key、digest、size_bytes、storage_tier | 归档对象 |
+| ArchiveRestoreJob | id、archive_id、requested_by、status、restore_prefix、expires_at | 临时恢复任务 |
+| LegalHold | id、tenant_id、scope、reason、authority、starts_at、expires_at | 法律保留 |
+| BackupProfile | id、deployment_id、enabled、component_flags、schedule、retention_days、version | 可选备份配置 |
+| BackupJob | id、profile_version、component、status、snapshot_ref、manifest_ref、hash | 备份作业 |
+| RestoreJob | id、backup_ids、scope、approval_ref、status、rpo_actual、rto_actual | 恢复作业 |
+| RightsDeclaration | id、tenant_id、artifact_id、owner_type、rights_status、provider_terms_ref | 产出权利声明 |
+| ProvenanceRecord | id、tenant_id、artifact_id、task_id、model_version、tool_refs、output_hash | 产出来源链 |
+| ThirdPartyNotice | id、artifact_id、source_ref、license_id、attribution_required、notice_text | 第三方归属与许可 |
+| HumanAuthorshipRecord | id、artifact_id、account_id、contribution_type、evidence_refs | 人类创作贡献记录 |
 | AuditCheckpoint | id、stream_id、from_seq、to_seq、merkle_root、signing_key_id、signature、object_ref | 签名审计检查点 |
 | AuditVerification | id、stream_id、result、checked_range、evidence_ref、created_at | 完整性验证报告 |
 | AuditAnchor | id、checkpoint_id、anchor_type、external_ref、status、confirmed_at | 外部锚定记录 |
@@ -348,8 +385,29 @@ ToolInvocation:
 | SecurityIncident | id、tenant_id、severity、status、incident_commander_id、impact、timeline | SEV1～SEV4 安全事件 |
 | ContainmentAction | id、incident_id、action_type、target_ref、reason、approval_ref、result | 遏制动作 |
 | EvidenceItem | id、incident_id、type、source_ref、content_hash、storage_ref、legal_hold | 事件证据 |
-| IncidentNotification | id、incident_id、audience、channel、status、sent_at | 事件通知 |
+| IncidentNotification | id、incident_id、audience、channel=dashboard、status、sent_at | 事件站内通知 |
+| Notification | id、tenant_id、recipient_id、level、type、content_ref、status | 站内权威通知记录 |
+| NotificationDelivery | id、notification_id、mode、attempt、status、cursor | SignalR 提示与重拉状态 |
+| NotificationPreference | id、tenant_id、recipient_id、levels、digest、quiet_hours | 站内通知偏好 |
+| NotificationSuppression | id、tenant_id、rule_version、group_key、reason、hit_count | 去重和抑制证据 |
 | Postmortem | id、incident_id、root_cause、actions、owner_ids、status | 复盘与改进行动 |
+| PasswordCredential | id、user_account_id、algorithm、parameters、password_hash、updated_at | 账户密码凭据 |
+| EmailClaim | id、user_account_id、email_normalized、source、verified、verified_at | 邮箱及验证来源 |
+| ExternalIdentityBinding | id、user_account_id、provider、provider_subject、linked_at | GitHub 等外部身份绑定 |
+| RecoveryCodeSet | id、user_account_id、generated_at、invalidated_at | 一次性恢复码集合 |
+| RecoveryCode | id、recovery_code_set_id、code_hash、used_at | 单次恢复码 |
+| AccountRecoveryRequest | id、user_account_id、channel、status、requested_at、expires_at | 自助找回请求 |
+| OAuthTransaction | id、user_account_id、provider、state_hash、pkce_hash、expires_at | 短期 OAuth 事务 |
+| OidcProviderConfig | id、tenant_id、issuer、client_id、client_secret_ref、status、version | 租户 OIDC 配置 |
+| SsoInvitation | id、tenant_id、email_normalized、capabilities、status、expires_at | SSO 邀请 |
+| OidcIdentityBinding | id、tenant_id、provider_config_id、issuer、subject、user_account_id | OIDC 身份绑定 |
+| AuthenticationPolicy | tenant_id、mode、acr_policy、group_mapping_version、emergency_access | 租户认证策略 |
+| EmergencyAccessGrant | id、tenant_id、user_account_id、scope、expires_at、used_at | 受限紧急访问 |
+| TenantMembership | id、tenant_id、account_id、status、membership_version | 账户租户成员关系 |
+| TenantOwnership | membership_id、tenant_id、kind、granted_at、revoked_at | Primary/Co-Owner 所有权 |
+| OwnerInvitation | id、tenant_id、inviter_id、target_ref、token_hash、expires_at、status | 所有者邀请 |
+| OwnerDelegation | id、tenant_id、grantor_id、delegate_id、capabilities、expires_at | 限时治理委托 |
+| ActiveTenantContext | session_id、account_id、tenant_id、membership_version、capabilities | 当前租户会话上下文 |
 | OrgChange | id、tenant_id、before_snapshot、after_snapshot、reason、evidence_ids | 组织变更必须可审计、可回放 |
 | WorkflowDefinition | id、tenant_id、scope_type、owner_employee_id?、scope_position_id?、status | 个人范围属于作者；组织范围绑定岗位子树 |
 | WorkflowVersion | id、workflow_id、version、definition_json、status | 已采纳版本不可变；Run 固定版本 |
@@ -367,7 +425,19 @@ ToolInvocation:
 | KpiDefinition | id、tenant_id、subject_type、subject_id、metric_key、data_source、target、cadence | KPI 基于权威事实，不可由员工直接修改 |
 | KpiSnapshot | id、kpi_definition_id、subject_id、period、value、evidence_refs | 快照不可变，结论必须引用证据 |
 | PerformanceReview | id、tenant_id、subject_employee_id、reviewer_employee_id、status、confidence | 自评、复核、动作和申诉分离 |
-| PerformanceAction | id、review_id、action_type、status、approved_by? | 高影响动作需复核和审计 |
+| PerformanceAction | id、review_id、action_type、evidence_digest、approval_kind、ai_reviewer_id?、human_approval_id?、status | 非解雇动作独立 AI 复核，解雇需人类批准 |
+| HumanPerformanceReview | id、action_id、human_account_id、outcome、findings、corrective_action_refs | 人类只做事后审查，可推翻结论和要求纠正 |
+| FairnessPolicy | id、tenant_id、position_id、version、criteria、protected_attributes、audit_thresholds | 招聘前冻结岗位相关标准和盲评规则 |
+| CandidateAssessment | id、tenant_id、requisition_id、candidate_ref、rubric_version、scores、evidence_refs | 评分与身份资料隔离 |
+| FairnessAudit | id、tenant_id、requisition_id、slice_definitions、sample_sizes、selection_rates、findings | 分群偏差调查 |
+| BiasFinding | id、audit_id、affected_slice、evidence_refs、severity、remediation、status | 偏差纠正任务 |
+| CandidateAppeal | id、tenant_id、candidate_ref、assessment_id、appeal_type、independent_reviewer_id、outcome | 候选人申诉和复测 |
+| LicenseInventory | id、artifact_digest、component_ref、spdx_id、license_text_ref、compatibility_status | 制品许可证清单 |
+| ReleaseLicenseReport | id、release_id、artifact_digest、sbom_ref、license_ref、notice_ref、scan_status | 发布许可门禁 |
+| ContributionAttestation | id、repository、commit_sha、contributor_ref、signoff_ref、authority_attested | 贡献者确认 |
+| LocalePolicy | id、tenant_id、default_ui_locale、default_content_locale、timezone、fallback_locale、version | 租户和用户本地化策略 |
+| TranslationResource | id、resource_key、source_locale、target_locale、target_text、status、version | 可版本化翻译资源 |
+| TranslationReview | id、translation_resource_id、reviewer_id、decision、reviewed_at | 安全/法律/审批文案复核 |
 | Task | id、tenant_id、employee_id、type、state、attempt、idempotency_key | 同一业务幂等键不能并发执行 |
 | TaskLease | task_id、runner_id、token、expires_at | fencing token 每次租约递增 |
 | Message | id、tenant_id、seq、to_id、type、payload、schema_version | `(tenant_id, seq)` 唯一 |
@@ -378,10 +448,23 @@ ToolInvocation:
 | ObjectUpload | id、tenant_id、artifact_id、object_key、checksum、state、attempts | PendingUpload 到 Ready 显式转换 |
 | Model | id、tenant_id、provider、tier、key_ref、price_version、state | key_ref 不包含密钥内容 |
 | UsageEvent | id、tenant_id、source、source_event_id、task_id、amount | `(source, source_event_id)` 唯一 |
-| LedgerEntry | id、tenant_id、usage_event_id、account、amount、currency | 只增不改；更正用新条目 |
+| LedgerEntry | id、tenant_id、usage_event_id、account、amount、currency、cost_dimensions | 只增不改；更正用新条目 |
+| CostAllocationRule | id、tenant_id、source_cost_center、targets、weights、version、approval_ref | 权重合计 100%，分摊不新增费用 |
+| BudgetEnvelope | id、tenant_id、project_id?、amount、currency、period、soft_or_hard | 项目预算属于租户预算 |
+| BudgetCarryover | id、source_period、target_period、amount、approval_ref | 仅显式批准，预留/欠款/超支不得结转 |
+| CostAnomaly | id、rule_id、rule_version、subject、severity、evidence_refs、status | 确定性规则，不自动处罚 |
 | BudgetReservation | id、tenant_id、task_id、amount、state、expires_at | 同一预算并发扣减必须原子 |
 | Escalation | id、tenant_id、action_hash、state、expires_at、decision | 审批绑定不可变动作参数 |
+| NegotiationRecord | id、tenant_id、escalation_id、participants、evidence_refs、authority_refs、outcome | 缺席协商证据和结论 |
+| ApprovalTierPolicy | id、tenant_id、action_type、tier、required_capability、quorum、sla | 版本化分级审批策略 |
+| ApprovalDelegation | id、tenant_id、grantor_id、delegate_id、scope、starts_at、expires_at、accepted_at、revoked_at | 限时、限范围、不可转授权 |
+| ApprovalRoute | id、escalation_id、route_version、assignee_id、on_behalf_of、reason | 可解释审批路由 |
 | ButlerJob | id、tenant_id、cron、timezone、prompt_template、next_run_at | 同一触发时间只生成一个报告 |
+| WorkSchedule | id、tenant_id、timezone、windows、blocked_windows、quiet_windows、version | 全天可配置公司窗口 |
+| CostWindow | id、tenant_id、provider_id?、model_id?、starts_at、ends_at、discount_value、source_ref、version | 用户配置的低价窗口 |
+| HolidayCalendar | id、tenant_id、dates、recurrence_rule、schedule_mode、version | 用户可配置节假日作息 |
+| WakePolicy | id、tenant_id、event_type、priority、eligible_roles、budget_limit、max_duration | 紧急唤醒边界 |
+| ScheduleOverride | id、tenant_id、scope、reason、starts_at、expires_at、budget_limit、status | 限时加班 |
 | AuditEvent | id、tenant_id、actor、action、target、payload_hash、created_at | 只增不改 |
 
 ## 6. 状态机
@@ -752,7 +835,7 @@ Outbox 发布器可以重试，消费者按 `event_id` 去重。事件顺序只�
 200. 生产禁止应用启动时自动迁移。
 201. 迁移必须使用独立角色和 advisory lock。
 202. 应用回滚不得突破 Expand 和数据兼容边界。
-203. Contract 后必须前滚或恢复备份。
+203. Contract 后必须前滚或使用已批准可用恢复点；备份关闭时不得伪造恢复能力。
 204. 升级、迁移和恢复必须保留审计及 RPO/RTO 结果。
 205. 遥测统一通过 OpenTelemetry 接入，后端支持 off/local/otlp/elastic Profile。
 206. Elasticsearch 不得作为业务或审计权威源。
@@ -850,6 +933,202 @@ Outbox 发布器可以重试，消费者按 `event_id` 去重。事件顺序只�
 298. SEV1 恢复还需受影响租户或 Boss 确认。
 299. 复盘默认无责归因员工个人，故意滥用另行处理。
 300. 复盘改进行动必须进入项目系统并跟踪完成。
+301. GitHub 登录必须使用 Authorization Code + PKCE、state 和精确 redirect URI。
+302. 外部身份必须以 provider + 不可变 provider_subject 唯一绑定。
+303. 不得按 GitHub login 或昵称自动合并账户；邮箱合并只接受已验证 claim。
+304. 已验证邮箱必须唯一匹配才可自动合并；本地未验证邮箱不得合并已有账户。
+305. 除已验证邮箱自动合并外，已有账户只能在已认证会话中显式绑定外部身份。
+306. 解绑前必须保留至少一个其他可用登录方式。
+307. GitHub Access Token 默认不持久化到业务数据库。
+308. 恢复码只显示一次、只存不可逆哈希且单次使用。
+309. 重新生成恢复码必须使旧恢复码全部失效。
+310. 找回成功必须撤销旧会话和 Refresh Token。
+311. 密码、恢复码和 GitHub Token 不得进入日志、遥测或审计正文。
+312. 账号密码注册登录属于第一梯队，密码必须使用 Argon2id。
+313. 登录和注册必须按账户、IP 和全局维度限流，且不泄露账户是否存在。
+314. 已验证邮箱匹配多个账户或身份冲突时必须拒绝自动合并。
+315. 邮箱合并只增加登录方式，不转移租户所有权、岗位或权限。
+316. OIDC 必须按租户配置，身份键为 issuer+sub。
+317. OIDC 登录必须校验签名、iss、aud、azp、exp、iat、state 和 nonce。
+318. OIDC 新用户必须先邀请或预置，禁止默认 JIT 和域名自动加入。
+319. OIDC 不得按邮箱自动创建 Owner 或合并未知账户。
+320. 组映射只能授予显式能力，Owner 不能由组默认授予。
+321. required SSO 必须配置独立紧急恢复，IdP 故障不得回退本地密码。
+322. OIDC 本地会话最长 8 小时，IdP 退出不自动等同本地退出。
+323. 现有 Cookie/CSRF、基础撤销和运营 MFA 不得因 OIDC 接入而削弱。
+324. BFF、设备管理、会话家族轮换和本地 WebAuthn/TOTP 不属于第一梯队。
+325. OIDC 配置和 JWKS 端点必须防止 SSRF 和任意管理员输入。
+326. 账户可以拥有或加入多个租户，第一梯队一租户一公司。
+327. 每个租户恰好一个 Active Primary Owner，可有多名 Co-Owner。
+328. 不能移除、暂停或降级最后一个 Active 所有者。
+329. Primary 所有权转让必须由目标 Active Co-Owner 明确接受。
+330. OwnerDelegation 必须限时、限范围、可撤销且不可转授权。
+331. 代理不能执行主所有权转让、租户删除、订阅变更和所有者管理。
+332. 切换租户必须由服务端校验成员关系并重新签发租户作用域会话。
+333. 跨租户默认不共享密钥、预算、员工、记忆、成果和审计。
+334. 成员移除只撤销目标租户访问，不删除全局账户或其他租户关系。
+335. 成员和所有权变更必须递增版本并写入审计。
+336. 账户注销和租户删除必须立即软删除，账户恢复窗口 30 天、租户 7 天。
+337. 软删除数据不得被普通 API、Agent、索引或 RLS 查询访问。
+338. 账户注销前必须处理唯一 Primary 所有权，Co-Owner 注销不得删除公司。
+339. 密钥和 Token 必须在软删除时立即撤销。
+340. 恢复窗口结束后必须物理清除并生成 DeletionProof。
+341. 备份启用后最长 35 天，恢复时必须重放 tombstone。
+342. tombstone 默认保留 1 年且不得包含可还原业务内容。
+343. 法律保留只阻止物理清除，不得恢复用户访问。
+344. 物理清除失败不得标记完成。
+345. 外部服务已保存数据必须按外部政策处理并写入删除证明。
+346. 数据必须按版本化保留类进入 Hot、Archive、Cold。
+347. 消息在线 90 天，账本和审计在租户终止后保留 7 年。
+348. 月度归档必须冻结水位并校验数量、SHA-256 和 manifest。
+349. 归档验证失败不得退出在线查询。
+350. 审计归档不得改变 canonical payload、seq、event_hash 或检查点。
+351. 普通 Agent 不得检索 Cold，归档恢复必须授权、隔离和审计。
+352. 归档恢复临时副本默认 7 天清除。
+353. 软删除和 tombstone 优先于归档，已删除数据不得重新打包。
+354. 法律保留只冻结指定范围且不得恢复用户访问。
+355. 秘密和认证材料不得进入归档。
+356. 备份必须开关化且默认关闭，实施后置。
+357. 未启用备份组件不得承诺 RPO/RTO 或计入成功率。
+358. 有效 RPO/RTO 必须来自最近成功备份和实际演练。
+359. PITR 依赖 Postgres 全量，异地依赖至少一个本地备份。
+360. 滚动备份最长 35 天，长期保留由归档承担。
+361. 未配置备份时恢复必须返回 not_configured。
+362. 组件缺失时不得标记完整恢复。
+363. 升级跳过备份必须记录风险接受，不得伪造成功。
+364. 归档、审计、RustFS 持久化和软删除不受备份开关影响。
+365. 备份密文不得包含明文主密钥。
+366. 租户任务产出归租户所有，平台仅保留有限运营许可。
+367. 用户输入和既有知识产权仍归原权利人。
+368. 第三方材料、开源依赖、Tool 返回数据和提供商条款不得被归属声明覆盖。
+369. UnknownRights 默认不得对外发布。
+370. 重要 Artifact 必须记录来源、模型、Tool、许可和人类贡献。
+371. 权利声明绑定不可变 artifact digest，新版本不得覆盖历史。
+372. 租户内容默认不得用于平台训练、公共基准或跨租户资产。
+373. 对外发布必须同时通过权利、许可、SBOM、秘密、PII、内容安全和 Owner 批准。
+374. 员工离职不改变公司成果归属。
+375. 产品不得承诺 AI 产出一定受版权保护。
+376. 非解雇绩效动作不需要人类事前批准。
+377. 降职和绩效冻结必须由独立 AI 复核，并保留申诉窗口。
+378. 解雇、移除模型订阅和释放编制必须由人类 Boss 最终批准。
+379. 人类只参与解雇和事后审查，不参与其他日常绩效动作。
+380. 人类事后审查可以推翻结论和要求纠正，但不得删除历史证据。
+381. 解雇批准必须绑定真实人类账户和不可变证据摘要。
+382. 无人类批准解雇数目标为 0。
+383. 高影响动作事后审查覆盖率目标为 100%。
+384. 这里的解雇是终止 AI 员工运行时和组织关系，不是解除人类劳动合同。
+385. Regent 不代替企业作出人类雇佣、薪酬或纪律决定。
+386. 招聘只按岗位相关能力评分，禁止受保护特征和代理变量。
+387. 面试前必须冻结能力矩阵、等价题目和评分门槛。
+388. 身份资料和模型品牌必须与盲评隔离。
+389. 每个招聘周期必须执行 FairnessAudit，样本不足时不得宣布无偏。
+390. 群体选择率比值低于 0.8 只触发调查，不自动认定歧视或改变个人结果。
+391. 候选人可申诉、复测和申请合理便利，申诉期间暂停最终淘汰。
+392. 申诉必须由非原评分者复核。
+393. 公平修正不得降低安全、质量和核心能力门槛。
+394. Boss 保留最终录用权。
+395. 候选人资料决策后默认 180 天清除。
+396. 第一方源码、文档和部署资产统一采用 Apache-2.0。
+397. 公开发布必须包含 LICENSE、NOTICE、SBOM 和第三方通知。
+398. 核心和默认企业功能不得通过许可证锁闭源。
+399. 托管、支持、SLA 和运维服务可以收费。
+400. 第三方依赖、模型、数据集和素材保留各自许可证。
+401. 未知许可证默认阻止公开发布。
+402. 贡献必须按 Apache-2.0 第 5 条和 DCO Signed-off-by 提交。
+403. 贡献不强制转让版权，贡献者必须有权提交内容。
+404. Regent 商标不随代码许可证授予。
+405. 租户产出不自动适用 Apache-2.0。
+406. Boss 首屏必须聚焦健康、风险、预算、组织和待决策事项。
+407. 租户导航最多两级，运营页面不得进入租户导航。
+408. 项目工作流阶段与健康状态必须分开存储和展示。
+409. 项目健康必须由确定性规则计算，LLM 不得直接修改。
+410. 数据 Stale 或 Unknown 时不得显示为 OnTrack。
+411. 行动中心必须统一聚合约定风险来源并按根因去重。
+412. 仪表盘卡片必须可下钻并显示数据时间和新鲜度。
+413. Butler 摘要不得覆盖确定性状态或替代审批。
+414. 菜单隐藏不是安全边界，API 必须逐次鉴权。
+415. 单卡片投影失败不得阻塞整个首屏。
+416. 审批必须按 T0～T3 和禁止分级，Controller 不得自行降级。
+417. 人类缺席时优先由 Controller 与直接下一层协商。
+418. 缺席协商必须双方明确同意、权限和预算充足且不触红线。
+419. 协商不能替代所有者专属事项、红线或解雇的人类批准。
+420. ApprovalDelegation 必须双方确认、限时、限范围、可撤销且不可转授权。
+421. 被委托人不得自我批准或批准利益冲突事项；解雇只能委托给人类 Boss/Co-Owner。
+422. 主所有权转让、租户删除、订阅变更、所有者管理、法律声明和不可逆大规模清除不得普通委托。
+423. 无有效代理人时保持待定，超时默认拒绝。
+424. 默认 SLA 为 Critical 30 分钟、High 4 小时、Normal 24 小时、Low 72 小时。
+425. 紧急安全遏制按预授权执行，不等待普通审批。
+426. 审批路由、缺席协商和代签关系必须完整审计。
+427. 参数变化或审批过期后原批准不得执行。
+428. 双人 quorum 不能由同一委托链替代。
+429. 不能仅因短时间未登录就自动视为人类缺席。
+430. 无有效审批人时不得获得静默授权。
+431. 第一梯队 UI 必须支持 zh-CN 和 en-US。
+432. 租户默认语言与用户覆盖必须分离，缺失翻译不得显示资源 key。
+433. 时间统一 UTC/RFC 3339 存储，展示使用 IANA 时区和 locale。
+434. 日期、数字和排序按 locale 格式化，币种必须显式使用 ISO 4217。
+435. Agent 输出必须记录内容语言和翻译状态。
+436. 代码标识、API 字段、Schema、审计 payload 和法律原文不得自动翻译。
+437. 安全、法律和审批文案必须人工复核后才能发布。
+438. 完整无障碍支持后置，不进入 MVP 发布门禁。
+439. 公司全天 24 小时可配置，不默认禁止夜间。
+440. 普通任务只在用户设置的禁用窗口排队。
+441. 可延期 P2/P3 任务可利用已配置 CostWindow，折扣未知时不得假设低价。
+442. 到达禁用窗口或排班结束时必须保存 TaskCheckpoint、释放租约并标记 DeferredUntil。
+443. P0 安全、生产事故、红线、L2/L3、硬预算和密钥风险可紧急唤醒。
+444. 紧急唤醒不得扩大 Tool、网络、预算或数据权限。
+445. ScheduleOverride 必须限时、限范围并在预算内，到期自动失效。
+446. 用户禁用窗口、休息和假期不计入员工可用率分母，允许的夜间工作时间同等计入。
+447. Butler 和 Controller 的普通周期任务必须遵守用户配置窗口和 cadence。
+448. 组内全员休眠后才停止团队工位容器。
+449. 源码和 CI 只使用 GitHub 和 GitHub Actions。
+450. GitHub 只打版本 Tag，不发布镜像或二进制制品。
+451. GitHub Actions 只检查和测试，不推送镜像或包。
+452. 本地部署必须从批准版本 Tag 检出源码，用 Docker Compose + systemd 构建。
+453. CI 不得持有生产模型密钥，外部 PR 不得获得秘密。
+454. 本地构建必须记录 Tag、commit、基础镜像和输出镜像 ID，不使用 GHCR。
+455. 不引入多 Git 平台适配、多环境晋升或 Kubernetes，回滚优先复用旧镜像或旧 Tag。
+456. 成本只在钱账记录一次，员工、岗位、项目和公共成本不得重复计费。
+457. 成本归属按任务项目、显式成本中心、公共成本顺序处理；无法归属必须进入 Unallocated。
+458. 历史成本保留发生时员工、岗位和项目快照，不得随调岗或离职改写。
+459. 公共成本默认不自动分摊；显式规则必须版本化、审批且权重合计 100%。
+460. 分摊只生成投影，不生成第二笔费用。
+461. 项目预算默认软限制，属于租户预算；预算不得自动结转。
+462. 确定性成本异常不得自动修改预算、模型、岗位或绩效。
+463. 金额只保存原币金额和币种，不同币种分别统计且不得直接相加。
+464. 迟到费用按发生周期归属，已关闭周期通过当前开放周期更正且不覆盖原条目。
+465. 模型运行只允许 OpenAI 与 Anthropic 云端原生端点，不支持本地 GPU、Ollama、本地模型或 GPU 调度。
+466. 第一梯队只实现仪表盘内部通知中心，不实现外部通知渠道或 Provider 接口。
+467. 通知必须先持久化，SignalR 只是实时增强，失败后必须支持重拉。
+468. 通知按租户、接收人和事件幂等去重，并在服务端校验详情权限。
+469. L3/SEV1 不受普通静默时段限制，通知不得包含秘密或替代正式审批。
+470. `/v1` 仅用于系统内部调用，不提供公共 API Token、OAuth Client 或公共兼容性承诺。
+471. MCP 仅作为 Butler 只读和模型评测的内部工具面，不建设市场或通用插件协议。
+472. 不提供公共 SDK、出站 Webhook、跨租户 Skill 分享或第三方自动安装更新。
+473. 租户内部扩展仍必须按不可变 digest、签名、SBOM 和 Q-021 准入审核。
+474. 自托管只使用版本 Tag 源码、Compose、systemd 和仓库脚本，不提供二进制或 GUI 安装包。
+475. 安装和运行不需要激活，不提供电话回拨或自动更新。
+476. 离线模式禁止联网回退，缓存缺失必须快速失败，完全断网不承诺模型推理。
+477. 升级必须显式指定目标 Tag，构建或迁移失败不得切换运行版本。
+478. 升级失败必须保留旧 Tag 和旧镜像，Contract 后禁止应用回滚。
+479. 当前容量只承诺单租户单机聚合基线，多租户大规模容量不作为当前承诺。
+480. 普通读 API P95 必须 ≤300ms，普通写 API P95 必须 ≤500ms。
+481. Pending Task、员工待处理项、消息、Outbox 和模型在途请求必须有上限和背压，不得静默丢弃。
+482. 共享 Runner 按租户加权轮询，有其他租户等待时单租户连续占用共享槽最多 3 次。
+483. 单租户压测不得使其他租户普通 API P95 劣化超过 20%，合格任务等待不得超过 30 秒。
+484. 合规必须通过版本化 ComplianceProfile 配置，策略激活需要审批并保留历史版本。
+485. ComplianceProfile 必需控制不满足时必须 fail closed，不得静默降级为 baseline。
+486. 平台不得宣称认证或将技术证据表述为法律意见。
+487. 当前不提供商业 SLA、24×7 值班、专属支持或自动客户合规审计包。
+488. 云端模型外发和数据驻留边界必须对租户可见，不能宣称完全离线 AI。
+489. 评测集必须分为 development、calibration、holdout；holdout 仅评测服务可读，canary 泄漏必须触发隔离。
+490. 污染检测必须执行精确 hash、0.92 近似重复、已知污染和交叉泄漏检查，受影响结果不得计为通过。
+491. Judge 必须是具备 evaluation.judge 能力的正式员工和独立运行时，优先不同模型，同模型不同运行时允许。
+492. Judge 不得评审自己的产出、共享候选员工上下文或读取密封题；SameModelJudge 必须降低置信度并增加高影响人工复核。
+493. Judge 每版本必须使用至少 100 条或 20% 双人盲评样本校准，一致率 ≥85%、加权 κ ≥0.70，并每月抽检。
+494. 核心、安全、单维度和 canary 最小样本分别为 100、50、30、20；每案例固定 seed 运行 3 次，核心和安全必须 3/3。
+495. 整体和单维度必须同时满足通过率与 Wilson 下界，基线比较使用 McNemar 精确检验，硬失败不可抵消。
+496. 评测结果只允许 Approved、Rejected、Quarantined、Inconclusive；安全失败立即隔离，复测包含失败案例、20% 相邻回归和完整安全集。
 
 ## 10. 管家会话与定时任务
 
@@ -872,12 +1151,13 @@ ButlerSession:
 ```text
 ButlerJob:
   id, tenant_id, name, schedule, timezone
-  prompt_template, tools, channels, enabled
+  prompt_template, tools, enabled
   next_run_at, lease_token, lease_expires_at
   last_run_at, last_status, consecutive_failures
 ```
 
 - 每个租户的 cron 独立解析，不使用服务器默认时区。
+- Butler 普通定时任务遵守 WorkSchedule 和 CostWindow，报告时间由用户设置，未设置时默认 09:00。
 - 同一 job 同一 `scheduled_for_utc` 使用唯一幂等键，重复触发只运行一次。
 - 单 job 并发度为 1；不同租户可并行。
 - 执行使用短租约，崩溃后租约过期可重试。
@@ -895,4 +1175,4 @@ ButlerJob:
 - `escalation.created` 和 `budget.warning` 等事件通过 Outbox 触发管家任务。
 - 事件幂等键为 `(job_id, event_id)`，防止重复通知。
 - 事件任务与定时任务共用租约、重试、预算和审计机制。
-- 投递到仪表盘通知中心后再投递外部渠道；外部失败不删除站内记录。
+- 只投递到仪表盘通知中心；SignalR 失败不删除站内记录，客户端可重新拉取。

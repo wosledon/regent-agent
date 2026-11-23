@@ -31,6 +31,27 @@
 | [23 离职、调岗与再入职](./23-employee-offboarding-and-identity.md) | employee_no、EmploymentPeriod、PendingRemoval、Boss 决策、交接与私有数据 |
 | [24 内容安全](./24-content-safety.md) | ContentSafetyPolicy、检测、分级处置、复核、申诉、证据与合规 |
 | [25 安全事件响应](./25-security-incident-response.md) | SecurityIncident、ContainmentAction、EvidenceItem、通知、恢复与复盘 |
+| [26 账户身份与找回](./26-account-identity-and-recovery.md) | 账号密码、GitHub OAuth、EmailClaim、已验证邮箱合并、恢复码与会话撤销 |
+| [27 企业 OIDC 与认证策略](./27-enterprise-oidc-and-authentication-policy.md) | OidcProviderConfig、SsoInvitation、issuer+sub、组映射、IdP MFA 与紧急恢复 |
+| [28 账户、租户与所有权](./28-account-tenancy-and-ownership.md) | TenantMembership、TenantOwnership、OwnerInvitation、OwnerDelegation 和租户切换 |
+| [29 账户与租户软删除](./29-account-and-tenant-soft-deletion.md) | DeletionRequest、软删除、恢复、物理清除、DeletionProof 和 tombstone |
+| [30 在线保留与归档](./30-retention-and-archiving.md) | RetentionPolicy、ArchiveManifest、ArchiveObject、ArchiveRestoreJob 和 LegalHold |
+| [31 可选备份与恢复](./31-backup-profiles-and-recovery.md) | BackupProfile、BackupJob、RestoreJob、开关依赖和有效 RPO/RTO |
+| [32 产出权利与来源](./32-tenant-output-rights-and-provenance.md) | RightsDeclaration、ProvenanceRecord、ThirdPartyNotice、HumanAuthorshipRecord |
+| [33 公平招聘与申诉](./33-recruitment-fairness-and-appeals.md) | FairnessPolicy、CandidateAssessment、FairnessAudit、BiasFinding、CandidateAppeal |
+| [34 开源许可与分发](./34-open-source-licensing-and-distribution.md) | LicenseInventory、ReleaseLicenseReport、ContributionAttestation |
+| [35 租户仪表盘信息架构](./35-tenant-dashboard-information-architecture.md) | DashboardSnapshot、ProjectHealth、ActionCenterItem |
+| [36 审批委托与缺席](./36-approval-delegation-and-absence.md) | NegotiationRecord、ApprovalTierPolicy、ApprovalDelegation、ApprovalRoute |
+| [37 国际化与本地化](./37-internationalization-and-localization.md) | LocalePolicy、TranslationResource、TranslationReview |
+| [38 公司作息与调度](./38-company-work-schedule-and-dispatch.md) | WorkSchedule、CostWindow、HolidayCalendar、WakePolicy、ScheduleOverride |
+| [39 GitHub CI/CD 与本地部署](./39-github-actions-and-local-compose.md) | CiRun、LocalBuild、LocalDeployment |
+| [40 成本归属、分摊与异常](./40-cost-allocation-and-anomaly.md) | CostAllocationRule、BudgetEnvelope、BudgetCarryover、CostAnomaly |
+| [41 内部通知中心](./41-internal-notification-center.md) | Notification、NotificationDelivery、NotificationPreference、NotificationSuppression |
+| [42 内部 API 与扩展边界](./42-internal-api-and-extension-boundary.md) | InternalApiClient、ToolManifest、McpToolSurface、SupplyChainArtifact |
+| [43 自托管安装与离线升级](./43-self-hosted-install-and-offline-upgrade.md) | InstallRun、OfflineCacheManifest、UpgradeRun |
+| [44 容量与性能基线](./44-capacity-and-performance-baseline.md) | CapacityPolicy、QueueLimit、CapacityReport |
+| [45 企业合规与支持边界](./45-enterprise-compliance-and-support-boundary.md) | ComplianceProfile、ComplianceControl、ComplianceEvaluation、ComplianceViolation |
+| [46 模型评测 QA 实施细则](./46-evaluation-qa-implementation.md) | JudgeAssignment、JudgeCalibration、ContaminationFinding、StatisticalGate |
 
 ## 2. 设计缺口登记
 
@@ -74,6 +95,29 @@
 | G-36 | 员工离职缺少永久工号、再入职、待驱逐、Boss 决策和私有数据处置 | 23 | 已细化 | 身份连续、权限矩阵、交接、隔离、删除证明和审计可验收 |
 | G-37 | 内容安全缺少统一检测、分级处置、误报申诉和合规证据 | 24 | 已细化 | 正常内容放行、模糊复核、红线阻止、申诉和取证可验收 |
 | G-38 | 安全事件缺少分级、IC、预授权遏制、取证、恢复和复盘闭环 | 25 | 已细化 | SEV1～SEV4、自动遏制、证据链、通知、恢复和行动跟踪可验收 |
+| G-39 | 无邮件环境下缺少安全的密码登录、外部登录和账户自助找回基线 | 26 | 已细化 | 账号密码、GitHub OAuth、已验证邮箱合并、恢复码和会话撤销可验收 |
+| G-40 | 企业 SSO 缺少租户 OIDC、身份映射、邀请、能力映射和紧急恢复基线 | 27 | 已细化 | OIDC、issuer+sub、IdP MFA、required 模式和紧急恢复可验收 |
+| G-41 | 账户与租户耦合，缺少多所有者、代理委托和多租户切换基线 | 28 | 已细化 | 多租户成员、唯一 Primary Owner、限时代理和切换隔离可验收 |
+| G-42 | 账户与租户删除缺少软删除、恢复、物理清除和防复活闭环 | 29 | 已细化 | 逻辑隔离、30/7 天恢复、备份 tombstone 和删除证明可验收 |
+| G-43 | 各类数据缺少统一在线期、归档格式、冷检索和到期清除闭环 | 30 | 已细化 | 保留类、三层存储、manifest 校验、授权恢复和清除可验收 |
+| G-44 | 备份能力与 SLA 强耦合，缺少开关、有效覆盖和风险接受 | 31 | 已细化 | 默认关闭、组件开关、有效 RPO/RTO 和可选演练可验收 |
+| G-45 | AI 产出缺少租户归属、第三方权利、来源和发布许可边界 | 32 | 已细化 | 租户归属、有限平台许可、来源记录和未知权利发布阻断可验收 |
+| G-46 | 绩效动作未明确 AI 自主、人类解雇批准和事后审查边界 | 10 | 已细化 | 非解雇动作无需人类批准，解雇必须人类批准，事后审查可验收 |
+| G-47 | 招聘缺少偏差审计、合理便利和候选人申诉 | 33 | 已细化 | 岗位相关、盲评、分群调查、复测和能力门槛保持可验收 |
+| G-48 | 平台开源缺少统一许可证、NOTICE、贡献者和商业边界 | 34 | 已细化 | Apache-2.0、SBOM、DCO、第三方通知和服务型商业可验收 |
+| G-49 | 租户仪表盘缺少 Boss 首屏、确定性健康和行动中心 | 35 | 已细化 | 首屏、两级导航、项目健康、下钻和新鲜度可验收 |
+| G-50 | 审批缺少缺席协商、分级、委托和 SLA | 36 | 已细化 | 协商不越权、委托限时、超时拒绝和审计可验收 |
+| G-51 | UI 和 Agent 输出缺少语言、时区、格式和翻译治理 | 37 | 已细化 | zh-CN/en-US、locale、UTC/IANA 和翻译复核可验收 |
+| G-52 | 完整无障碍缺少 WCAG 目标、辅助技术测试和生成内容门禁 | 37（后置） | 已延后 | 不阻塞 MVP，后续按 WCAG 2.2 AA 实施 |
+| G-53 | 公司缺少全天可配置窗口、低价调度、假期和紧急唤醒策略 | 38 | 已细化 | 用户窗口、成本感知调度、检查点延期和 KPI 可验收 |
+| G-54 | CI/CD 缺少最简 GitHub 版本、检查和本地 Compose 构建契约 | 39 | 已细化 | 版本 Tag、Actions 门禁、本地构建记录和回滚可验收 |
+| G-55 | 成本缺少明确归属、公共成本分摊、项目预算结转和确定性异常契约 | 40 | 已细化 | 不重复计费、显式分摊、异常可复现且不自动处罚 |
+| G-56 | 通知中心缺少内部持久化、分级路由、去重和实时增强契约 | 41 | 已细化 | 仅站内通知，SignalR 失败可重拉，外部渠道后置 |
+| G-57 | 内部 API、MCP 与公共生态之间缺少明确开放边界 | 42 | 已细化 | 仅内部 API/Tool/MCP，公共 API、SDK、Webhook 和市场后置 |
+| G-58 | 自托管缺少最简安装、离线缓存、更新和失败恢复契约 | 43 | 已细化 | Tag 源码 + Compose，无激活/自动更新，离线缺失快速失败 |
+| G-59 | 容量基线缺少 API 延迟、队列上限、背压和 noisy neighbor 量化契约 | 44 | 已细化 | 单机聚合容量可测试，队列不静默丢弃，租户公平有门槛 |
+| G-60 | 企业合规缺少可配置策略、fail-closed、证据和商业支持边界 | 45 | 已细化 | ComplianceProfile 可执行，不宣称认证/SLA，必需项失败即拒绝 |
+| G-61 | 模型评测缺少密封集轮换、污染检测、Judge 校准、统计门槛和失败处置细则 | 46 | 已细化 | Judge 员工独立运行，校准/样本/统计可复现，失败不静默通过 |
 
 ## 3. 全局不变量
 
@@ -114,3 +158,26 @@
 33. 员工工号永久唯一；主控只能否决候选，录用、再入职和移除订阅由 Boss 最终决定；离职保留公司成果并隔离私有数据。
 34. 内容安全必须版本化并采用分级处置；分类器不是唯一判断，误报可申诉，对外发布不得绕过门禁。
 35. 安全事件必须按等级响应并由 IC 负责；预授权自动遏制不得等待逐级审批，证据与恢复必须可审计。
+36. 外部身份按不可变 provider subject 绑定；仅已验证邮箱可唯一匹配自动合并，恢复码单次使用，找回成功必须撤销旧会话。
+37. OIDC 身份键为 issuer+sub，新用户必须先邀请或预置；required SSO 必须具有独立紧急恢复，IdP 故障不得回退本地密码。
+38. 账户可拥有多个租户但第一梯队一租户一公司；每租户唯一 Primary Owner，最后所有者不可移除，代理不得转授权。
+39. 账户和租户删除必须立即软删除并限时恢复；窗口结束后物理清除，备份恢复必须重放 tombstone，软删除不是永久保留。
+40. 数据按版本化保留类进入 Hot/Archive/Cold；归档必须校验水位、数量和哈希，普通 Agent 不得检索 Cold，删除优先于归档。
+41. 备份必须开关化且默认关闭；未启用组件不得承诺 RPO/RTO，启用后按实际证据计算有效目标，升级跳过必须记录风险接受。
+42. 租户任务产出归租户所有，平台仅持有限运营许可；第三方权利不得被覆盖，UnknownRights 不得对外发布，租户内容默认不得用于平台训练。
+43. 非解雇绩效动作由 AI 自主决定并经独立 AI 复核；只有解雇需人类 Boss 最终批准，人类只参与解雇和事后审查。
+44. 招聘只按岗位相关能力评分，必须盲评、等价案例和分群偏差审计；偏差触发调查，候选人可申诉，能力门槛不得降低。
+45. 第一方资产统一 Apache-2.0；核心和默认企业功能保持开源，商业收入来自服务，第三方权利、租户产出和商标保持独立。
+46. Boss 仪表盘只突出健康、风险、预算、组织和待决策；项目健康由确定性规则计算，行动中心必须可下钻并显示新鲜度。
+47. 人类缺席时优先由 Controller 与直接下一层协商；协商不得创造权限或突破红线，不能处理才进入委托或备用审批，超时仍拒绝。
+48. 第一梯队支持 zh-CN/en-US；UTC 存储、IANA 时区和 locale 展示、币种显式，翻译保留来源与复核状态；完整无障碍后置。
+49. 公司全天 24 小时可配置；普通任务只在用户禁用窗口排队，可延期任务利用低价窗口，紧急唤醒不得扩大权限，禁用窗口不计绩效扣分。
+50. 源码和 CI 只使用 GitHub/GitHub Actions；仓库只打版本 Tag，Actions 只检查，本地从 Tag 用 Compose 构建，不发布镜像或引入多环境/Kubernetes。
+51. 成本只在钱账记录一次；任务项目优先、公共成本默认不分摊、预算不自动结转，确定性异常不得自动改预算、换模型或惩罚员工。
+52. 模型运行只支持 OpenAI 与 Anthropic 云端原生端点，不支持本地 GPU、Ollama、本地模型或 GPU 调度。
+53. 第一梯队只实现仪表盘内部通知中心；通知必须持久化、去重并支持 SignalR 实时增强和失败重拉，外部渠道后置。
+54. `/v1` 仅用于系统内部调用；不提供公共 API、公共 SDK、出站 Webhook、MCP/插件市场或跨租户分享。
+55. 自托管只使用版本 Tag 源码、Compose 和仓库脚本；不提供激活或自动更新，离线缓存缺失必须快速失败，完全断网不承诺模型推理。
+56. 当前只承诺单租户单机聚合容量；队列必须有上限和背压，noisy neighbor 不得使其他租户 API P95 劣化超过 20% 或等待超过 30 秒。
+57. 合规通过版本化 ComplianceProfile 配置；必需控制不满足必须 fail closed，技术证据不等于认证，当前不提供商业 SLA 或专属支持。
+58. 评测 holdout 与 canary 必须隔离；Judge 是独立员工运行时，模型可同但上下文不可共享，校准、样本、统计和失败处置必须可复现。

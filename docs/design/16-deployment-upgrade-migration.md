@@ -35,7 +35,8 @@ systemd
 ```
 
 - 默认 Compose 不启动可选遥测组件。
-- 镜像按 digest 固定，禁止 `latest`。
+- GitHub 只打版本 Tag，GitHub Actions 只检查和测试，不发布镜像。
+- 本地从批准 Tag 检出源码，用 Docker Compose 构建；基础镜像尽量按 digest 固定。
 - 配置通过环境变量或 secret 文件注入。
 - 密钥不写入镜像、Compose 明文或普通配置。
 - 容器使用非 Root 用户、只读根文件系统和显式数据卷。
@@ -45,7 +46,9 @@ systemd
 
 ```text
 release_version
-image_digests[]
+version_tag
+source_commit
+base_image_digests[]
 database_schema_version
 config_schema_version
 observability_profile
@@ -68,6 +71,9 @@ contract_migration_required
 - 升级和回滚说明。
 - 已知不兼容项。
 - TestEvidence、安全/容量/混沌/恢复测试摘要。
+- LICENSE、NOTICE、SBOM 和 ReleaseLicenseReport。
+- 版本 Tag、源 commit 和本地构建记录，详见 [39 GitHub CI/CD 与本地部署](./39-github-actions-and-local-compose.md)。
+- install、upgrade、validate、rollback 和 status 脚本，离线缓存与失败恢复见 [43 自托管安装与离线升级](./43-self-hosted-install-and-offline-upgrade.md)。
 
 ## 4. 版本兼容
 
@@ -108,12 +114,12 @@ observability profile 和 Exporter 配置
 
 ### 6.2 Backup
 
-- Postgres 一致性备份。
-- RustFS 版本和备份检查。
-- 网关密钥库加密备份。
-- 当前镜像、schema 和配置清单。
-- 最近审计检查点、签名和锚定状态。
-- 抽样验证备份可读。
+- 读取 BackupProfile；默认关闭，不作为升级优先项。
+- 启用时执行 Postgres 一致性备份、RustFS 版本检查、密钥库加密备份和清单校验。
+- 关闭时记录 `backup_step=skipped`、风险接受人、理由和时间。
+- 不得伪造备份成功或沿用旧作业状态。
+- 最近审计检查点、签名和锚定状态始终记录，不属于可选备份。
+- 备份启用时在 Contract 前验证最近备份可读。
 
 ### 6.3 Expand Migration
 
@@ -289,7 +295,7 @@ Runner 额外提供：
 
 1. 镜像必须按 digest 固定。
 2. N-2 Runner 无法注册。
-3. 升级前必须完成 Drain 和备份。
+3. 升级前必须完成 Drain；备份启用时完成备份，关闭时记录风险接受。
 4. Expand Migration 不删除旧结构。
 5. 生产启动不会自动迁移。
 6. 两个迁移 Job 不会并发执行。

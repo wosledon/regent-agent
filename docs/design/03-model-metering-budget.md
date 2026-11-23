@@ -15,6 +15,10 @@
 7. 控制面调用网关必须使用服务身份，不能借用员工令牌。
 8. 模型元数据和价格以 models.dev 每日快照为首选来源，BYOK 手工补价可被目录字段自动覆盖。
 9. 价格和档位均版本化；历史 usage 按请求发生时快照结算，不追溯改写。
+10. 成本只在钱账记录一次，员工、岗位、项目和公共成本不重复计费。
+11. 归属按任务项目、显式成本中心、公共成本顺序处理；无法归属进入 Unallocated。
+12. 公共成本默认不自动分摊，项目预算不自动结转，异常不自动改预算、换模型或惩罚员工。
+13. 模型运行只支持 OpenAI 与 Anthropic 云端端点，不支持本地 GPU、Ollama 或本地模型。
 
 ## 2. 模型与 BYOK 生命周期
 
@@ -30,7 +34,7 @@ Model:
   key_ref, state, health, last_test_at
 ```
 
-`protocol` 取值：`openai_chat_completions`、`anthropic_messages`、`ollama_openai`。`endpoint_kind` 由协议推导，客户端必须选择对应原生端点。
+`protocol` 取值：`openai_chat_completions`、`anthropic_messages`。`endpoint_kind` 由协议推导，客户端必须选择对应原生端点。
 
 `key_ref` 是网关内的不透明引用，不包含密钥、密钥哈希或可逆标识。
 
@@ -183,13 +187,13 @@ llm_usage:
 
 ### 4.2 工具用量事件
 
-Runner 上报沙箱、浏览器、存储、GPU 等工具消耗：
+Runner 上报沙箱、浏览器、存储等工具消耗：
 
 ```text
 tool_usage:
   usage_event_id, tenant_id, runner_id, employee_id, task_id
   tool_type, duration_ms, cpu_ms, memory_mb_seconds
-  storage_bytes, network_bytes, gpu_ms
+  storage_bytes, network_bytes
   unit_price_version, amount, currency
 ```
 
@@ -217,15 +221,19 @@ tool_usage:
 ```text
 ledger_entries:
   id, tenant_id, usage_event_id
-  period, account_type, employee_id, position_id, project_id
+  occurred_period, posted_period
+  account_type, employee_id, position_id, project_id
+  cost_center_type, cost_center_id
   amount, currency, price_version
   entry_type: charge | correction | refund
-  created_at
+  corrects_entry_id?, created_at
 ```
 
 - `account_type`：model、tool、butler、benchmark、platform。
-- 员工、岗位、项目和全局视图由同一权威条目投影。
+- 员工、岗位、项目和全局视图由同一权威条目投影，不重复计费。
+- 归属优先任务所属项目，其次显式项目或成本中心；无项目成本进入 CompanyOverhead，无法归属进入 Unallocated。
 - 原始条目不可更新或删除；更正引用原条目并记录原因。
+- 详细归属、分摊、结转、异常和原币规则见 [40 成本归属、分摊与异常](./40-cost-allocation-and-anomaly.md)。
 
 ### 5.2 结算顺序
 
@@ -242,6 +250,7 @@ ledger_entries:
 - 租户月度硬预算：默认 ¥8000。
 - 预警线：默认 ¥5600，即硬预算的 70%。
 - 项目、岗位和单任务预算作为预警与评审线，不自动硬终止；任务成本到 100% 时暂停并沿管理链逐级评审。
+- 项目预算默认软限制，可经审批设为硬限制；预算不自动结转，只允许所有者显式批准未使用项目预算结转。
 - 模型和推理强度绑定员工，成本评审不得通过临时换模型规避。
 - BYOK 模型费用仍计入租户运营账本，但不进入平台收入。
 
@@ -294,11 +303,15 @@ WHERE tenant_id = :tenant
 
 ## 7. 成本异常
 
-- 单任务成本超过岗位日均预算 3 倍：自动暂停并通知主控或授权经营岗位。
-- 同一模型短时间价格变化超过 20%：停止自动路由，要求重新评估。
-- 网关用量与控制面投影差异：进入对账队列。
+- 单任务成本超过岗位近 30 天同类完成任务日均成本 3 倍且样本至少 5 条：L1 告警并通知直接 Leader；样本不足不触发。
+- 项目实际或预测成本超过预算 120%：L2 告警。
+- 租户预测超过月度硬预算 100%：L2；超过 110%：L3 并冻结非必要任务。
+- 同一 Provider + Model ID 在 24 小时内有效价格变化超过 20%：停止自动路由，要求重新评估。
+- 网关用量与控制面投影差异超过月度账单 1% 或配置绝对阈值：进入对账队列。
 - 重复 source_event_id：去重并记录指标，不重复入账。
-- Butler 定时任务连续失败仍计费：在报告中单列异常项。
+- Butler 同一 Job 连续 3 次失败仍计费：在报告中单列异常项。
+- 异常只告警和触发既有评审，不自动修改预算、模型、岗位或绩效。
+- 公共成本分摊、预算结转、原币和迟到更正详见 [40 成本归属、分摊与异常](./40-cost-allocation-and-anomaly.md)。
 
 ## 8. 验收场景
 
@@ -312,7 +325,7 @@ WHERE tenant_id = :tenant
 8. A 租户模型故障不会路由到 B 租户。
 9. 管家和 benchmark 成本可在账本中单列。
 10. 预算预警、硬限制、对账差异均有可验证事件和审计记录。
-11. 本地模型超过单并发限制时排队，不产生隐式并发。
+11. 配置 Ollama、本地模型或本地 GPU 端点时返回明确不支持错误。
 12. Provider 流式中断后，已产生用量仍可结算，未完成工具调用不自动重放。
 13. OpenAI 请求进入 Anthropic 端点时返回 422，不发生协议转化。
 14. OpenAI 与 Anthropic 的工具调用、流式事件和错误结构分别保持原生形状。
@@ -328,8 +341,28 @@ WHERE tenant_id = :tenant
 24. cheap/mid/premium 由目录数据自动计算。
 25. 档位变化不影响在途任务。
 26. 历史账目不会因目录更新而改写。
+27. 同一 Usage 只生成一条钱账记录。
+28. 任务费用归项目并保留发生时员工和岗位快照。
+29. 无项目 Butler 和公共评测费用进入公司公共成本。
+30. 无效或跨租户归属进入 Unallocated 并记录安全事件。
+31. 公共成本默认不自动分摊。
+32. 分摊权重不为 100% 时拒绝规则，分摊不增加总成本。
+33. 项目预算默认软限制，可经审批设为硬限制。
+34. 未审批不能结转预算，预留、欠款和超支不得结转。
+35. 岗位样本不足 5 条时不触发任务成本异常。
+36. 同类任务成本超过 3 倍时生成 L1。
+37. 项目预测超过 120% 时生成 L2。
+38. 租户预测超过 100% 和 110% 时分别生成 L2 和 L3。
+39. 价格 24 小时变化超过 20% 时停止自动路由。
+40. 账单差异超过阈值时生成对账案件。
+41. 成本异常不自动改预算、换模型或惩罚员工。
+42. 不同币种分别统计且不直接相加。
+43. 迟到费用归发生周期，关闭周期通过当前周期更正。
+44. 重复 Usage 不重复入账。
+45. 预算为 0 或币种不一致时不计算偏差比例。
+46. 项目预算偏差统一使用 ±10% 目标和 ±20% 预警。
 
-## 9. 能力评估、本地模型与 Provider 韧性
+## 9. 能力评估与 Provider 韧性
 
 ### 9.1 能力矩阵
 
@@ -347,13 +380,13 @@ BenchmarkRun:
 - 新岗位优先复用有效评估；模型或套件版本变化时才重测。
 - 评估失败或预算不足不会把模型标记为 `Ready`。
 
-### 9.2 本地模型并发
+### 9.2 模型运行边界
 
-- 本地档默认只有 1 个推理位。
-- 网关按租户公平排队，单请求设置等待超时和最大输出。
-- 排队期间不占用模型费用，只记录等待指标。
-- 超时后暂停并上报直接 Leader；不得自动回退到其他模型，调岗后由新员工按自身绑定重新执行。
-- 本地模型调用同样生成 usage、账本和审计事件。
+- 当前只支持 OpenAI 与 Anthropic 云端原生端点。
+- 不支持本地 GPU、Ollama、本地模型档、GPU 排队、抢占、显存调度或本地推理端点。
+- 协议枚举和 Provider 插件不保留 `ollama_openai` 或本地兼容实现。
+- 员工容器不挂载 GPU，Runner 不上报本地推理资源。
+- 本地推理如将来重新引入，必须作为新需求评审。
 
 ### 9.3 Provider 错误与流式语义
 

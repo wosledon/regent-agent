@@ -24,7 +24,7 @@
 | 人类接口 | 仪表盘（观察）+ 管家 AI（对话式操作）+ 升级队列（唯一决策入口，超时默认拒绝），其余完全不管 |
 | 管理界面 | 租户仪表盘与运营控制台分离；前者服务股东，后者服务提供方；网关对租户 API-only，运营平台通过独立管理 API 运维 |
 | 部署形态 | 全链路开源；两种用法：运营方托管服务（注册即用，多租户）或源码全套自托管（单租户自足） |
-| 产品形态 | 多租户 SaaS：每个注册用户配置自己的模型池（BYOK）、章程与公司；租户 #1 为股东自用（dogfooding） |
+| 产品形态 | 多租户 SaaS：每个账户可配置一个或多个租户，各自拥有模型池（BYOK）、章程与公司；租户 #1 为股东自用（dogfooding） |
 
 ---
 
@@ -57,6 +57,21 @@
 | 唯一工号、调岗/再入职、待驱逐、Boss 决策和离职数据 | [23 离职、调岗与再入职](./design/23-employee-offboarding-and-identity.md) |
 | 内容分级、检测管线、处置、误报申诉和外部合规 | [24 内容安全](./design/24-content-safety.md) |
 | SEV1～SEV4、IC、遏制、取证、通知、恢复与复盘 | [25 安全事件响应](./design/25-security-incident-response.md) |
+| 账号密码、GitHub OAuth、已验证邮箱合并、恢复码与会话撤销 | [26 账户身份与找回](./design/26-account-identity-and-recovery.md) |
+| 租户 OIDC、issuer+sub、邀请预置、组映射、IdP MFA 与紧急恢复 | [27 企业 OIDC 与认证策略](./design/27-enterprise-oidc-and-authentication-policy.md) |
+| 账户多租户、Primary/Co-Owner、限时代理和租户切换 | [28 账户、租户与所有权](./design/28-account-tenancy-and-ownership.md) |
+| 软删除、加密隔离、限时恢复、物理清除和 tombstone | [29 账户与租户软删除](./design/29-account-and-tenant-soft-deletion.md) |
+| 保留类、Hot/Archive/Cold、月度归档、manifest 和授权恢复 | [30 在线保留与归档](./design/30-retention-and-archiving.md) |
+| 可选备份开关、有效 RPO/RTO、异地副本和恢复演练 | [31 可选备份与恢复](./design/31-backup-profiles-and-recovery.md) |
+| 租户产出归属、第三方权利、来源记录和发布门禁 | [32 产出权利与来源](./design/32-tenant-output-rights-and-provenance.md) |
+| 岗位相关招聘、盲评、偏差审计和候选人申诉 | [33 公平招聘与申诉](./design/33-recruitment-fairness-and-appeals.md) |
+| Apache-2.0、NOTICE、SBOM、贡献者和商业边界 | [34 开源许可与分发](./design/34-open-source-licensing-and-distribution.md) |
+| Boss 首屏、两级导航、项目健康和行动中心 | [35 租户仪表盘信息架构](./design/35-tenant-dashboard-information-architecture.md) |
+| 缺席协商、分级审批、委托、备用审批人和 SLA | [36 审批委托与缺席](./design/36-approval-delegation-and-absence.md) |
+| zh-CN/en-US、时区、格式和翻译治理 | [37 国际化与本地化](./design/37-internationalization-and-localization.md) |
+| 全天可配置、低价窗口和成本感知调度 | [38 公司作息与调度](./design/38-company-work-schedule-and-dispatch.md) |
+| GitHub 版本 Tag、Actions 检查和本地 Compose 构建 | [39 GitHub CI/CD 与本地部署](./design/39-github-actions-and-local-compose.md) |
+| 成本归属、显式分摊、预算结转和确定性异常 | [40 成本归属、分摊与异常](./design/40-cost-allocation-and-anomaly.md) |
 
 完整缺口登记和全局不变量见 [详细设计 README](./design/README.md)；四部分拓扑、工具调用、项目交付和模型预算流程见 [完整架构流程图](./Regent-Agent-架构流程图.md)。
 
@@ -64,7 +79,7 @@
 
 ## 1. 愿景与定位
 
-产品形态是**多租户 SaaS**：每个注册用户是一个租户，配置自己的模型池（BYOK）、写自己的章程、拥有自己的自主公司。租户 #1 是股东自己的公司（dogfooding）。
+产品形态是**多租户 SaaS**：每个注册账户可以拥有或加入多个租户，配置各自的模型池（BYOK）、章程和自主公司。第一梯队一租户一公司，租户 #1 是股东自己的公司（dogfooding）。
 
 这不是"一个 AI 助手"，也不是"装几个服务"，而是一台**公司孵化器**：
 
@@ -82,7 +97,7 @@ Regent = 摄政者：**君主（股东）长期缺席，摄政者代行统治**�
 | 层 | 名称 | 说明 |
 |---|---|---|
 | 平台 | **Regent-Agent**（摄政） | 产品总名 |
-| 人类所有者 | **Boss / Owner**（老板） | 租户所有者，不是 Agent；可设置展示后缀，权限来自 Owner 身份 |
+| 人类所有者 | **Boss / Owner**（老板） | 租户所有者成员，不是 Agent；Primary Owner 唯一，权限来自显式所有权或委托 |
 | 用户角色别称 | **Sovereign**（君主） | Boss 在产品叙事中的别称 |
 | 股东助手 | **Steward**（总管） | §3.1.1 管家：只读、直属股东、定时汇报 |
 | 公司种子 | **Charter**（特许状） | §2 章程。Royal Charter 史上正是"设立一个实体的特许文件" |
@@ -106,7 +121,7 @@ Regent = 摄政者：**君主（股东）长期缺席，摄政者代行统治**�
   · 伦理红线：不碰灰产、不侵权、不冒充人类、不生成违法内容
 治理：
   · 分级放权：见 §6.5 升级队列
-  · 股东通知渠道：仪表盘通知中心 + Telegram（灾难级必达；升级事项与定时报告按分级推送）
+  · 股东通知渠道：仅仪表盘通知中心（灾难、升级和定时报告按分级站内推送；外部渠道后置）
   · 技术约束：C#/.NET 10/MAF；不引入 Kafka；密钥只在网关；Runner 必须无状态
 ```
 
@@ -120,7 +135,7 @@ Regent = 摄政者：**君主（股东）长期缺席，摄政者代行统治**�
 
 | 概念 | 说明 |
 |---|---|
-| Boss / Owner | 人类租户所有者，不是 Agent，不占编制；展示后缀不影响权限 |
+| Boss / Owner | 人类租户所有者成员，不是 Agent，不占编制；Primary Owner 唯一，展示后缀不影响权限 |
 | Controller | 公司唯一的编排 Agent 运行时，不占编制；启动后为自己创建一个数据化岗位 |
 | Employee Agent | 绑定岗位的独立 Agent 运行时；主控自建岗位后也以 EmployeeRuntime 执行岗位任务 |
 | Position | 组织树节点与编制槽，包含名称、职责、能力、模型档位、预算和汇报关系 |
@@ -148,12 +163,33 @@ Regent = 摄政者：**君主（股东）长期缺席，摄政者代行统治**�
 | Employee No / Pending Removal | 永久工号、任职周期、待驱逐队列、Boss 决策与离职交接 |
 | Content Safety Policy | 版本化规则、可插拔检测、分级处置、申诉与合规 |
 | Security Incident Response | SEV1～SEV4、IC、遏制、取证、通知、恢复与复盘 |
+| Account Identity | 账号密码、GitHub OAuth、已验证邮箱合并、恢复码与会话撤销 |
+| Enterprise OIDC | 租户 issuer+sub、邀请预置、组映射、IdP MFA 与紧急恢复 |
+| Tenancy & Ownership | 账户多租户、Primary/Co-Owner、限时代理与租户切换 |
+| Soft Deletion | 逻辑删除、加密隔离、限时恢复、物理清除与 tombstone |
+| Retention & Archive | 保留类、Hot/Archive/Cold、manifest、授权恢复与冷检索 |
+| Backup Profile | 可选全量、PITR、对象、密钥、异地和演练开关 |
+| Output Rights | 租户归属、平台有限许可、第三方权利、来源与发布门禁 |
 | Workflow | 可版本化的流程资产；个人自主使用，组织范围绑定岗位子树并需 Leader 采纳 |
 | Memory | 个人、组织和公共知识数据；支持混合 RAG、关系多跳和生命周期遗忘 |
 | Knowledge Base | 公司根范围已发布记忆的策展视图，不是原始日志仓库 |
 | Self-Drive | 员工主动反思、提出改进并验证效果的循环 |
 | KPI | 公司、岗位和员工的可衡量目标，数据来自控制面事实 |
 | Performance Review | 基于证据的评估、组织动作、申诉和审计 |
+| Fairness Policy | 岗位相关标准、盲评、分群偏差审计、合理便利和候选人申诉 |
+| Open Source Policy | Apache-2.0、LICENSE/NOTICE、SBOM、贡献者和商业服务边界 |
+| Dashboard IA | Boss 首屏、两级导航、确定性项目健康和行动中心 |
+| Approval Policy | 缺席协商、分级审批、委托、备用审批人和 SLA |
+| Locale Policy | zh-CN/en-US、时区、格式、翻译治理和无障碍后置 |
+| Work Schedule | 全天可配置、静默/低价窗口、成本感知调度和紧急唤醒 |
+| Delivery Pipeline | GitHub 版本 Tag、Actions 检查和本地 Docker Compose 构建 |
+| Cost Governance | 直接归属、显式分摊、不自动结转、确定性异常和原币记账 |
+| Model Runtime | 仅 OpenAI 与 Anthropic 云端原生端点；不支持本地 GPU 或 Ollama |
+| Notification Center | 仅仪表盘内部通知、持久化和 SignalR 实时推送 |
+| Extension Boundary | 仅内部 API、Tool 和内部 MCP；公共生态后置 |
+| Self-host Install | Tag 源码、Compose、systemd 和简单脚本；无激活或自动更新 |
+| Capacity Baseline | 单机聚合容量、API P95、队列上限、背压和租户公平 |
+| Compliance Profile | 可配置合规控制、证据和 fail-closed；不宣称认证 |
 | Capability | 权限与调度依据，如调研、招聘、技术评审、项目决策、独立验收 |
 | Sentinel | 纯程序算法，不调用 LLM、不是 Agent、不占编制 |
 | Butler | 股东只读助手，不是公司员工，不占编制 |
@@ -192,7 +228,7 @@ Sentinel（纯算法）──事件──▶ Controller / Butler / Boss 通知
 - **公司输出 → 人话**：回答"为什么这周没产出"（读公司志/账本/组织状态后讲解）
 - **升级事项带建议**：每个升级事项附管家推荐与理由（§6.5）
 - **上手引导**：BYOK 配模型、章程撰写辅助——新租户的第一个触点
-- **定时汇报**：按计划主动出具报告，如默认每日 08:00 预算报告（当月花费 / 燃烧速率 / TOP 消耗岗位 / 异常项）
+- **定时汇报**：按计划主动出具报告，如默认每日用户设置时间（未设置时默认 09:00）的预算报告（当月花费 / 燃烧速率 / TOP 消耗岗位 / 异常项）
 
 能力面（安全边界）：**控制面给它开一组 MCP 只读工具，管家不直接访问数据层**：
 
@@ -208,9 +244,9 @@ org.status / ledger.summary / journal.recent / escalations.list / hiring.funnel
 
 多租户与降级：管家服务单例、会话全租户作用域，对话历史存控制面库（小体量）；网关不可用时仅管家对话停用，仪表盘其余功能正常。
 
-**定时任务机制**：管家持一张任务表 `butler_jobs{schedule(五字段 cron), prompt_template, tools, channels, enabled}`，租户可定义、数量按套餐设上限。触发时管家唤醒 → 经只读工具取数 → 经网关生成报告 → 投递到**仪表盘通知中心**与股东通知渠道（灾难 / 升级 / 定时报告分级路由，§2）。失败重试带退避，漏产有标记。成本经网关计量、账本单列"管家"类目。时区按租户本地。
+**定时任务机制**：管家持一张任务表 `butler_jobs{schedule(五字段 cron), prompt_template, tools, enabled}`，租户可定义、数量按套餐设上限。触发时管家唤醒 → 经只读工具取数 → 经网关生成报告 → 投递到**仪表盘通知中心**。失败重试带退避，漏产有标记。成本经网关计量、账本单列"管家"类目。时区按租户本地。
 
-默认任务集：每日 08:00 预算报告；每周公司摘要（叠加公司经营报告之上的**平台运营视角**）；事件触发：升级事项创建、预算破预警线（带管家解读）。
+默认任务集：每日用户设置时间（未设置时默认 09:00）的预算报告；每周公司摘要（叠加公司经营报告之上的**平台运营视角**）；事件触发：升级事项创建、预算破预警线（带管家解读）。
 
 **与公司经营报告的分工**：公司经营报告 = 业务进展，读者是公司；管家报告 = 平台运营视角（预算 / 用量 / 系统状态 / 股东待办），读者是股东。两者不重复。
 
@@ -298,7 +334,7 @@ OrgManagementGrant:
 - 验收覆盖功能、易用性、设计合理性和可访问性；关键场景 100% 通过，P0/P1 清零，设计评分平均 ≥4 且无维度低于 3。
 - 首轮后最多两轮复测；不能降低标准、删除失败场景或修改人格，连续两轮失败进入终止或重新规划。
 - AI 人格验收不能替代真实用户验证。
-- 成本设计：人格一致性用便宜/本地模型，记录员用中档。
+- 成本设计：人格一致性用 cheap 云端模型，记录员用 mid 云端模型。
 
 ---
 
@@ -338,7 +374,7 @@ OrgManagementGrant:
 
 ```
 ModelDescriptor {
-  Id, Provider, Protocol,        // openai_chat_completions | anthropic_messages | ollama_openai
+  Id, Provider, Protocol,        // openai_chat_completions | anthropic_messages
   Tier,                           // 档位：cheap / mid / premium
   CapabilityTags,                // code / reasoning / writing / fast
   InputPricePerMTok, OutputPricePerMTok,
@@ -377,9 +413,9 @@ ModelDescriptor {
 
 模型 X 的代码能力测过一次，全公司复用；禁止每开一个岗位重测一遍。面试记录持续沉淀"什么模型适合什么岗"的公司知识。
 
-### 5.5 本地模型档
+### 5.5 模型运行边界
 
-本机 RTX 3060 12G：本地档容量 = **1 个并发推理位**（14B-Q4 约 9G），仅供低优先级杂活（测试、文档、体验官），推理请求排队。
+当前只支持 OpenAI 与 Anthropic 云端原生端点，不实现本地 GPU、Ollama、本地模型档或 GPU 调度。
 
 ---
 
@@ -485,7 +521,7 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
 | 财务账本 | 模型成本以网关用量为权威源，工具成本以 Runner 用量为权威源；员工/岗位/项目/全局视图；预算预留与软硬线；只增不改 |
 | 编制账本 | 总编制、在编、冻结、空槽；招聘/开除事件流；录用与占槽同事务 |
 | 消息总线 | 租户级消息表 + seq 游标 + Outbox/Inbox；拉取/广播；毒消息死信 |
-| 调度器 | pending 任务 × Runner 能力（镜像/槽位/并发/GPU/工作区）匹配；任务租约与 fencing；心跳超时检出孤儿 → 重调度 |
+| 调度器 | pending 任务 × Runner 能力（镜像/槽位/并发/工作区）匹配；任务租约与 fencing；心跳超时检出孤儿 → 重调度 |
 | Tool Registry / PEP | ToolManifest、权限过滤发现、执行鉴权、参数校验、幂等、审计 |
 | 升级队列 | 股东唯一决策入口：主控或员工升级事项（超预算/对外动作/红线），超时默认拒绝；每项附管家推荐与理由（§3.1.1） |
 | 记忆系统 | 个人/组织/知识库分层；Postgres + pgvector + 全文检索 + 关系多跳；来源、版本、置信度、衰减、遗忘和删除 |
@@ -493,14 +529,14 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
 | 哨兵（Sentinel） | 纯程序算法：机器指标、URL/证书、Runner 心跳、预算燃烧速率；不调用 LLM、不占编制；L0 记录 / L1 日报 / L2 告警+唤醒主控 / L3 通知 Boss+预定义预案 |
 | 仪表盘 | Blazor Server + SignalR：组织架构实时图、双账本、招聘漏斗、总线流量、升级队列、模型池配置（BYOK，页面属控制面、服务端直连网关）、**管家对话面板** |
 | 管家（Butler） | 控制面内置只读助手（§3.1.1）：经本模块暴露的 MCP 只读工具面（租户作用域）访问数据，模型调用经网关；持任务表（租户可定义定时报告与事件触发通知）；非公司员工，不占编制、不被调度；工具清单即安全边界 |
-| 备份 | 每日快照：Postgres + RustFS 快照与版本 + 网关导出的加密密钥库；主密钥分离保管；支持恢复演练 |
+| 备份 | 可选 BackupProfile：全量、PITR、RustFS、密钥库、异地和演练独立开关；默认关闭，启用后计算有效 RPO/RTO |
 
 ### 6.6 网关模块清单
 
 | 模块 | 内容 |
 |---|---|
 | 密钥托管 | 加密存储（主密钥在环境变量），轮换端点，**不落明文日志** |
-| Provider 插件 | OpenAI 与 Anthropic 分别实现原生协议插件；本地 Ollama 使用其 OpenAI 兼容端点。禁止 OpenAI↔Anthropic 请求或响应转化 |
+| Provider 插件 | OpenAI 与 Anthropic 分别实现原生协议插件。禁止 OpenAI↔Anthropic 请求或响应转化 |
 | 鉴权授权 | 验 JWT + 执行模型档位策略（如"测试岗禁用 premium"） |
 | 代理转发 | 注入 key 调 provider，回传响应 |
 | 计量 | 每次调用记录（runner/员工/模型/token/费用）→ 推控制面入账；计费采集点与执行点合并，账本准确性有结构保证 |
@@ -513,7 +549,7 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
 
 | 模块 | 内容 |
 |---|---|
-| 注册/心跳 | 能力画像上报（槽位/镜像/重并发/GPU）；优雅 drain（不接新活、跑完迁移） |
+| 注册/心跳 | 能力画像上报（槽位/镜像/重并发）；优雅 drain（不接新活、跑完迁移） |
 | 主控宿主 | ControllerRuntime：公司级状态读取、组织规划、任务创建、继任与节奏管理；不是固定 CEO 岗位 |
 | 员工 Agent 宿主 | EmployeeRuntime 生命周期：按 charter 拉起、Channel 收件箱、单线程主循环（串行化自身动作）、休眠/唤醒、停止 |
 | Agent 运行时 | 调 RegentAgent.Agents：charter → MAF `AsAIAgent(instructions, tools)` |
@@ -529,13 +565,15 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
 
 ### 6.8 多租户（SaaS）模型
 
-定位：每个注册用户是一个租户，配置自己的模型池（BYOK）、写自己的章程、拥有自己的公司。租户 #1 是股东自己的公司。
+定位：每个注册账户可以拥有或加入多个租户，各自配置模型池（BYOK）、章程和公司。第一梯队一租户一公司，租户 #1 是股东自己的公司。
 
-**新增实体**：Tenant（TenantId / 归属用户 / 套餐 / 状态）。每个租户一家公司（v1）：章程、组织、双账本、消息总线、记忆、工位，全部租户隔离。
+**新增实体**：Tenant（TenantId / PrimaryOwner / 套餐 / 状态）、TenantMembership、TenantOwnership、OwnerInvitation、OwnerDelegation。每个租户一家公司（v1）：章程、组织、双账本、消息总线、记忆、工位，全部租户隔离。
 
 **认证与身份**：
 
-- 用户注册 → 创建 Tenant → 成为该公司股东；登录签发带 `sub / tenant_id / role / scopes` 的 JWT，所有调用按 tenant claim 强隔离
+- 用户注册可创建首个 Tenant 并成为 Primary Owner，也可接受其他租户邀请；登录会话携带 `sub / tenant_id / role / scopes`，所有调用按 tenant claim 和成员关系强隔离
+- 每个租户恰好一个 Primary Owner，可有多名 Co-Owner；代理权限限时、限范围且不可转授权
+- 切换租户时服务端重新校验成员关系并签发目标租户会话，不信任请求体中的 Tenant ID
 - Runner 归属随部署形态：托管服务下全部为运营方池（多租户共享、按租户公平调度）；自托管下全部本地。Runner 使用部署身份领活，每个任务使用独立 assignment token
 - 网关按 assignment token 或 control service token 解析租户 → 取该租户的密钥；不信任请求体中的 tenant_id
 - 身份、claims、密钥轮换和权限矩阵见 [01 基础契约与状态模型](./design/01-contracts-and-state.md)
@@ -551,7 +589,7 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
       → 写章程（模板化默认值）→ 公司启动（主控自建岗位并规划组织）→ 仪表盘
 ```
 
-当前版本不接入邮件服务商，注册邮件验证与密码找回邮件不作为前置条件，相关能力延后。
+当前版本不接入邮件服务商，本地邮件验证与邮件找回不作为前置条件；第一梯队支持账号密码、GitHub OAuth 和一次性恢复码，仅已验证邮箱可自动合并。
 
 **隔离策略（多租户第一属性，跨租户泄漏 = 产品级事故）**：
 
@@ -560,7 +598,7 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
 - 容器：不同租户的员工容器网络分段、卷不共享
 - 密钥：租户密钥库严格分离，无跨租户取用路径
 - 调度：公平分享，单租户满编不得饿死其他租户
-- 备份和导出按租户可分区恢复，密钥库与主密钥分离保管
+- 启用备份时可按租户分区恢复，密钥库与主密钥分离保管；数据导出按 Q-033 延后
 
 **构建策略**：`tenant_id` 从第一个 migration 进入所有租户业务表，系统级实体使用显式 system scope；认证从第一天就是租户作用域——"单租户"只是第一个租户。SaaS 外壳（注册、BYOK 向导、套餐计费）是增量层而非重写，置于首个自主闭环跑通之后（§12 阶段 8）。
 
@@ -575,7 +613,7 @@ Runner → 网关:    POST /v1/chat/completions（OpenAI 原生协议，Bearer a
 
 模式 B（运营方只跑控制面、用户自带 Runner+网关）**已否决**：它制造"半信任"模糊地带——运营方可见全部组织数据却不能承诺不管，用户让渡可见性又握不住密钥；为此引入的跨信任域注册、E2E 密文中转、契约跨版本协商，复杂度远超收益。开源 SaaS 的成熟形态就是"托管或自托管"二选一。
 
-**模式 C 的诚实声明**：托管下运营方技术上可接触租户密钥与数据，这是托管服务固有属性，不伪装。运营平台通过独立身份、支持授权和审计限制访问，默认不读取业务内容和密钥。退出通道是产品的一部分：代码开源 + 一键自托管（模式 A）+ 数据导出。密钥由网关加密存储、控制面不接触——这是**部署内职责分离**（缩小审计面、限制爆炸半径），不是跨信任域的加密保证。若需防运营方内部人，可选加固：管理命令 E2E 加密（租户网关持公钥，控制面仅中转密文）。
+**模式 C 的诚实声明**：托管下运营方技术上可接触租户密钥与数据，这是托管服务固有属性，不伪装。运营平台通过独立身份、支持授权和审计限制访问，默认不读取业务内容和密钥。代码开源和 Tag 源码自托管继续提供；数据导出与托管退出按 Q-033 延后。密钥由网关加密存储、控制面不接触——这是**部署内职责分离**（缩小审计面、限制爆炸半径），不是跨信任域的加密保证。若需防运营方内部人，可选加固：管理命令 E2E 加密（租户网关持公钥，控制面仅中转密文）。
 
 **连接与配置**：四部分同部署，内部发现（localhost / 内网），无 NAT 穿透、无跨组织注册、无跨运营边界契约协商；自托管用户随版本整体升级，可选择不启动或不暴露运营平台。
 
@@ -660,8 +698,12 @@ Position / CapabilityGrant
 - 主控默认每 7 天运行一次绩效周期，其他周期可配置或事件触发。
 - 评估者由 `employee.assess` 能力决定，不要求 HRBP 岗位名称。
 - 动作包括辅导、流程优化、模型调整、调岗、降职、冻结和解雇。
-- KPI 不达标不直接触发解雇；高影响动作需要证据、复核、申诉和审计。
-- 任务按复杂度加权，权重在 Ready 前锁定；加权得分同时考虑实际质量和能力匹配。
+- 非解雇绩效动作由 Controller/AI 自主决定，不需要人类事前批准；高影响动作需要独立 AI 复核、申诉和审计。
+- 解雇、移除模型订阅和释放编制必须由人类 Boss 最终批准。
+- 人类只参与解雇和事后审查，可推翻结论和要求纠正，不参与其他日常绩效动作。
+- 招聘只按岗位相关能力评分，必须盲评、等价案例、独立评分和分群偏差审计。
+- 候选人可申诉、复测和申请合理便利；偏差调查不降低能力门槛，Boss 保留最终录用权。
+- KPI 不达标不直接触发解雇；任务按复杂度加权，权重在 Ready 前锁定。
 - 员工能力由模型 benchmark、历史交付、工具链和上下文适配共同计算。
 - 主控解雇前必须完成继任。
 
@@ -712,10 +754,12 @@ Position / CapabilityGrant
 - 复用键包含模型版本、推理强度、PromptBundle、Tool Profile、Runtime、数据集、评分策略和 seed。
 - 密封集与生产上下文隔离；跨租户默认不共享评测数据。
 - 新模型完整评测，每日 canary、每周核心回归、每月全量，Prompt/Skill/Tool 变化运行受影响集合。
-- 确定性测试优先，LLM Judge 独立且版本固定，人工抽检校准。
+- 确定性测试优先；Judge 是具备 evaluation.judge 能力的独立员工运行时，优先不同模型，同模型不同运行时允许但禁止自评和上下文共享。
+- Judge 每版本进行双人盲评校准，一致率 ≥85%、加权 κ ≥0.70，并每月抽检。
+- holdout、canary、0.92 污染检测、最小样本、3 次重复、Wilson/McNemar 门槛和四态处置按 Q-052 执行。
 - 评测通过不自动绑定员工，失败不自动触发处罚；安全和租户隔离案例一票否决。
 
-完整设计见 [14 模型评测与回归](./design/14-model-evaluation-and-regression.md)。
+完整设计见 [14 模型评测与回归](./design/14-model-evaluation-and-regression.md) 和 [46 模型评测 QA 实施细则](./design/46-evaluation-qa-implementation.md)。
 
 ### 6.19 数据 Schema 与事务边界
 
@@ -731,7 +775,7 @@ Position / CapabilityGrant
 
 - MVP 和自托管采用单机 Docker Compose + systemd 监管，所有镜像按 digest 固定。
 - ReleaseManifest 声明 schema、API、事件、Runner 和配置兼容版本；升级期间只允许 N/N-1 混跑。
-- 升级执行 Drain → Backup → Expand → Deploy → Smoke → Resume → Contract。
+- 升级执行 Drain → Backup → Expand → Deploy → Smoke → Resume → Contract；备份关闭时记录跳过和风险接受。
 - 生产迁移使用独立 Job、迁移角色和 advisory lock，禁止启动时自动迁移。
 - 应用只能在 Expand 且数据兼容时回滚；Contract 后必须前滚或恢复备份。
 
@@ -828,6 +872,221 @@ Position / CapabilityGrant
 
 完整设计见 [25 安全事件响应](./design/25-security-incident-response.md)。
 
+### 6.30 账户身份与无邮件找回
+
+- 本期优先支持账号密码注册登录、GitHub OAuth 和一次性恢复码自助找回。
+- 密码使用 Argon2id，登录注册限流且不泄露账户是否存在。
+- OAuth 使用 Authorization Code + PKCE、state 和精确 redirect URI。
+- 外部身份以不可变 GitHub user id 绑定，不使用 login 作为主键。
+- GitHub 已验证邮箱可自动合并到唯一匹配账户；本地未验证邮箱不得合并。
+- 恢复码只显示一次、单次使用且只存不可逆哈希。
+- 找回成功后撤销旧会话和 Refresh Token。
+- 备用邮箱、短信、问题、其他社交登录和完整人工找回暂缓。
+
+完整设计见 [26 账户身份与找回](./design/26-account-identity-and-recovery.md)。
+
+### 6.31 企业 OIDC 与会话
+
+- 租户 OIDC 企业登录提前到第一梯队，SAML 暂缓。
+- 使用 Authorization Code + PKCE、state、nonce 和完整 ID Token 校验。
+- 账户身份使用 issuer+sub，新用户必须先邀请或预置。
+- 组映射显式配置且不自动授予 Owner，SSO 用户优先委托 IdP MFA。
+- required 模式必须配置独立紧急恢复，IdP 故障 fail closed。
+- BFF、设备管理、会话家族轮换和本地 WebAuthn/TOTP 后置。
+- 现有 Cookie/Token、CSRF、基础退出撤销和运营 MFA 保留。
+
+完整设计见 [27 企业 OIDC 与认证策略](./design/27-enterprise-oidc-and-authentication-policy.md)。
+
+### 6.32 账户、租户与所有权
+
+- 账户与租户解耦，一个账户可以拥有或加入多个租户。
+- 第一梯队一租户一公司，多公司通过多租户实现。
+- 每个租户恰好一个 Primary Owner，可有多名 Co-Owner。
+- OwnerDelegation 限时、限范围、可撤销且不可转授权。
+- 不能移除最后一个所有者，主所有权转让需要目标接受。
+- 切换租户重新签发租户作用域会话，跨租户默认不共享业务数据。
+
+完整设计见 [28 账户、租户与所有权](./design/28-account-tenancy-and-ownership.md)。
+
+### 6.33 账户与租户软删除
+
+- 删除请求立即逻辑删除并停止登录、任务、召回、搜索和普通访问。
+- 账户恢复窗口 30 天，租户 7 天，窗口内可重新认证恢复。
+- 软删除数据加密隔离，密钥和 Token 立即撤销。
+- 账户注销前必须处理唯一 Primary 所有权。
+- 窗口结束后物理清除并生成 DeletionProof。
+- 备份启用后最长 35 天，tombstone 默认 1 年，恢复备份必须重放删除状态。
+- 法律保留只阻止物理清除，不恢复用户访问。
+
+完整设计见 [29 账户与租户软删除](./design/29-account-and-tenant-soft-deletion.md)。
+
+### 6.34 在线保留与归档
+
+- 数据按版本化保留类进入 Hot、Archive、Cold。
+- 消息在线 90 天加归档 1 年，账本和审计在租户终止后保留 7 年。
+- 结构化数据按月归档为 JSONL + Zstandard，并校验数量、SHA-256 和 manifest。
+- 普通 Agent 只查 Hot，冷归档恢复需授权、隔离和审计。
+- 审计归档不改变 canonical payload、seq、event_hash 或检查点。
+- 软删除和 tombstone 优先于归档，法律保留不恢复访问。
+
+完整设计见 [30 在线保留与归档](./design/30-retention-and-archiving.md)。
+
+### 6.35 可选备份与恢复
+
+- 备份默认关闭且实施后置，不作为 MVP 优先项。
+- 全量、PITR、RustFS、密钥库、异地和演练独立开关。
+- 未启用组件不承诺 RPO/RTO，启用后按实际覆盖计算有效目标。
+- 全量目标 24h/8h，账本审计 15min/4h，密钥库 15min/2h。
+- 滚动备份 35 天，长期保留由归档承担。
+- 升级可显式接受无备份风险，但不得伪造成功状态。
+- 归档、审计、RustFS 持久化和软删除不受开关影响。
+
+完整设计见 [31 可选备份与恢复](./design/31-backup-profiles-and-recovery.md)。
+
+### 6.36 产出权利与来源
+
+- 租户任务产出归租户所有，平台仅保留有限运营许可。
+- 第三方材料、开源依赖、Tool 返回数据和数据集仍受原许可证约束。
+- 提供商条款不覆盖第三方权利，也不保证 AI 产出一定受版权保护。
+- 重要 Artifact 记录来源、模型、Tool、许可和人类贡献。
+- UnknownRights 不得对外发布，租户内容默认不用于平台训练或跨租户资产。
+
+完整设计见 [32 产出权利与来源](./design/32-tenant-output-rights-and-provenance.md)。
+
+### 6.37 公平招聘
+
+- 面试前固定岗位相关能力矩阵、等价题目和门槛。
+- 身份和模型品牌盲评，工作样本优先，独立评分。
+- 按模型、版本、语言和自愿分群执行偏差审计。
+- 选择率比值低于 0.8 只触发调查，不自动认定歧视。
+- 候选人可申诉、复测和申请合理便利。
+- 公平不得降低安全、质量和核心能力门槛。
+
+完整设计见 [33 公平招聘与申诉](./design/33-recruitment-fairness-and-appeals.md)。
+
+### 6.38 开源许可与分发
+
+- 第一方代码、文档和部署资产统一 Apache-2.0。
+- 发布必须包含 LICENSE、NOTICE、SBOM、依赖清单和第三方通知。
+- 核心和默认企业功能保持开源，商业收入来自托管、支持和服务。
+- 贡献按 Apache-2.0 第 5 条和 DCO 提交，不强制转让版权。
+- 第三方权利、租户产出和商标不随平台许可证改变。
+
+完整设计见 [34 开源许可与分发](./design/34-open-source-licensing-and-distribution.md)。
+
+### 6.39 租户仪表盘
+
+- Boss 首屏聚焦公司健康、待决策、项目风险、预算、组织和审计。
+- 项目阶段与健康状态分开，健康状态由确定性规则计算。
+- 导航最多两级，行动中心统一聚合风险并下钻到证据。
+- 卡片显示负责人、等待时间、数据时间和新鲜度。
+- Butler 只提供辅助摘要，菜单隐藏不替代服务端鉴权。
+
+完整设计见 [35 租户仪表盘信息架构](./design/35-tenant-dashboard-information-architecture.md)。
+
+### 6.40 审批委托与缺席
+
+- 人类缺席时先由 Controller 与直接下一层协商，不能处理才进入审批路由。
+- 协商不能创造权限、突破预算或红线，也不能替代所有者专属事项和解雇批准。
+- 审批按 T0～T3 和禁止分级，委托限时、限范围、不可转授权。
+- 无有效代理人时保持待定，超时默认拒绝。
+
+完整设计见 [36 审批委托与缺席](./design/36-approval-delegation-and-absence.md)。
+
+### 6.41 国际化与本地化
+
+- 第一梯队界面支持 zh-CN 和 en-US，租户默认语言与用户覆盖分离。
+- UTC/RFC 3339 存储，IANA 时区和 locale 展示，币种显式使用 ISO 4217。
+- Agent 输出跟随租户语言，翻译保留来源、版本和标识。
+- 安全、法务和审批文案必须人工复核。
+- 完整无障碍支持后置，不进入 MVP 门禁。
+
+完整设计见 [37 国际化与本地化](./design/37-internationalization-and-localization.md)。
+
+### 6.42 公司作息与调度
+
+- 公司全天 24 小时可配置，不默认禁止夜间。
+- 用户可设置静默/禁用窗口和低价窗口，可延期任务按成本感知调度。
+- 到达禁用窗口或排班结束时保存检查点、释放租约并延期。
+- P0、安全事件、硬预算和密钥风险可紧急唤醒，但不扩大权限。
+- 用户禁用窗口和休息时间不计绩效扣分，临时加班必须限时并在预算内。
+
+完整设计见 [38 公司作息与调度](./design/38-company-work-schedule-and-dispatch.md)。
+
+### 6.43 GitHub CI/CD 与本地部署
+
+- 源码和 CI 只使用 GitHub/GitHub Actions，仓库只打版本 Tag。
+- Actions 只检查和测试，不发布镜像。
+- 自托管从批准 Tag 检出源码，用本地 Docker Compose + systemd 构建。
+- 本地记录 Tag、commit 和镜像 ID，回滚优先复用旧镜像。
+- CI 不持生产模型密钥，不使用 GHCR，不引入多平台适配、多环境晋升或 Kubernetes。
+
+完整设计见 [39 GitHub CI/CD 与本地部署](./design/39-github-actions-and-local-compose.md)。
+
+### 6.44 成本归属、分摊与异常
+
+- 钱账是唯一成本事实，员工、岗位、项目和公共成本不重复计费。
+- 任务项目优先，其次显式成本中心；无法归属进入 Unallocated。
+- 公共成本默认不分摊，显式规则版本化且权重合计 100%。
+- 项目预算默认软限制，不自动结转；租户月度预算保持硬限制。
+- 确定性异常只告警和触发既有评审，不自动改预算、换模型或惩罚员工。
+- 金额只保存原币和币种，不同币种分别统计，关闭周期通过更正条目处理。
+
+完整设计见 [40 成本归属、分摊与异常](./design/40-cost-allocation-and-anomaly.md)。
+
+### 6.45 模型运行边界
+
+- 模型运行只支持 OpenAI 和 Anthropic 云端原生端点。
+- 不支持本地 GPU、Ollama、本地模型档、GPU 排队、抢占或显存调度。
+- 协议和 Provider 不保留 `ollama_openai` 或本地推理兼容层。
+- 员工容器不挂载 GPU，Runner 不上报本地推理资源。
+
+### 6.46 内部通知中心
+
+- 只实现仪表盘内部通知，不实现 Telegram、邮件、其他 IM 或 Webhook。
+- 通知先持久化，再通过 SignalR 推送；失败可重新拉取。
+- L0/L1 记录或摘要，L2 提示，L3/SEV1/SEV2 立即站内通知。
+- 通知去重、授权和已读状态完整，不包含秘密，也不替代正式审批。
+
+完整设计见 [41 内部通知中心](./design/41-internal-notification-center.md)。
+
+### 6.47 公共 API 与生态边界
+
+- `/v1` 仅用于系统内部调用，不构成公共 API 或兼容性承诺。
+- Tool 以 ToolManifest + AIFunction 为主，MCP 仅用于 Butler 只读和模型评测。
+- 不提供公共 SDK、出站 Webhook、MCP/插件市场、跨租户分享或自动安装更新。
+- 租户内部扩展仍按 Q-021 审核、签名和撤销。
+
+完整设计见 [42 内部 API 与扩展边界](./design/42-internal-api-and-extension-boundary.md)。
+
+### 6.48 自托管安装与离线升级
+
+- 只使用 GitHub Tag 源码、Compose、systemd 和仓库脚本。
+- 不提供二进制安装包、激活或自动更新。
+- 离线仅支持自备源码和依赖缓存，缺失时快速失败，完全断网无法推理。
+- 升级失败保留旧 Tag 和旧镜像，按既有边界回滚或前滚。
+
+完整设计见 [43 自托管安装与离线升级](./design/43-self-hosted-install-and-offline-upgrade.md)。
+
+### 6.49 容量与性能基线
+
+- 当前只承诺单租户单机聚合容量，多租户大规模容量后置。
+- 基线为 20 员工、40 并行任务、100 任务/小时、1000 消息/小时、100 模型请求/分钟、2 倍 15 分钟突发和 24 小时 soak。
+- 普通读/写 API P95 分别为 300ms/500ms。
+- 队列必须有上限和背压，不得静默丢弃。
+- 共享 Runner 按租户公平调度，noisy neighbor 门槛为 P95 劣化 ≤20%、等待 ≤30 秒。
+
+完整设计见 [44 容量与性能基线](./design/44-capacity-and-performance-baseline.md)。
+
+### 6.50 企业合规与支持边界
+
+- 支持用户自行部署的源码私有环境，不提供托管式 BYOC 或跨区域驻留编排。
+- ComplianceProfile 可配置 Provider/区域、保留、审计、备份和共享，必需项 fail closed。
+- 不宣称认证、不提供法律意见、商业 SLA、专属支持或自动合规审计包。
+- 当前仅提供公开 GitHub Issue 和文档支持。
+
+完整设计见 [45 企业合规与支持边界](./design/45-enterprise-compliance-and-support-boundary.md)。
+
 ## 7. 沙箱与安全
 
 ### 7.1 两层沙箱
@@ -879,7 +1138,6 @@ Position / CapabilityGrant
 
 - 沙箱默认断网，按角色开白名单（开发：nuget/npm 源；分析员：网页）。
 - 任何容器**不挂 docker.sock、不 --privileged**（否则员工等于拥有整机 root）。
-- GPU 只挂给需要本地推理的容器。
 - 员工卷隔离：私有工位卷 + 共享工位卷（他人目录只读）。
 
 ---
@@ -957,7 +1215,7 @@ RegentAgent.slnx
 ├─ RegentAgent.Contracts     # DTO / 事件 / API 契约 / 状态机
 ├─ RegentAgent.ControlPlane  # ASP.NET：租户注册表、双账本、消息总线、调度、升级队列、哨兵、管家
 ├─ RegentAgent.Gateway       # 模型网关：密钥托管、鉴权、provider 路由、计量（OpenAI/Anthropic 原生 API）
-├─ RegentAgent.Providers     # provider 插件：OpenAI/Anthropic 原生协议实现与 Ollama 兼容实现
+├─ RegentAgent.Providers     # provider 插件：OpenAI/Anthropic 原生协议实现
 ├─ RegentAgent.Agents        # MAF 粘合：Agent 工厂、工具实现、技能包（被 Runner 引用）
 ├─ RegentAgent.Workflows    # 工作流定义、版本、提案审查、运行实例与度量
 ├─ RegentAgent.Memory       # 分层记忆、知识库、混合召回、关系多跳、遗忘与索引维护
@@ -991,13 +1249,13 @@ RegentAgent.slnx
 | 4 | 升级队列 + 仪表盘最小版 + 管家最小版（对话面板 + 状态解读 + 每日预算报告） | 股东能在网页看到状态、和管家对话、收预算报告、处理绑定参数的升级事项 |
 | 5 | 沙箱执行器（两层）+ RustFS 快照 + 本地隔离工作区 + 主控自建岗位与调研能力 | **第一个自主闭环：主控自主规划组织并产出带证据的简报**；Runner 换机后成果不丢失 |
 | 6 | 动态组织 + 能力授权 + 面试流水线（MAF Workflow） | 主控可合并/拆分岗位并提出扩编和录用建议；Boss 批准后录用与占槽原子；权限不依赖岗位名称 |
-| 7 | 独立验收闭环 + 发布回滚 + 公司志/周报 + 备份 | 交付物经独立验收；发布可回滚；每日快照实际恢复演练通过 |
+| 7 | 独立验收闭环 + 发布回滚 + 公司志/周报 + 可选备份 | 交付物经独立验收；发布可回滚；备份默认关闭，启用时按 Profile 验收 |
 | 8 | SaaS 外壳 + 运营平台：注册/登录、BYOK 向导、套餐配额、计费、租户账户、资源池、支持授权和 Ops Console | 新用户可启动公司；提供方可在独立后台管理租户；租户 token 无法访问 Ops API |
-| 9 | 开源打包：一键部署脚本、四部分镜像/compose、数据导出、升级迁移说明、运营状态页 | 模式 A/C 两条路径各验证一次；clone 即跑、导出可迁走；自托管可禁用远程运营访问 |
+| 9 | 开源自托管：Tag 源码、Compose、安装/升级脚本、迁移说明和状态页 | 模式 A/C 两条路径各验证一次；按 Tag clone 即跑；数据导出按 Q-033 延后；自托管可禁用远程运营访问 |
 
 每阶段可独立演示；阶段 5 是"公司成立"的标志性时刻。
 
-> 后置阶段（v1 之后，不影响主线）：员工技能层从进程内 `AIFunction` 迁移为 MCP server 协议（§6.7）——技能可独立开发、测试、分发，开源社区与租户可以贡献技能包，形成技能市场；网关 MCP 工具面随之扩展为技能注册与发现的入口。
+> 后置阶段（不影响主线）：员工技能层从进程内 `AIFunction` 迁移为通用 MCP 协议、公共 SDK 或技能市场均需作为新需求评审；当前只保留 Butler 和模型评测的内部 MCP 工具面。
 
 ---
 
@@ -1011,8 +1269,8 @@ RegentAgent.slnx
 | 员工唤醒 | 事件驱动（来任务/消息才起） | 无固定心跳；活跃员工每 60s 向控制面报一次心跳 |
 | 员工休眠 | 无任务可做即休眠 | 工位容器组内全员休眠才 stop |
 | 独立验收 | 里程碑触发 | 产品出现可测试版本时，由与实现者分离的验收岗位执行一轮 |
-| 日报 | 每日 08:00 | 主控或授权经营岗位产出，落公司志；可选推送给股东 |
-| 管家定时任务 | 租户可定义，默认每日 08:00 预算报告 | 只读取数 → 网关生成 → 投递通知中心；事件触发：升级创建 / 破预警线（§3.1.1） |
+| 日报 | 每日用户设置时间（未设置时默认 09:00） | 主控或授权经营岗位产出，落公司志；可选推送给股东 |
+| 管家定时任务 | 租户可定义，默认每日用户设置时间（未设置时默认 09:00）的预算报告 | 只读取数 → 网关生成 → 投递通知中心；事件触发：升级创建 / 破预警线（§3.1.1） |
 | 周报 / 组织复盘 | 每周一 | 产出考核、模型迁移决策、编制调整提案 |
 | 预算审查 | 每日 + 破预警线即时 | 燃烧速率进哨兵监控 |
 | 备份快照 | 每日 | 库 + 注册表 + 工位清单 + 网关密钥库（加密） |
@@ -1027,11 +1285,10 @@ RegentAgent.slnx
 |---|---|---|
 | CPU | 12 核 | 编排层富余；重任务并发按 4~5 设计 |
 | 内存 | 30G（可用 ~25G） | 20 员工全醒 ~22G；舒适区 40~50 人 |
-| GPU | RTX 3060 12G | 本地模型 1 并发推理位（14B-Q4） |
 | 磁盘 | NVMe 468G，可用 312G | 工位/快照/镜像管够 |
 | Docker | 29.4.1 已装 | 沙箱直接可用 |
 | Python | 3.14.4（系统） | 仅沙箱内工具链用，与系统本身无关 |
-| 待安装 | .NET 10 SDK、Ollama（启用本地档时） | 开工前置 |
+| 待安装 | .NET 10 SDK | 开工前置 |
 
 ## 附录 B：设计决策记录（含被否决项）
 
@@ -1056,16 +1313,17 @@ RegentAgent.slnx
 |---|---|
 | 产品方向 | **不预设**——由市场分析师 + 产品经理自主发现（设计核心） |
 | 月预算 | ¥8000 硬底线（预警 ¥5600） |
-| 模型池 | 股东自行增删；默认需含三档（cheap/mid/premium）+ 可选本地 Ollama |
+| 模型池 | 股东自行增删；默认需含三档（cheap/mid/premium），仅支持云端 Provider |
 | OpenAI / Anthropic 接入 | 两条独立原生协议链路；不做 OpenAI↔Anthropic 协议转化 |
 | 数据库 | 生产统一使用 Postgres；SQLite 仅用于单租户开发和测试，不承担托管多租户生产负载 |
-| 灾难通知渠道 | 默认 Telegram，可在章程改 |
-| 仪表盘认证 | 默认 HTTPS + Secure HttpOnly SameSite Cookie + access/refresh token 轮换 + CSRF 防护；自托管可额外启用 mTLS |
+| 灾难通知渠道 | 仅仪表盘内部通知；外部渠道后置 |
+| 仪表盘认证 | 账号密码、GitHub OAuth 或租户 OIDC；HTTPS + Secure HttpOnly SameSite Cookie + access/refresh token 轮换 + CSRF 防护；自托管可额外启用 mTLS |
+| 会话演进 | OIDC 优先；BFF、设备管理、会话家族轮换和本地 WebAuthn/TOTP 后置，基础撤销不削弱 |
 | 运营后台认证 | 独立 Operator 身份、`regent-ops` audience、MFA/step-up；租户访问通过限时 SupportGrant |
-| 数据归档策略 | 消息在线保留 90 天，之后按月归档；账本和审计长期保留并按租户策略冷存储；记忆定期策展，原始日志不直接入记忆 |
-| 备份恢复目标 | 默认每日全量快照，RPO 24 小时、RTO 8 小时；账本和审计连续归档，目标 RPO 15 分钟 |
-| 计费 / 订阅 | **待定**：支付渠道（Stripe / 支付宝 / 微信）、套餐档位与价格；模型费 BYOK 直达，平台只收订阅 |
-| 邮件 / 验证 | 本期不接入邮件服务商；注册邮件验证与密码找回邮件延后，不作为当前注册前置条件 |
+| 数据归档策略 | 统一保留类与 Hot/Archive/Cold；消息在线 90 天，账本审计终止后 7 年；月度 JSONL+Zstandard 归档，软删除优先 |
+| 备份恢复目标 | 默认关闭；启用后全量 RPO 24h/RTO 8h，账本审计 15min/4h，密钥库 15min/2h，按组件生效 |
+| 计费 / 订阅 | **Q-046 已延后**：当前不实现支付、套餐和定价；模型费 BYOK 直达 |
+| 邮件 / 验证 | 本期不接入邮件服务商；本地邮件验证延后，账号密码、GitHub OAuth 和恢复码优先，仅已验证邮箱可自动合并 |
 
 ---
 

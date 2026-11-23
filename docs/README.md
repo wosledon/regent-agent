@@ -18,7 +18,7 @@
 | [07 运营平台](./design/07-operations-platform.md) | 提供方管理端、租户账户、资源池、支持访问和运维 | 运营、SRE、安全、财务 |
 | [08 工作流系统](./design/08-workflow-system.md) | 工作流捕获、组织范围、版本、审查、执行与度量 | 产品、研发、流程负责人 |
 | [09 记忆系统](./design/09-memory-system.md) | 分层记忆、知识库、RAG、图谱多跳、遗忘与删除 | 研发、知识管理、安全 |
-| [10 绩效与自我改进](./design/10-performance-and-self-improvement.md) | 员工自驱动、KPI、绩效评估、组织动作与申诉 | 产品、研发、组织管理 |
+| [10 绩效与自我改进](./design/10-performance-and-self-improvement.md) | 员工自驱动、KPI、AI 自主绩效动作、人类解雇与事后审查 | 产品、研发、组织管理 |
 | [11 项目管理中心](./design/11-project-management.md) | 项目、需求、任务、缺陷、自动认领、讨论、对抗评审与决策 | 产品、研发、测试、项目管理 |
 | [12 通信与穿透路由](./design/12-communication-and-routing.md) | 岗位标签、管理链/专业链、向上穿透、项目覆盖与通信审计 | 产品、研发、组织管理、安全 |
 | [13 Agent 聊天与协作](./design/13-agent-chat-and-collaboration.md) | 私人/群组聊天、@、委派交接、打断、加权召回与渐进披露 | 产品、研发、组织管理、安全 |
@@ -34,6 +34,27 @@
 | [23 离职、调岗与再入职](./design/23-employee-offboarding-and-identity.md) | 唯一工号、任职周期、待驱逐、Boss 决策、交接与私有数据 | 组织、绩效、Memory、安全 |
 | [24 内容安全](./design/24-content-safety.md) | 内容政策、检测管线、分级处置、申诉、证据与合规 | 安全、产品、Agent、合规 |
 | [25 安全事件响应](./design/25-security-incident-response.md) | SEV1～SEV4、IC、遏制、取证、通知、恢复与复盘 | 安全、SRE、运营、合规 |
+| [26 账户身份与找回](./design/26-account-identity-and-recovery.md) | 账号密码、GitHub OAuth、已验证邮箱合并、恢复码自助找回与会话撤销 | 账户、UI、安全 |
+| [27 企业 OIDC 与认证策略](./design/27-enterprise-oidc-and-authentication-policy.md) | 租户 OIDC、issuer+sub、邀请、组映射、IdP MFA 与紧急恢复 | 身份、企业自托管、安全 |
+| [28 账户、租户与所有权](./design/28-account-tenancy-and-ownership.md) | 账户多租户、Primary/Co-Owner、邀请、限时代理和租户切换 | 账户、租户、权限、安全 |
+| [29 账户与租户软删除](./design/29-account-and-tenant-soft-deletion.md) | 逻辑删除、加密隔离、限时恢复、物理清除、备份和法律保留 | 账户、数据、Operations、合规 |
+| [30 在线保留与归档](./design/30-retention-and-archiving.md) | 保留类、Hot/Archive/Cold、月度归档、manifest、恢复与冷检索 | 数据、Memory、审计、Operations |
+| [31 可选备份与恢复](./design/31-backup-profiles-and-recovery.md) | BackupProfile、组件开关、有效 RPO/RTO、异地和演练 | Operations、SRE、安全 |
+| [32 产出权利与来源](./design/32-tenant-output-rights-and-provenance.md) | 租户归属、平台有限许可、第三方权利、来源和发布门禁 | 法务、产品、交付、安全 |
+| [33 公平招聘与申诉](./design/33-recruitment-fairness-and-appeals.md) | 岗位相关标准、盲评、偏差审计、合理便利和候选人申诉 | 招聘、组织、法务、QA |
+| [34 开源许可与分发](./design/34-open-source-licensing-and-distribution.md) | Apache-2.0、NOTICE、SBOM、贡献者、商标和商业服务 | 法务、发布、商业 |
+| [35 租户仪表盘信息架构](./design/35-tenant-dashboard-information-architecture.md) | Boss 首屏、两级导航、项目健康、行动中心和新鲜度 | 产品、UX、研发、QA |
+| [36 审批委托与缺席](./design/36-approval-delegation-and-absence.md) | 缺席协商、分级审批、委托、备用审批人和 SLA | 治理、组织、安全、UX |
+| [37 国际化与本地化](./design/37-internationalization-and-localization.md) | zh-CN/en-US、时区、格式、翻译治理；无障碍后置 | 产品、UX、研发、QA |
+| [38 公司作息与调度](./design/38-company-work-schedule-and-dispatch.md) | 全天可配置、低价窗口、成本感知调度和紧急唤醒 | 调度、组织、消息、QA |
+| [39 GitHub CI/CD 与本地部署](./design/39-github-actions-and-local-compose.md) | GitHub 版本 Tag、Actions 检查和本地 Compose 构建 | 交付、集成、安全 |
+| [40 成本归属、分摊与异常](./design/40-cost-allocation-and-anomaly.md) | 直接归属、公共成本、项目预算、结转、异常和原币记账 | 账本、预算、绩效 |
+| [41 内部通知中心](./design/41-internal-notification-center.md) | 站内分级通知、持久化、SignalR、去重和已读状态 | 通知、租户仪表盘 |
+| [42 内部 API 与扩展边界](./design/42-internal-api-and-extension-boundary.md) | 内部 API、Tool、内部 MCP 和公共生态边界 | 平台、集成、安全 |
+| [43 自托管安装与离线升级](./design/43-self-hosted-install-and-offline-upgrade.md) | Tag 源码、Compose、脚本、离线缓存和升级恢复 | 自托管、运维 |
+| [44 容量与性能基线](./design/44-capacity-and-performance-baseline.md) | 单机聚合容量、API P95、队列上限、背压和租户公平 | 容量、调度、SLO |
+| [45 企业合规与支持边界](./design/45-enterprise-compliance-and-support-boundary.md) | 可配置合规、fail-closed、技术证据和支持边界 | 合规、Operations、法务 |
+| [46 模型评测 QA 实施细则](./design/46-evaluation-qa-implementation.md) | 密封集、污染、Judge 员工、校准、统计和失败处置 | 评测、QA、数据治理 |
 
 ## 拆分原则
 

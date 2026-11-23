@@ -20,7 +20,7 @@
 
 | 概念 | 含义 | 是否占编制 |
 |---|---|---|
-| Boss / Owner | 人类租户所有者，可配置展示后缀 | 否 |
+| Boss / Owner | 人类租户所有者成员；Primary Owner 唯一，Co-Owner 与代理权限显式授予 | 否 |
 | Controller | 公司唯一的编排 Agent 运行时，负责读状态、规划、决策和推进闭环 | 否 |
 | Position | 组织树节点与编制槽，可由主控或授权员工创建 | 岗位存在时占用一个槽，关闭后释放 |
 | PositionAssignment | 员工与岗位的任职关系 | 不额外占编制 |
@@ -223,10 +223,12 @@ tool_profile = ToolRegistry.profile(
 ### 5.6 自驱动与绩效权限
 
 - 所有员工均可提交 `improvement.propose`。
-- `employee.assess` 可生成绩效结论和辅导、冻结等动作。
-- `org.design` 可执行调岗、降职等组织变更。
+- `employee.assess` 可生成绩效结论和辅导、绩效冻结等动作，不需要人类事前批准。
+- `org.design` 可自主执行调岗、惩罚性降职等组织变更，但高影响动作需要独立 AI 复核。
 - 主控可以决定不录用候选人，但录用、再入职和移除订阅必须由 Boss 最终批准。
-- `employee.terminate` 可在 Boss 批准后执行解雇，但必须经过独立复核和申诉窗口。
+- `employee.terminate` 可在人类 Boss 批准后执行解雇，但必须经过独立 AI 复核和申诉窗口。
+- 人类只参与解雇和事后审查，不参与其他日常绩效动作。
+- 人类缺席时，Controller 与直接下一层可先协商升级事项，但只能在现有授权内达成一致，不能绕过红线或替代所有者批准。
 - 主控 Terminate 必须先完成继任。
 - 员工不能修改 KPI 原始快照，也不能评估自己并执行动作。
 - HRBP 只是可选岗位名称，实际权限来自能力。
@@ -360,7 +362,7 @@ SuccessionPending -> Unassigned / Dormant
 
 - `ControllerRuntime` 是公司级循环，读取状态、生成组织计划、创建任务并跟踪结果。
 - 自建岗位激活后，主控使用普通 `EmployeeRuntime` 执行岗位任务。
-- 主控循环节奏由 cadence policy 管理，默认仍避免空转和高成本频繁唤醒。
+- 主控循环节奏由 cadence policy 和 WorkSchedule 管理，可配置全天或夜间运行，但避免无意义频繁唤醒。
 - 主控任务与普通员工任务使用同一租约、幂等、预算和审计机制。
 - 员工 Agent 拥有独立上下文和运行时，不是主控的内部函数；协作通过控制面任务和消息。
 - Sentinel 只读取指标并生成事件，不调用 LLM；预定义安全动作由策略执行，开放式决策仍交给主控或 Boss。
@@ -386,6 +388,8 @@ SuccessionPending -> Unassigned / Dormant
 - 任意具备 `employee.hire` 能力的岗位都可以发起招聘。
 - JD、题库和评分标准由被授权者创建；技术项由具备 `technical.review` 能力者评审。
 - 录用、降配、重试和淘汰规则不依赖 HRBP 岗位是否存在。
+- 招聘必须按 FairnessPolicy 盲评，完成 FairnessAudit 后才进入 Boss 录用审批。
+- 候选人可申诉、复测和申请合理便利，公平修正不得降低能力门槛。
 - 考核由具备 `employee.assess` 能力的岗位执行，只认交付物和成本证据。
 - 主控可以亲自承担多项职能，但不能绕过独立评审和验收。
 

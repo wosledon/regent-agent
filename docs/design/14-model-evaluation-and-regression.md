@@ -13,7 +13,7 @@
 - 评测数据集、提示词、工具、运行时和评分策略全部版本化。
 - 密封集与生产上下文隔离，评测用例不进入记忆、Skill 或 Prompt。
 - 评测通过不自动绑定员工，失败不自动触发处罚。
-- 具体密封集设计、污染检测算法、Judge 校准样本和统计显著性门槛由 Q-052 继续讨论。
+- 密封集、污染检测、Judge 员工、校准、统计门槛和失败处置按 Q-052 执行，详见 [46 模型评测 QA 实施细则](./46-evaluation-qa-implementation.md)。
 
 ## 2. 数据模型
 
@@ -27,6 +27,11 @@
 | CaseResult | id、run_id、case_id、verdict、score_vector、evidence_refs、judge_ref、latency、cost | 案例结果 |
 | EvaluationSummary | id、run_id、metrics、confidence_intervals、gate_results、baseline_run_id | 汇总与门槛判断 |
 | EvaluationApproval | id、run_id、approver_id、decision、reason、expires_at | 审批记录 |
+| JudgeAssignment | id、run_id、judge_employee_id、model_binding_id、independence、status | Judge 员工与模型独立性 |
+| JudgeCalibration | id、judge_version、human_sample_refs、agreement、weighted_kappa、status | Judge 人工校准 |
+| ContaminationFinding | id、dataset_version_id、case_id、detector、similarity、status、resolution_ref | 污染发现与隔离 |
+| StatisticalGate | id、run_id、metric、estimate、ci_lower、margin、test、result | 统计门槛证据 |
+| FairnessAudit | id、requisition_id、slice_definitions、sample_sizes、selection_rates、findings | 招聘分群偏差审计 |
 
 所有已发布对象不可静默修改；更新生成新版本并引用旧版本。
 
@@ -98,7 +103,8 @@ provider_model_version
   → Approved / Rejected / Quarantined
 ```
 
-- 随机任务固定 seed，并至少连续运行 3 次。
+- 每个案例固定 seed 连续运行 3 次；核心和安全案例 3/3 通过，其他案例至少 2/3 通过。
+- 最小样本：核心 100、安全 50、单维度 30、每日 canary 20；有效样本不足为 Inconclusive。
 - 流式中断、工具失败和环境故障与能力失败分开记录。
 - 同一案例的重复执行用于识别 Flaky 结果。
 - 无法稳定复现的结果不能作为唯一通过依据。
@@ -119,7 +125,8 @@ provider_model_version
 - 延迟和成本必须符合岗位预算。
 - 硬失败不能被总分或加权评分抵消。
 - 报告通过率、样本量、波动范围和不稳定案例。
-- 统计显著性细则由 Q-052 决定。
+- 整体通过率 ≥80% 且 Wilson 95% 下界 ≥75%；单维度 ≥70% 且下界 ≥65%。
+- 基线比较使用配对 McNemar 精确检验，单侧 α=0.05；关键下降 ≤5pp、单维度 ≤10pp。
 
 ## 9. 评分与 Judge
 
@@ -129,18 +136,23 @@ provider_model_version
 确定性测试 → 规则评分 → LLM Judge → 人工抽检
 ```
 
-- Judge 使用独立模型或服务，不让被评模型给自己打分。
+- Judge 是具备 evaluation.judge 能力的正式员工和独立运行时，优先不同模型；仅一个模型时允许同模型不同运行时。
+- Judge 禁止评审自己的产出、共享候选员工记忆/聊天/工作区或读取密封题；SameModelJudge 降低置信度，高影响场景增加人工复核。
 - Judge 版本、Prompt、示例和评分理由全部记录。
 - 主观维度进行人工校准，并监控 Judge 与人工一致率。
+- 每个 Judge 版本首次使用前由两名独立人工盲评至少 100 条或 20% 案例；一致率 ≥85%、加权 κ ≥0.70，每月抽检。
 - 评分规则在运行前冻结，不得看到结果后修改。
 - Judge 失败或不可复现时进入复核，不默认通过。
 
 ## 10. 结果使用
 
+- 结果分为 Approved、Rejected、Quarantined、Inconclusive。
 - Approved 只表示评测门槛通过，不自动创建员工绑定。
-- Rejected 或 Quarantined 模型不得用于新绑定。
+- Rejected 或 Quarantined 模型不得用于新绑定；Inconclusive 必须补测。
+- 安全案例任何一次失败立即 Quarantine；复测包含失败案例 +20% 相邻回归，安全集全量复测。
 - 在途任务不因评测结果自动换模型。
 - 招聘、调岗、技能公共化和模型升级必须引用 EvaluationRun。
+- 招聘还必须引用 FairnessAudit，并按模型、版本、语言和自愿分群检查偏差。
 - 样本不足或结果不稳定时不生成高置信度绩效结论。
 - 所有审批、申诉和例外均审计。
 
@@ -160,11 +172,15 @@ provider_model_version
 - 评测结果复用率。
 - 数据集污染事件数，目标 0。
 - 回归逃逸率，初始 ≤5%。
-- Judge 与人工一致率，初始 ≥85%。
-- Flaky 案例率。
+- Judge 与人工一致率，初始 ≥85%；加权 κ ≥0.70。
+- Flaky 案例率，目标 ≤5%。
+- Inconclusive 比例，目标 ≤5%。
 - 单次成功成本。
 - 岗位专属重复评测率。
 - 评测结果新鲜度。
+- 招聘周期偏差审计覆盖率，目标 100%。
+- 候选人申诉按期处理率，初始 ≥95%。
+- 被推翻的错误淘汰率，目标 0。
 
 ## 13. 验收场景
 
@@ -183,4 +199,14 @@ provider_model_version
 13. 公共评测必须经过脱敏和许可审核。
 14. 评测预算与生产预算分账。
 15. 原始输出仅授权评估者和审计可见。
-16. Q-052 未决细则不会被静默假定。
+16. holdout 和 canary 泄漏会被检测并隔离。
+17. 污染案例不会静默删除或计为通过。
+18. Judge 是独立员工运行时，同模型也不能共享候选上下文。
+19. Judge 不能评审自己的产出。
+20. Judge 校准不足时主观维度转人工评分。
+21. 最小样本不足时结论为 Inconclusive。
+22. 核心和安全案例必须 3/3 通过。
+23. Wilson 和 McNemar 门槛按固定版本执行。
+24. 安全失败立即 Quarantine。
+25. 复测覆盖失败案例、20% 相邻回归和完整安全集。
+26. SameModelJudge 会被标记并增加高影响人工复核。

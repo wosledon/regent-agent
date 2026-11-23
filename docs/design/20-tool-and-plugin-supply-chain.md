@@ -46,6 +46,10 @@ approval_status
 - 生产禁止 `latest`。
 - 每个 TaskRun 记录实际加载的 artifact digest。
 - 签名、SBOM、扫描和审批引用不可静默替换。
+- 第三方许可证和归属通知进入 ThirdPartyNotice，随发布包保留。
+- 权利和许可规则见 [32 产出权利与来源](./32-tenant-output-rights-and-provenance.md)。
+- 发布还必须生成 LicenseInventory 和 ReleaseLicenseReport，见 [34 开源许可与分发](./34-open-source-licensing-and-distribution.md)。
+- GitHub Actions 检查、版本 Tag 和本地 Compose 构建记录相互绑定，见 [39 GitHub CI/CD 与本地部署](./39-github-actions-and-local-compose.md)。
 
 ## 4. 信任等级
 
@@ -201,6 +205,12 @@ High 漏洞例外必须有负责人、补偿控制和到期时间。
 - 员工可以继续使用其他已批准工具。
 - 插件被撤销时不处罚员工。
 - 本地未签名草稿可在开发环境试用。
+
+## 16.1 公共生态边界
+
+- 当前只保留内部 Tool、租户内部扩展和 Butler/模型评测 MCP 工具面。
+- 不建设 MCP 市场、插件市场、发布者后台、跨租户分享或自动安装更新。
+- 公共 API、SDK 和 Webhook 按 Q-047 后置，详见 [42 内部 API 与扩展边界](./42-internal-api-and-extension-boundary.md)。
 
 ## 17. 指标
 

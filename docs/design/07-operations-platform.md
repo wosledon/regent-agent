@@ -26,6 +26,8 @@ Regent-Agent 分为四个逻辑部分：
 
 租户界面与运营界面使用不同路由、认证 audience 和授权策略。托管模式下建议使用不同 origin，例如 `app.example.com` 与 `ops.example.com`。
 
+运营页面不得进入 Tenant Dashboard 导航；租户首屏与行动中心只聚合租户授权范围内的公司风险，详见 [35 租户仪表盘信息架构](./35-tenant-dashboard-information-architecture.md)。
+
 ## 3. 职责边界
 
 ### 3.1 运营平台负责
@@ -37,7 +39,7 @@ Regent-Agent 分为四个逻辑部分：
 - Provider 价目目录、全局匿名 benchmark 和供应限制。
 - 支持访问申请、临时授权和双人紧急访问。
 - 运营审计、安全调查、内容安全和滥用处置。
-- 数据导出、租户终止和迁移协助。
+- 租户终止；数据导出和迁移协助按 Q-033 延后。
 
 ### 3.2 运营平台不负责
 
@@ -81,7 +83,7 @@ Regent-Agent 分为四个逻辑部分：
 - `company.status_changed`
 - `usage.summary.updated`
 - `capacity.requested`
-- `export.requested`
+- `export.requested`（Q-033 延后，当前不产生）
 - `incident.detected`
 
 运营平台只接收完成聚合所需的数据，不默认接收完整任务载荷、消息正文或模型提示词。
@@ -126,6 +128,15 @@ Regent-Agent 分为四个逻辑部分：
 - 运营角色不能自行扩大 support grant。
 - 所有授权、访问和拒绝都写入不可变运营审计。
 
+### 6.4 租户 OIDC 运营边界
+
+- 租户 OIDC 配置由租户管理员在控制面管理。
+- 运营人员只能查看脱敏配置状态、版本和登录审计。
+- 运营人员不能替换 issuer、client secret 或组映射。
+- required 模式启用前必须验证紧急恢复路径。
+- IdP 故障不回退本地密码，紧急访问必须限时并审计。
+- OIDC 属于第一梯队；BFF 和设备管理后置。
+
 ## 7. 支持访问
 
 ### 7.1 正常支持流程
@@ -159,13 +170,17 @@ reason, approved_by, expires_at
 
 ```text
 Pending -> Active -> Suspended -> Active
-                    \-> PendingDeletion -> Deleted
+                    \-> SoftDeleted -> Purged
 ```
 
-- 创建账户和默认配额。
+- 创建租户和默认配额；账户可以拥有多个租户。
 - 激活后允许注册控制面公司。
+- 每个租户保留唯一 Primary Owner，运营人员不能代替租户转让所有权。
 - 暂停时拒绝新任务和模型调用，保留数据。
-- 删除按宽限期、导出和备份清除流程执行。
+- 删除请求立即软删除，账户恢复窗口 30 天、租户 7 天。
+- 窗口结束后物理清除并生成 DeletionProof，失败保持可重试。
+- 备份启用后最长 35 天，恢复时重放 tombstone，法律保留不恢复访问。
+- 订阅和计费按租户独立，Primary Owner 是管理责任人。
 
 ### 8.2 配额与公平调度
 
@@ -186,10 +201,11 @@ Pending -> Active -> Suspended -> Active
 
 ### 8.4 备份与恢复
 
-- 运营平台制定备份策略并调用各组件备份 API。
-- 备份作业记录组件、快照、哈希、加密状态和保留期。
-- 恢复需要审批，并按租户或全量执行。
-- 恢复后执行一致性校验和演练报告。
+- 备份默认关闭，运营平台通过 BackupProfile 分别控制全量、PITR、RustFS、密钥库、异地和演练。
+- 未启用组件不产生备份作业、RPO/RTO 承诺或成功率指标。
+- 备份作业记录组件、快照、哈希、加密状态和 35 天保留期。
+- 恢复需要审批，并按租户或全量执行；未配置时返回 not_configured。
+- 恢复后执行一致性校验和可选演练报告。
 - 密钥库由网关导出密文，主密钥分离保管。
 
 ### 8.5 计费与对账
@@ -197,7 +213,32 @@ Pending -> Active -> Suspended -> Active
 - 运营平台管理套餐、订阅、发票和付款状态。
 - 模型费用仍由 BYOK 租户直接承担，平台只收订阅费。
 - Provider 账单差异进入对账队列，不修改原始用量。
-- 支付渠道和价格当前仍待产品评审。
+- 支付渠道、套餐和价格按 Q-046 延后，当前不实现。
+
+### 8.6 账户身份与找回支持
+
+- 账号密码、GitHub OAuth 和恢复码自助找回由控制面身份服务提供。
+- 已验证邮箱自动合并由身份服务执行，运营人员不能手工强制合并。
+- 运营人员只能查看授权的登录和找回审计元数据。
+- 运营人员不能直接修改密码哈希、恢复码或外部身份绑定。
+- 完整人工找回流程暂缓；未来必须双人审批并保留证据。
+- 异常找回批量失败或 OAuth 异常进入安全事件流程。
+
+### 8.7 保留与归档
+
+- 运营平台执行版本化 RetentionPolicy、月度 ArchiveJob 和冷存储生命周期。
+- 归档必须冻结水位并校验数量、SHA-256 和 manifest。
+- 验证失败保留 Hot，不发布半成品清单。
+- 冷恢复需授权、隔离、审计并默认 7 天清除。
+- 软删除、tombstone 和法律保留优先于普通归档。
+- 运营人员不能直接执行任意 SQL 或绕过租户权限读取归档。
+
+### 8.8 合规与支持边界
+
+- 合规通过租户 ComplianceProfile 配置，必需控制不满足时 fail closed。
+- 保留技术证据，但不宣称认证、法律意见或商业 SLA。
+- 当前仅提供公开 GitHub Issue 和文档支持，专属支持后置。
+- 完整策略和证据边界见 [45 企业合规与支持边界](./45-enterprise-compliance-and-support-boundary.md)。
 
 ## 9. 部署模式
 
@@ -228,9 +269,16 @@ Pending -> Active -> Suspended -> Active
 | Incident | id、severity、status、impact、timeline |
 | StatusPageEvent | incident_id、public_message、published_at |
 | SupportGrant | tenant_id、operator_id、scope、expires_at、approvals |
+| ComplianceProfile | tenant_id、preset、jurisdictions、allowed_regions、required_controls、version、status |
+| ComplianceViolation | profile_id、control_id、subject_ref、impact、status、appeal_ref |
+| BackupProfile | id、deployment_id、enabled、component_flags、schedule、retention_days、version |
 | BackupJob | id、components、snapshot_refs、status、hash |
+| RestoreJob | id、backup_ids、scope、approval_ref、status、rpo_actual、rto_actual |
 | OpsAuditEvent | operator_id、action、target、request_id、created_at |
 | ObservabilityBackend | id、profile、endpoint_ref、version、status、signals、retention_policy |
+| TenantMembership | tenant_id、account_id、status、membership_version |
+| TenantOwnership | tenant_id、membership_id、kind、granted_at、revoked_at |
+| OwnerDelegation | tenant_id、grantor_id、delegate_id、capabilities、expires_at |
 | SloDefinition | id、service、sli、target、window、error_budget_policy |
 | AlertEvent | id、level、service、slo_ref、status、ack_by、runbook_ref、created_at |
 | SupplyChainArtifact | id、type、publisher、version、digest、signature_ref、sbom_ref、status |
@@ -239,6 +287,12 @@ Pending -> Active -> Suspended -> Active
 | SensitiveDataPolicy | id、tenant_id、version、data_classes、pii_rules、secret_rules、egress_policy |
 | DlpFinding | id、tenant_id、source_ref、rule_id、data_class、risk_level、action、status |
 | DeletionProof | id、subject_ref、scope、completed_steps、retained_items、created_at |
+| DeletionRequest | id、subject_type、subject_id、status、deleted_at、restore_due_at、purged_at |
+| DeletionTombstone | id、subject_type、subject_id、scope、deleted_at、purged_at、result_hash |
+| RetentionPolicy | id、tenant_id、data_type、retention_class、online_days、archive_days、version |
+| ArchiveManifest | id、tenant_id、data_type、watermark、record_count、status、verification_result |
+| ArchiveRestoreJob | id、archive_id、requested_by、status、restore_prefix、expires_at |
+| LegalHold | id、tenant_id、scope、reason、authority、starts_at、expires_at |
 | AuditCheckpoint | id、stream_id、from_seq、to_seq、merkle_root、signing_key_id、signature、object_ref |
 | AuditVerification | id、stream_id、result、checked_range、evidence_ref、created_at |
 | AuditAnchor | id、checkpoint_id、anchor_type、external_ref、status、confirmed_at |

@@ -65,7 +65,11 @@
 | Iterating | 指标和反馈 | 优先级、修复计划 | 新发布候选 | 主控或 `priority.set` 岗位 |
 | Terminated | 失败证据或战略调整 | 复盘、经验条目、资源释放 | 项目关闭 | 主控或 `project.decide` 岗位 |
 
+项目预算默认软限制，直接成本优先归属项目，公共成本只有显式规则才分摊；不自动结转，详见 [40 成本归属、分摊与异常](./40-cost-allocation-and-anomaly.md)。
+
 任何阶段缺少必需证据时，状态不能前进。项目阶段门禁与 [11 项目管理中心](./11-project-management.md) 的需求就绪、任务认领、缺陷复测和验收门禁联动；详细工作项状态以 11 号设计为准。
+
+仪表盘另存确定性 `ProjectHealth`：`OnTrack / AtRisk / Blocked / PendingAcceptance / Live / Failed`。健康状态由门禁、依赖、预算、资源和新鲜度计算，不替代项目阶段，也不由 LLM 直接修改，详见 [35 租户仪表盘信息架构](./35-tenant-dashboard-information-architecture.md)。
 
 ## 4. 调研与产品简报
 
@@ -237,10 +241,13 @@ merge: squash merge after review and CI
 - 自动化门禁通过。
 - 独立体验门禁通过。
 - 发布审批已绑定镜像摘要、环境和参数。
-- ReleaseManifest 固定镜像 digest、schema 和兼容版本。
+- ReleaseManifest 固定版本 Tag、源 commit、基础镜像 digest、schema 和兼容版本。
 - 数据库迁移采用 Expand/Deploy/Contract，并明确应用回滚边界。
-- 运行时密钥、域名、TLS、备份和监控已配置。
+- 运行时密钥、域名、TLS 和监控已配置；备份按 BackupProfile 可选启用。
 - 回滚点已验证。
+- RightsDeclaration 有效，UnknownRights 不得发布。
+- ThirdPartyNotice、SBOM、许可证、秘密、PII 和内容安全检查通过。
+- 公开发布包含 LICENSE、NOTICE 和 ReleaseLicenseReport，未知许可证为 0。
 
 ### 8.2 产品运行时
 
@@ -369,7 +376,7 @@ Charter → 组织 → 简报 → 项目/需求/任务 → 加权认领
 
 ### 12.3 后置能力
 
-在线支付、完整运营平台、多租户商业化、一键安装包、高级图谱、自动招聘评分平台、自动绩效处罚、技能市场、企业 SSO 和完整 Butler 报告不在首个 MVP 内。
+在线支付、完整运营平台、多租户商业化、一键安装包、高级图谱、自动招聘评分平台、自动绩效处罚、技能市场、SAML 和完整 Butler 报告不在首个 MVP 内；OIDC 企业登录按 Q-028 提前。
 12. 从调研到发布的每个关键动作都能追溯到任务、员工、成果和审计事件。
 13. 招聘并发占用同一空槽时只有一个候选人可录用。
 14. 面试评分、实操证据和最终决策可追溯。
@@ -383,10 +390,13 @@ Charter → 组织 → 简报 → 项目/需求/任务 → 加权认领
 22. 暂停租户后新任务和新模型调用被拒绝，备份和导出仍可按授权执行。
 23. 产品发布前已完成运营监控、状态页、备份和回滚演练。
 24. 发布必须固定镜像 digest 并通过 Expand/Deploy/Contract 兼容检查。
-25. 发布必须通过安全、容量、混沌、恢复和升级测试。
+25. 发布必须通过安全、容量、混沌和升级测试；恢复测试仅对启用备份组件要求。
 26. elastic Profile 下关键链路必须在 Kibana 中具有指标、日志和 APM 追踪；local/off Profile 不要求该门禁。
 27. 工具、MCP、Skill、依赖和镜像必须具有 digest、签名、SBOM 和准入记录。
 28. 对外发布必须通过内容安全门禁，红线内容不得发布。
+29. 对外发布必须具有有效权利声明和完整第三方通知，UnknownRights 不得发布。
+30. 招聘必须完成岗位相关盲评、FairnessAudit 和申诉窗口，能力门槛不得降低。
+31. 公开发布必须通过 Apache-2.0、NOTICE、SBOM 和第三方许可门禁。
 
 ### 11.1 运营就绪门禁
 
@@ -405,7 +415,7 @@ Charter → 组织 → 简报 → 项目/需求/任务 → 加权认领
 
 ```text
 Draft -> Open -> Interviewing -> Offered -> PendingBossApproval -> Hired
-                    |  \-> Rejected
+                    |  \-> Rejected -> Appealed -> Interviewing / Rejected
                     \-> RetryWithDifferentModel
 Open -> Frozen / Closed
 ```
@@ -414,16 +424,20 @@ Open -> Frozen / Closed
 - 主控可决定不录用；正向录用必须先经 Boss 批准。
 - 录用时把岗位置为 `Filled`，员工进入 `Pending` 或 `Active`。
 - 拒绝、冻结和关闭都会释放对应招聘占用。
+- 拒绝进入 Appealed 时暂缓释放，申诉结束或超时才完成淘汰。
 - 同一岗位并发录用使用行锁或条件更新，防止超编。
 
 ### 12.2 面试流程
 
 1. 具备招聘能力的岗位生成 JD、题库和评分标准；具备 `technical.review` 能力的非作者评审技术项。
-2. 笔试在隔离环境执行，自动评分。
-3. 实操使用一次性容器和真实任务，不访问生产工作区。
-4. 评分记录包含模型版本、提示模板、评分表版本和原始 artifact。
-5. 主控可决定淘汰；录用、降配录用和换模型重试提交 Boss 最终批准。
-6. 所有面试记录进入公司知识和审计，不包含密钥。
+2. 发布 FairnessPolicy，固定岗位相关标准、盲评规则、等价案例和门槛。
+3. 笔试在隔离环境执行，自动评分。
+4. 实操使用一次性容器和真实任务，不访问生产工作区。
+5. 评分记录包含模型版本、提示模板、评分表版本和原始 artifact。
+6. 完成独立评分、FairnessAudit 和阻断性 BiasFinding 处理。
+7. 主控可决定淘汰；录用、降配录用和换模型重试提交 Boss 最终批准。
+8. 拒绝必须提供证据和原因，候选人可申诉、复测或申请合理便利。
+9. 面试记录进入授权审计，不进入普通公共知识，不包含密钥。
 
 ### 12.3 评分与模型迁移
 

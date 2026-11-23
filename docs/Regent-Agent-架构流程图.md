@@ -24,7 +24,6 @@ flowchart TB
         OpsOperator["运营人员"]
         OpenAI["OpenAI"]
         Anthropic["Anthropic"]
-        Ollama["Ollama"]
         ExternalTools["CI / 测试 / 浏览器 / 已授权 HTTP"]
     end
 
@@ -147,7 +146,6 @@ flowchart TB
     Butler -->|模型请求| GatewayAPI
     NativeAdapters --> OpenAI
     NativeAdapters --> Anthropic
-    NativeAdapters --> Ollama
     Metering -.->|权威模型用量| Ledger
     ToolClient -.->|工具用量事件| Ledger
 
@@ -264,7 +262,7 @@ sequenceDiagram
     participant GW as AI Gateway
     participant Policy as 鉴权 / 预算
     participant KV as BYOK KeyVault
-    participant Provider as OpenAI / Anthropic / Ollama
+    participant Provider as OpenAI / Anthropic
     participant Ledger as ControlPlane 账本
 
     Runner->>GW: 原生协议请求 + assignment token
@@ -282,7 +280,6 @@ sequenceDiagram
 
 - OpenAI 使用 `/v1/chat/completions`。
 - Anthropic 使用 `/v1/messages`。
-- Ollama 可使用其 OpenAI 兼容端点。
 - 不做 OpenAI 与 Anthropic 协议转换。
 - 控制面不读取模型密钥。
 
@@ -352,13 +349,13 @@ KPI 是证据信号，不直接等于自动解雇。高影响动作需要充分�
 当前主图覆盖运行时闭环；以下内容适合后续单独出图，而不是继续堆进总图：
 
 1. **招聘与面试流水线**：岗位、候选人、笔试、实操、评分、占槽与录用。
-2. **模型评估与能力矩阵**：benchmark 版本、MCP 工具面、本地模型并发与结果复用。
+2. **模型评估与能力矩阵**：benchmark 版本、MCP 工具面、云端模型并发与结果复用。
 3. **CI/CD 与发布环境**：Git 宿主、构建、测试、制品、发布、回滚和环境晋升。
 4. **可观测性拓扑**：OpenTelemetry、指标、日志、追踪、告警、SLO 与错误预算。
 5. **备份、恢复与迁移**：加密备份、主密钥恢复、租户导出和恢复演练。
-6. **外部通知与集成**：Telegram、Webhook、未来邮件或其他渠道。
+6. **内部通知中心**：站内持久化、SignalR、分级和去重；外部渠道后置。
 7. **商业化与计费**：套餐、支付渠道、发票、订阅状态和用量对账。
-8. **插件与 MCP 生态**：工具提供方、签名、版本、沙箱和供应链治理。
+8. **公共 API 与插件生态**：公共 API、SDK、Webhook、MCP/插件市场和跨租户分享均后置。
 
 ## 10. 架构检查清单
 

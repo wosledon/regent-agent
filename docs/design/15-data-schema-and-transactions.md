@@ -23,7 +23,8 @@ identity      租户、员工、岗位、任职、能力
 runtime      Runner、租约、调度、工具调用
 projects     项目、需求、任务、缺陷、评审、决策
 communication 会话、消息、委派、交接
-performance  KPI、评审、绩效动作、工作台账
+performance  KPI、评审、绩效动作、人类事后审查、工作台账
+dashboard    只读卡片投影、项目健康、行动中心
 models       模型绑定、目录、预算、用量、账本
 evaluation   评测集、密封数据、评测运行
 platform     模型目录、运营配置
@@ -37,6 +38,8 @@ Schema 是模块代码边界，不是租户隔离边界。运营数据使用独�
 租户业务表采用共享表 + `tenant_id` + 强制 Postgres RLS。
 
 - 所有租户业务表包含 `tenant_id UUID NOT NULL`。
+- Account 和 Tenant 根记录包含 `deleted_at`、`deletion_request_id` 和 `purged_at`。
+- 普通查询和 RLS 同时过滤根记录 `deleted_at IS NULL`。
 - 主键、唯一约束、外键和索引包含 `tenant_id`。
 - 跨表外键使用复合 `(tenant_id, referenced_id)`。
 - 应用角色不是表 Owner，且没有 `BYPASSRLS`。
@@ -45,6 +48,12 @@ Schema 是模块代码边界，不是租户隔离边界。运营数据使用独�
 - 连接池不得复用前一租户的事务上下文。
 - 迁移角色与运行角色分离，运行角色无 DDL 权限。
 - 系统级表使用独立 Schema、权限和显式 system scope。
+- TenantMembership、TenantOwnership、OwnerInvitation 和 OwnerDelegation 属于控制面身份范围，但查询必须同时校验 tenant_id 和 account_id。
+- Primary Owner 使用数据库部分唯一索引保证每租户最多一个 active primary。
+- 成员和所有权更新使用短事务，并通过 Outbox 撤销旧会话上下文。
+- 软删除先更新根记录和 tombstone，再通过 Outbox 撤销会话、索引和对象访问。
+- 活动数据索引使用 `WHERE deleted_at IS NULL` 的部分索引。
+- 物理清除分批执行，完成后在短事务内写入 purged_at 和 DeletionProof。
 
 RLS 与复合约束必须由 Postgres 集成测试验证，SQLite 测试不能替代。
 
@@ -57,8 +66,12 @@ RLS 与复合约束必须由 Postgres 集成测试验证，SQLite 测试不能�
 | 项目交付 | `projects`、`requirements`、`tasks`、`defects`、`reviews`、`decisions` |
 | 协作容量 | `wip_slots`、`work_ledger`、`conversations`、`messages` |
 | 模型财务 | `model_bindings`、`budget_reservations`、`llm_usage`、`ledger_entries` |
+| 成本治理 | `budget_envelopes`、`budget_carryovers`、`cost_allocation_rules`、`cost_allocation_results`、`cost_anomalies`、`reconciliation_cases` |
+| 通知 | `notifications`、`notification_deliveries`、`notification_preferences`、`notification_suppressions` |
+| 容量治理 | `capacity_policies`、`queue_limits`、`capacity_reports` |
+| 合规治理 | `compliance_profiles`、`compliance_controls`、`compliance_evaluations`、`compliance_violations`、`compliance_evidence_exports` |
 | 对象元数据 | `artifacts`、`workspace_snapshots`、`object_uploads` |
-| 评测 | `benchmark_suites`、`dataset_versions`、`evaluation_runs`、`case_results` |
+| 评测 | `benchmark_suites`、`dataset_versions`、`evaluation_runs`、`case_results`、`judge_assignments`、`judge_calibrations`、`contamination_findings`、`statistical_gates`、`evaluation_retests` |
 | 可靠性 | `outbox`、`inbox`、`audit_events` |
 
 模块拥有自己的表，其他模块不能直接写入。跨模块协作通过应用命令和事件完成。
@@ -222,7 +235,10 @@ PendingUpload
 - 数据库提交失败保留 PendingUpload，由清理任务处理。
 - Ready 对象不可覆盖，新内容生成新版本。
 - DoneEvidence、审计附件和发布包启用版本保护。
+- 归档对象使用 JSONL + Zstandard 或原始二进制 digest，并写入 ArchiveManifest。
+- Ready 归档对象不可覆盖，修正生成新版本。
 - 对象删除遵循保留策略并记录审计。
+- Postgres 按月分区，只有归档清单提交并验证后才 Detach 热分区。
 
 ## 14. 检查点与恢复
 
@@ -256,11 +272,11 @@ Runner 崩溃后：
 
 ## 16. 备份与恢复
 
-- Postgres 使用 PITR 和一致性备份。
-- RustFS 使用版本控制、复制或独立备份。
+- 备份默认关闭；启用后 Postgres 可使用 PITR 和一致性备份。
+- RustFS 可启用版本控制、复制或独立备份。
 - 恢复顺序为 Postgres → RustFS → 引用核对 → 抽样下载。
 - 对账 Artifact、WorkspaceSnapshot、PendingUpload 和孤儿对象。
-- 生产 HA、S3 兼容性和恢复演练必须在上线前验证。
+- 未配置备份时禁止执行恢复；启用组件的生产恢复能力必须在上线前验证。
 
 ## 17. 验收场景
 
