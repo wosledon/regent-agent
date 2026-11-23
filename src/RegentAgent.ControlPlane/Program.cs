@@ -962,8 +962,34 @@ api.MapPut("/compliance/profile", async (ComplianceProfile profile, HttpContext 
     ComplianceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.UpdateAsync(CurrentTenant(context), profile, cancellationToken))).WithTags("Compliance");
 
-api.MapGet("/workflows", async (WorkflowService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.ListAsync(cancellationToken))).WithTags("Workflows");
+api.MapGet("/workflows", async (HttpContext context, WorkflowService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken))).Produces<IReadOnlyList<WorkflowDefinition>>().WithTags("Workflows");
+api.MapPost("/workflows", async (CreateWorkflowRequest request, HttpContext context, WorkflowService service,
+    AuditIntegrityService audit, CancellationToken cancellationToken) =>
+{
+    var workflow = await service.CaptureAsync(CurrentTenant(context), request.Name, request.Steps,
+        CurrentUser(context), request.ScopePositionId, cancellationToken);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "workflow.captured", CurrentUser(context),
+        new { workflow_id = workflow.Id, version = workflow.Version, scope_position_id = workflow.ScopePositionId }, cancellationToken);
+    return Results.Ok(workflow);
+}).Produces<WorkflowDefinition>().WithTags("Workflows");
+api.MapPost("/workflows/{id}/nominate", async (string id, HttpContext context, WorkflowService service,
+    AuditIntegrityService audit, CancellationToken cancellationToken) =>
+{
+    var workflow = await service.NominateAsync(id, CurrentTenant(context), cancellationToken);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "workflow.nominated", CurrentUser(context),
+        new { workflow_id = workflow.Id, parent_workflow_id = workflow.ParentWorkflowId, version = workflow.Version }, cancellationToken);
+    return Results.Ok(workflow);
+}).Produces<WorkflowDefinition>().WithTags("Workflows");
+api.MapPost("/workflows/{id}/review", async (string id, ReviewWorkflowRequest request, HttpContext context,
+    WorkflowService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+{
+    var workflow = await service.ReviewAsync(id, CurrentTenant(context), request.Decision, request.Reviewer,
+        request.Note, cancellationToken);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "workflow.reviewed", CurrentUser(context),
+        new { workflow_id = workflow.Id, decision = request.Decision, reviewer_id = request.Reviewer }, cancellationToken);
+    return Results.Ok(workflow);
+}).Produces<WorkflowDefinition>().WithTags("Workflows");
 api.MapPost("/workflows/{id}/runs", async (string id, HttpContext context, WorkflowService service,
     CancellationToken cancellationToken) => Results.Ok(await service.StartAsync(id, CurrentTenant(context), cancellationToken)))
     .WithTags("Workflows");
@@ -1118,12 +1144,23 @@ api.MapGet("/improvements", async (HttpContext context, ImprovementService servi
     CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken)))
     .Produces<IReadOnlyList<ImprovementProposal>>().WithTags("Performance");
 api.MapPost("/improvements", async (CreateImprovementRequest request, HttpContext context,
-    ImprovementService service, CancellationToken cancellationToken) => Results.Ok(await service.ProposeAsync(
-        CurrentTenant(context), request.EmployeeId, request.Category, request.Summary, request.ExpectedBenefit, cancellationToken)))
-    .Produces<ImprovementProposal>().WithTags("Performance");
+    ImprovementService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+{
+    var proposal = await service.ProposeAsync(CurrentTenant(context), request.EmployeeId, request.Category,
+        request.Summary, request.ExpectedBenefit, cancellationToken);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "improvement.proposed", CurrentUser(context),
+        new { proposal_id = proposal.Id, employee_id = proposal.EmployeeId, category = proposal.Category }, cancellationToken);
+    return Results.Ok(proposal);
+}).Produces<ImprovementProposal>().WithTags("Performance");
 api.MapPost("/improvements/{id}/review", async (string id, ReviewImprovementRequest request,
-    HttpContext context, ImprovementService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.ReviewAsync(id, CurrentTenant(context), request.Approved, cancellationToken))).WithTags("Performance");
+    HttpContext context, ImprovementService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+{
+    var proposal = await service.ReviewAsync(id, CurrentTenant(context), request.Approved, request.Reviewer,
+        request.Note, cancellationToken);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "improvement.reviewed", CurrentUser(context),
+        new { proposal_id = proposal.Id, approved = request.Approved, reviewer_id = request.Reviewer }, cancellationToken);
+    return Results.Ok(proposal);
+}).Produces<ImprovementProposal>().WithTags("Performance");
 
 api.MapPost("/agent-runtime/context", async (BuildContextRequest request, AgentRuntimeService service,
     CancellationToken cancellationToken) => Results.Ok(await service.BuildContextAsync(request.TaskId,
@@ -1210,7 +1247,7 @@ api.MapGet("/performance-actions", async (HttpContext context, PerformanceAction
     CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken)))
     .Produces<IReadOnlyList<PerformanceActionRecord>>().WithTags("Performance");
 api.MapPost("/performance-actions", async (PerformActionRequest request, HttpContext context,
-    PerformanceActionService service, RegentDbContext db, CancellationToken cancellationToken) =>
+    PerformanceActionService service, RegentDbContext db, AuditIntegrityService audit, CancellationToken cancellationToken) =>
 {
     if (request.ActionType == "Terminate")
     {
@@ -1221,13 +1258,29 @@ api.MapPost("/performance-actions", async (PerformActionRequest request, HttpCon
             && x.ActionType == "employee.terminate", cancellationToken);
         if (!approved) throw new InvalidOperationException("Human Boss approval is required for termination.");
     }
-    return Results.Ok(await service.PerformAsync(CurrentTenant(context), request.EmployeeId, request.ActionType,
-        request.ApprovalId, request.Reason, cancellationToken));
+    var action = await service.PerformAsync(CurrentTenant(context), request.EmployeeId, request.ActionType,
+        request.ApprovalId, request.Reason, cancellationToken);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "performance.action.recorded", CurrentUser(context),
+        new { action_id = action.Id, employee_id = action.EmployeeId, action_type = action.ActionType, approval_id = action.ApprovalId }, cancellationToken);
+    return Results.Ok(action);
 }).Produces<PerformanceActionRecord>().WithTags("Performance");
 api.MapPost("/performance-actions/{id}/appeal", async (string id, AppealActionRequest request,
-    HttpContext context, PerformanceActionService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.AppealAsync(id, CurrentTenant(context), request.Reason, cancellationToken)))
-    .Produces<PerformanceActionRecord>().WithTags("Performance");
+    HttpContext context, PerformanceActionService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+{
+    var action = await service.AppealAsync(id, CurrentTenant(context), request.Reason, cancellationToken);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "performance.action.appealed", CurrentUser(context),
+        new { action_id = action.Id, employee_id = action.EmployeeId }, cancellationToken);
+    return Results.Ok(action);
+}).Produces<PerformanceActionRecord>().WithTags("Performance");
+api.MapPost("/performance-actions/{id}/appeal/resolve", async (string id, ResolvePerformanceAppealRequest request,
+    HttpContext context, PerformanceActionService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+{
+    var action = await service.ResolveAppealAsync(id, CurrentTenant(context), request.Reviewer, request.Resolution,
+        request.Upheld, cancellationToken);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "performance.appeal.resolved", CurrentUser(context),
+        new { action_id = action.Id, reviewer_id = request.Reviewer, upheld = request.Upheld }, cancellationToken);
+    return Results.Ok(action);
+}).Produces<PerformanceActionRecord>().WithTags("Performance");
 
 api.MapGet("/communication/routes", (CommunicationRouter router) =>
 {
@@ -1422,10 +1475,13 @@ public sealed record CalibrationRequest(string SuiteId, int SuiteSize, IReadOnly
 public sealed record EvaluationGateRequest(string SuiteId, Guid CandidateEmployeeId, int Repeats, int SampleCount,
     int Successes, int BaselineSuccesses, int DiscordantA, int DiscordantB, bool CalibrationPassed);
 public sealed record CreateReviewRequest(string EmployeeId, string Conclusion, string EvidenceJson);
+public sealed record CreateWorkflowRequest(string Name, IReadOnlyList<string> Steps, string ScopePositionId);
+public sealed record ReviewWorkflowRequest(string Decision, string Reviewer, string Note);
 public sealed record SendMessageRequest(string Body, string Priority);
 public sealed record RunEvaluationRequest(string SuiteId, string CandidateEmployeeId, int Seed);
 public sealed record CreateImprovementRequest(string EmployeeId, string Category, string Summary, string ExpectedBenefit);
-public sealed record ReviewImprovementRequest(bool Approved);
+public sealed record ReviewImprovementRequest(bool Approved, string Reviewer, string Note);
+public sealed record ResolvePerformanceAppealRequest(string Reviewer, string Resolution, bool Upheld);
 public sealed record CreatePromptRequest(string Name, string Content);
 public sealed record CreateSkillRequest(string Name, Guid PromptBundleId, string ConfigJson);
 public sealed record BuildContextRequest(Guid TaskId, string SystemPrefix, string TenantMemory, string TaskGrantJson,

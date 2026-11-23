@@ -21,6 +21,8 @@ export function PerformanceActionsPage() {
   const perform = useMutation({ mutationFn: () => api.performAction(employeeId, actionType, reason, approvalId || undefined), onSuccess: async () => { setReason(''); setApprovalId(''); await invalidate(); } });
   const propose = useMutation({ mutationFn: () => api.proposeImprovement(employeeId, category, summary, benefit), onSuccess: async () => { setSummary(''); setBenefit(''); await invalidate(); } });
   const appeal = useMutation({ mutationFn: ({ id, reason }: { id: string; reason: string }) => api.appealPerformanceAction(id, reason), onSuccess: invalidate });
+  const resolveAppeal = useMutation({ mutationFn: ({ id, upheld }: { id: string; upheld: boolean }) => api.resolvePerformanceAppeal(id, upheld), onSuccess: invalidate });
+  const reviewImprovement = useMutation({ mutationFn: ({ id, approved }: { id: string; approved: boolean }) => api.reviewImprovement(id, approved), onSuccess: invalidate });
   if (actions.isLoading || improvements.isLoading) return <LoadingState />;
   const error = actions.error ?? improvements.error;
   if (error) return <ErrorState message={error.message} />;
@@ -37,7 +39,11 @@ export function PerformanceActionsPage() {
           { id: 'employee', header: 'Employee', render: row => row.employeeId },
           { id: 'action', header: 'Action', render: row => row.actionType },
           { id: 'status', header: 'Status', render: row => <StatusChip label={row.status} tone={row.actionType === 'Terminate' ? 'error' : 'info'} /> },
-          { id: 'appeal', header: 'Appeal', render: row => <Button tone="neutral" onClick={() => appeal.mutate({ id: row.id, reason: 'Employee requests independent review' })} disabled={row.appealStatus !== 'None'}>Appeal</Button> }
+          { id: 'appeal', header: 'Appeal', render: row => <Stack direction="row" wrap>
+            <Button tone="neutral" onClick={() => appeal.mutate({ id: row.id, reason: 'Employee requests independent review' })} disabled={row.appealStatus !== 'None' && row.appealStatus !== 'Rejected'}>Appeal</Button>
+            {row.appealStatus === 'Open' ? <Button tone="secondary" onClick={() => resolveAppeal.mutate({ id: row.id, upheld: true })}>Uphold</Button> : null}
+            {row.appealStatus === 'Open' ? <Button tone="danger" onClick={() => resolveAppeal.mutate({ id: row.id, upheld: false })}>Reverse</Button> : null}
+          </Stack> }
         ]} />
       </Card>
       <Card title="Employee improvement proposal">
@@ -49,7 +55,11 @@ export function PerformanceActionsPage() {
         <DataTable rows={improvements.data ?? []} getRowId={row => row.id} columns={[
           { id: 'category', header: 'Category', render: row => row.category },
           { id: 'summary', header: 'Summary', render: row => row.summary },
-          { id: 'status', header: 'Status', render: row => row.status }
+          { id: 'status', header: 'Status', render: row => <Stack direction="row" wrap>
+            <StatusChip label={row.status} tone={row.status === 'Approved' ? 'success' : row.status === 'Rejected' ? 'error' : 'warning'} />
+            {row.status === 'Proposed' ? <Button tone="secondary" onClick={() => reviewImprovement.mutate({ id: row.id, approved: true })}>Approve</Button> : null}
+            {row.status === 'Proposed' ? <Button tone="danger" onClick={() => reviewImprovement.mutate({ id: row.id, approved: false })}>Reject</Button> : null}
+          </Stack> }
         ]} />
       </Card>
     </Grid>

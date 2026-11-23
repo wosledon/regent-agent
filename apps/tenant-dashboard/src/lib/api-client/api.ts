@@ -98,6 +98,11 @@ export const api = {
       body: JSON.stringify(decision)
     }),
   workflows: () => request<WorkflowDefinition[]>('/v1/workflows'),
+  createWorkflow: (name: string, steps: string[], scopePositionId: string) =>
+    post<WorkflowDefinition>('/v1/workflows', { name, steps, scopePositionId }),
+  nominateWorkflow: (id: string) => post<WorkflowDefinition>(`/v1/workflows/${id}/nominate`),
+  reviewWorkflow: (id: string, decision: string, reviewer: string, note: string) =>
+    post<WorkflowDefinition>(`/v1/workflows/${id}/review`, { decision, reviewer, note }),
   startWorkflow: (id: string) => request<WorkflowRun>(`/v1/workflows/${id}/runs`, { method: 'POST' }),
   advanceWorkflow: (id: string) => request<WorkflowRun>(`/v1/workflow-runs/${id}/advance`, { method: 'POST' }),
   memories: (query = '') => request<MemoryClaim[]>(`/v1/memories?query=${encodeURIComponent(query)}`),
@@ -238,9 +243,17 @@ export const api = {
   performAction: (employeeId: string, actionType: string, reason: string, approvalId?: string) =>
     post<Schema['PerformanceActionRecord']>('/v1/performance-actions', { employeeId, actionType, reason, approvalId }),
   appealPerformanceAction: (id: string, reason: string) => post<Schema['PerformanceActionRecord']>(`/v1/performance-actions/${id}/appeal`, { reason }),
+  resolvePerformanceAppeal: (id: string, upheld: boolean) =>
+    post<Schema['PerformanceActionRecord']>(`/v1/performance-actions/${id}/appeal/resolve`, {
+      reviewer: 'Independent Reviewer', resolution: upheld ? 'Original action upheld' : 'Action reversed after review', upheld
+    }),
   improvements: () => request<Schema['ImprovementProposal'][]>('/v1/improvements'),
   proposeImprovement: (employeeId: string, category: string, summary: string, expectedBenefit: string) =>
     post<Schema['ImprovementProposal']>('/v1/improvements', { employeeId, category, summary, expectedBenefit }),
+  reviewImprovement: (id: string, approved: boolean, reviewer = 'Leader') =>
+    post<Schema['ImprovementProposal']>(`/v1/improvements/${id}/review`, {
+      approved, reviewer, note: approved ? 'Evidence supports adoption' : 'More evidence required'
+    }),
   agentRuntimeContext: (body: Schema['BuildContextRequest']) => post<Schema['AgentContextSnapshot']>('/v1/agent-runtime/context', body),
   runToolLoop: (body: Schema['ToolLoopRequest']) => post<Schema['ToolLoopResult']>('/v1/agent-runtime/tool-loop', body),
   taskGovernance: () => request<Schema['TaskGovernanceState']>('/v1/task-governance'),

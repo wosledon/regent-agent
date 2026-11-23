@@ -19,7 +19,7 @@ public sealed class DomainModuleTests
                 new JsonDocumentStore<WorkflowDefinition>(Path.Combine(root, "workflows.json")),
                 new JsonDocumentStore<WorkflowRun>(Path.Combine(root, "runs.json")));
             await workflows.SeedAsync(CancellationToken.None);
-            var run = await workflows.StartAsync("delivery", "tenant", CancellationToken.None);
+            var run = await workflows.StartAsync("delivery", "11111111-1111-1111-1111-111111111111", CancellationToken.None);
             Assert.NotNull(await workflows.AdvanceAsync(run.Id, CancellationToken.None));
 
             var memory = new MemoryService(

@@ -2709,12 +2709,115 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["WorkflowDefinition"][];
+                    };
                 };
             };
         };
         put?: never;
-        post?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateWorkflowRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WorkflowDefinition"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/nominate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WorkflowDefinition"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ReviewWorkflowRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WorkflowDefinition"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -3600,7 +3703,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ImprovementProposal"];
+                    };
                 };
             };
         };
@@ -4531,6 +4636,47 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": components["schemas"]["AppealActionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PerformanceActionRecord"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/performance-actions/{id}/appeal/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ResolvePerformanceAppealRequest"];
                 };
             };
             responses: {
@@ -8820,6 +8966,11 @@ export interface components {
             name: string;
             companyName: string;
         };
+        CreateWorkflowRequest: {
+            name: string;
+            steps: string[];
+            scopePositionId: string;
+        };
         CurrencyTotal: {
             currency: string;
             /** Format: double */
@@ -9276,6 +9427,10 @@ export interface components {
             status: string;
             /** Format: date-time */
             createdAt: string;
+            reviewedBy?: null | string;
+            reviewNote?: null | string;
+            /** Format: date-time */
+            reviewedAt?: null | string;
         };
         InjectionScanResult: {
             safe?: boolean;
@@ -9680,6 +9835,9 @@ export interface components {
             createdAt: string;
             /** @default None */
             appealStatus: string;
+            appealReason?: null | string;
+            appealResolution?: null | string;
+            appealReviewer?: null | string;
         };
         PositionDto: {
             /** Format: uuid */
@@ -9879,6 +10037,11 @@ export interface components {
         ResolveAppealRequest: {
             resolution: string;
         };
+        ResolvePerformanceAppealRequest: {
+            reviewer: string;
+            resolution: string;
+            upheld: boolean;
+        };
         RetentionPolicyRecord: {
             /** Format: uuid */
             id?: string;
@@ -9934,6 +10097,8 @@ export interface components {
         };
         ReviewImprovementRequest: {
             approved: boolean;
+            reviewer: string;
+            note: string;
         };
         ReviewTaskRecord: {
             /** Format: uuid */
@@ -9948,6 +10113,11 @@ export interface components {
             findings?: string[];
             approvers?: string[];
             status?: string;
+        };
+        ReviewWorkflowRequest: {
+            decision: string;
+            reviewer: string;
+            note: string;
         };
         RightsRecord: {
             /** Format: uuid */
@@ -10219,6 +10389,24 @@ export interface components {
             low: number | string;
             /** Format: double */
             high: number | string;
+        };
+        WorkflowDefinition: {
+            id: string;
+            tenantId: string;
+            name: string;
+            /** Format: int32 */
+            version: number | string;
+            steps: string[];
+            status: string;
+            author?: null | string;
+            scopePositionId?: null | string;
+            parentWorkflowId?: null | string;
+            reviewedBy?: null | string;
+            reviewNote?: null | string;
+            /** Format: date-time */
+            createdAt?: null | string;
+            /** Format: date-time */
+            reviewedAt?: null | string;
         };
         WorkLedgerEntry: {
             /** Format: uuid */

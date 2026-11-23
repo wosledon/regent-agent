@@ -1,9 +1,17 @@
 export interface WorkflowDefinition {
   id: string;
+  tenantId?: string;
   name: string;
   version: number;
   steps: string[];
   status: string;
+  author?: string | null;
+  scopePositionId?: string | null;
+  parentWorkflowId?: string | null;
+  reviewedBy?: string | null;
+  reviewNote?: string | null;
+  createdAt?: string | null;
+  reviewedAt?: string | null;
 }
 
 export interface WorkflowRun {
