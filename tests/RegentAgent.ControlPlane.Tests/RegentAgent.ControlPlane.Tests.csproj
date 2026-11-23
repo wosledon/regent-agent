@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\RegentAgent.ControlPlane\RegentAgent.ControlPlane.csproj" />
+    <ProjectReference Include="..\..\src\RegentAgent.Agents\RegentAgent.Agents.csproj" />
   </ItemGroup>
 
 </Project>

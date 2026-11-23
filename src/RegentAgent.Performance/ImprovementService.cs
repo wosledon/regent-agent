@@ -1,0 +1,33 @@
+using RegentAgent.Storage;
+
+namespace RegentAgent.Performance;
+
+public sealed record ImprovementProposal(string Id, string TenantId, string EmployeeId, string Category,
+    string Summary, string ExpectedBenefit, string Status, DateTimeOffset CreatedAt);
+
+public sealed class ImprovementService(JsonDocumentStore<ImprovementProposal> proposals)
+{
+    public async Task<ImprovementProposal> ProposeAsync(string tenantId, string employeeId, string category,
+        string summary, string expectedBenefit, CancellationToken cancellationToken)
+    {
+        if (category is not ("process" or "skill" or "tool" or "model" or "organization"))
+            throw new InvalidOperationException("Invalid improvement category.");
+        var proposal = new ImprovementProposal(Guid.NewGuid().ToString("N"), tenantId, employeeId, category,
+            summary, expectedBenefit, "Proposed", DateTimeOffset.UtcNow);
+        await proposals.PutAsync(proposal.Id, proposal, cancellationToken);
+        return proposal;
+    }
+
+    public async Task<IReadOnlyList<ImprovementProposal>> ListAsync(string tenantId, CancellationToken cancellationToken) =>
+        (await proposals.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId).ToArray();
+
+    public async Task<ImprovementProposal> ReviewAsync(string id, string tenantId, bool approved,
+        CancellationToken cancellationToken)
+    {
+        var proposal = await proposals.GetAsync(id, cancellationToken) ?? throw new KeyNotFoundException("Proposal not found.");
+        if (proposal.TenantId != tenantId) throw new UnauthorizedAccessException();
+        proposal = proposal with { Status = approved ? "Approved" : "Rejected" };
+        await proposals.PutAsync(id, proposal, cancellationToken);
+        return proposal;
+    }
+}

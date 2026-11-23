@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using RegentAgent.Agents;
 using RegentAgent.ControlPlane.Api;
 using RegentAgent.ControlPlane.Application;
 using RegentAgent.ControlPlane.Data;
@@ -19,6 +20,7 @@ using RegentAgent.Memory;
 using RegentAgent.Performance;
 using RegentAgent.Projects;
 using RegentAgent.Workflows;
+using RegentAgent.Contracts.Agents;
 using RegentAgent.Contracts.Artifacts;
 using RegentAgent.Contracts.Dashboard;
 using RegentAgent.Contracts.Evaluation;
@@ -73,6 +75,10 @@ builder.Services.AddSingleton(sp => new MemoryService(
 builder.Services.AddSingleton(sp => new PerformanceService(
     new JsonDocumentStore<KpiSnapshot>("data/modules/kpis.json"),
     new JsonDocumentStore<PerformanceReview>("data/modules/reviews.json")));
+builder.Services.AddSingleton(sp => new ImprovementService(
+    new JsonDocumentStore<ImprovementProposal>("data/modules/improvements.json")));
+builder.Services.AddSingleton(sp => new AgentEvolutionService(
+    new JsonDocumentStore<AgentEvolutionState>("data/modules/agent-evolution.json"), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new ComplianceService(
     new JsonDocumentStore<ComplianceProfile>("data/modules/compliance.json")));
 builder.Services.AddSingleton<CommunicationRouter>();
@@ -812,6 +818,54 @@ api.MapPost("/memories/{id}/correct", async (string id, CorrectMemoryRequest req
     MemoryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CorrectAsync(id, CurrentTenant(context), request.Content, request.Reason, cancellationToken)))
     .WithTags("Memory");
+api.MapPost("/memories/{id}/forget", async (string id, HttpContext context, MemoryService service,
+    CancellationToken cancellationToken) =>
+{
+    await service.ForgetAsync(id, CurrentTenant(context), cancellationToken);
+    return Results.NoContent();
+}).WithTags("Memory");
+api.MapDelete("/memories/{id}", async (string id, HttpContext context, MemoryService service,
+    CancellationToken cancellationToken) =>
+{
+    await service.DeleteAsync(id, CurrentTenant(context), cancellationToken);
+    return Results.NoContent();
+}).WithTags("Memory");
+api.MapPost("/memories/decay", async (HttpContext context, MemoryService service,
+    CancellationToken cancellationToken) =>
+{
+    await service.DecayAsync(CurrentTenant(context), cancellationToken);
+    return Results.NoContent();
+}).WithTags("Memory");
+
+api.MapGet("/improvements", async (HttpContext context, ImprovementService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken))).WithTags("Performance");
+api.MapPost("/improvements", async (CreateImprovementRequest request, HttpContext context,
+    ImprovementService service, CancellationToken cancellationToken) => Results.Ok(await service.ProposeAsync(
+        CurrentTenant(context), request.EmployeeId, request.Category, request.Summary, request.ExpectedBenefit, cancellationToken))).WithTags("Performance");
+api.MapPost("/improvements/{id}/review", async (string id, ReviewImprovementRequest request,
+    HttpContext context, ImprovementService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ReviewAsync(id, CurrentTenant(context), request.Approved, cancellationToken))).WithTags("Performance");
+
+api.MapGet("/agent-evolution", async (HttpContext context, AgentEvolutionService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken))).WithTags("Agent Evolution");
+api.MapPost("/agent-evolution/prompts", async (CreatePromptRequest request, HttpContext context,
+    AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.CreatePromptAsync(
+        Guid.Parse(CurrentTenant(context)), request.Name, request.Content, cancellationToken))).WithTags("Agent Evolution");
+api.MapPost("/agent-evolution/prompts/{id:guid}/activate", async (Guid id, HttpContext context,
+    AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.ActivatePromptAsync(
+        Guid.Parse(CurrentTenant(context)), id, cancellationToken))).WithTags("Agent Evolution");
+api.MapPost("/agent-evolution/skills", async (CreateSkillRequest request, HttpContext context,
+    AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.CreateSkillAsync(
+        Guid.Parse(CurrentTenant(context)), request.Name, request.PromptBundleId, request.ConfigJson, cancellationToken))).WithTags("Agent Evolution");
+api.MapPost("/agent-evolution/skills/{id:guid}/activate", async (Guid id, HttpContext context,
+    AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.ActivateSkillAsync(
+        Guid.Parse(CurrentTenant(context)), id, cancellationToken))).WithTags("Agent Evolution");
+api.MapPost("/agent-evolution/tool-policies", async (ToolDisclosurePolicy policy, HttpContext context,
+    AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.SetToolPolicyAsync(
+        Guid.Parse(CurrentTenant(context)), policy, cancellationToken))).WithTags("Agent Evolution");
+api.MapPost("/agent-evolution/tools/disclose", async (ToolDisclosureRequest request, HttpContext context,
+    AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.DiscloseAsync(
+        Guid.Parse(CurrentTenant(context)), request, cancellationToken))).WithTags("Agent Evolution");
 
 api.MapGet("/kpis", async (HttpContext context, PerformanceService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken)))
@@ -995,3 +1049,7 @@ public sealed record CorrectMemoryRequest(string Content, string Reason);
 public sealed record CreateReviewRequest(string EmployeeId, string Conclusion, string EvidenceJson);
 public sealed record SendMessageRequest(string Body, string Priority);
 public sealed record RunEvaluationRequest(string SuiteId, string CandidateEmployeeId, int Seed);
+public sealed record CreateImprovementRequest(string EmployeeId, string Category, string Summary, string ExpectedBenefit);
+public sealed record ReviewImprovementRequest(bool Approved);
+public sealed record CreatePromptRequest(string Name, string Content);
+public sealed record CreateSkillRequest(string Name, Guid PromptBundleId, string ConfigJson);

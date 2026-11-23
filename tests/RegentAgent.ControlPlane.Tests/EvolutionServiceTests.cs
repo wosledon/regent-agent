@@ -1,0 +1,63 @@
+using RegentAgent.Agents;
+using RegentAgent.Contracts.Agents;
+using RegentAgent.Memory;
+using RegentAgent.Performance;
+using RegentAgent.Storage;
+using Xunit;
+
+namespace RegentAgent.ControlPlane.Tests;
+
+public sealed class EvolutionServiceTests
+{
+    [Fact]
+    public async Task Memory_forget_delete_and_tool_disclosure_are_enforced()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"evolution-{Guid.NewGuid():N}");
+        try
+        {
+            var tenantId = Guid.NewGuid().ToString();
+            var claims = new JsonDocumentStore<MemoryClaim>(Path.Combine(root, "claims.json"));
+            var memory = new MemoryService(claims,
+                new JsonDocumentStore<CorrectionTask>(Path.Combine(root, "corrections.json")));
+            await claims.PutAsync("claim-1", new MemoryClaim("claim-1", tenantId, "personal", "secret", "source", 0.9, "trusted", "Active", 1), CancellationToken.None);
+            await memory.ForgetAsync("claim-1", tenantId, CancellationToken.None);
+            Assert.Empty(await memory.SearchAsync(tenantId, null, CancellationToken.None));
+            await memory.DeleteAsync("claim-1", tenantId, CancellationToken.None);
+            Assert.Null(await claims.GetAsync("claim-1", CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task Prompt_versions_and_restricted_tools_are_deterministic()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"agent-evolution-{Guid.NewGuid():N}.json");
+        try
+        {
+            var service = new AgentEvolutionService(new JsonDocumentStore<AgentEvolutionState>(path), TimeProvider.System);
+            var tenantId = Guid.NewGuid();
+            var first = await service.CreatePromptAsync(tenantId, "review", "v1", CancellationToken.None);
+            var second = await service.CreatePromptAsync(tenantId, "review", "v2", CancellationToken.None);
+            await service.ActivatePromptAsync(tenantId, second.Id, CancellationToken.None);
+            await service.SetToolPolicyAsync(tenantId, new ToolDisclosurePolicy { ToolName = "public", Level = "Primary" }, CancellationToken.None);
+            await service.SetToolPolicyAsync(tenantId, new ToolDisclosurePolicy { ToolName = "admin", Level = "Restricted", RequiredCapabilities = ["org.update"] }, CancellationToken.None);
+            await service.SetToolPolicyAsync(tenantId, new ToolDisclosurePolicy { ToolName = "secret", Level = "Forbidden" }, CancellationToken.None);
+            var hidden = await service.DiscloseAsync(tenantId, new ToolDisclosureRequest(["org.update"], false), CancellationToken.None);
+            var shown = await service.DiscloseAsync(tenantId, new ToolDisclosureRequest(["org.update"], true), CancellationToken.None);
+
+            Assert.Equal(1, first.Version);
+            Assert.Equal(2, second.Version);
+            Assert.Single(hidden.Tools);
+            Assert.Equal(2, shown.Tools.Count);
+            Assert.DoesNotContain(shown.Tools, x => x.Name == "secret");
+            Assert.False(shown.PermissionExpanded);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+}
