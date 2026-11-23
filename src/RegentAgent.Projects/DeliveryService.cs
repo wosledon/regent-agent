@@ -87,11 +87,19 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
         }, cancellationToken);
 
     public Task<DecompositionPlan> ApprovePlanAsync(Guid tenantId, Guid projectId, Guid planId,
-        CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+        CancellationToken cancellationToken) => ApprovePlanAsync(tenantId, projectId, planId, "Controller", null, cancellationToken);
+
+    public Task<DecompositionPlan> ApprovePlanAsync(Guid tenantId, Guid projectId, Guid planId,
+        string approver, string? approvalId, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
         {
             var plan = state.Plans.SingleOrDefault(x => x.Id == planId) ?? throw new KeyNotFoundException("Plan not found.");
             if (plan.Status != "Proposed") throw new InvalidOperationException("Only proposed plans can be approved.");
+            if (string.IsNullOrWhiteSpace(approver)) throw new InvalidOperationException("Plan approver is required.");
+            if (plan.RiskLevel == "High" && string.IsNullOrWhiteSpace(approvalId))
+                throw new InvalidOperationException("High-risk plans require an approval reference.");
             plan.Status = "Approved";
+            plan.ApprovedBy = approver;
+            plan.ApprovalId = approvalId;
             foreach (var task in plan.Tasks)
             {
                 task.TenantId = tenantId;

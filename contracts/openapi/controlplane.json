@@ -4225,6 +4225,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovePlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "OK",
@@ -7264,6 +7274,24 @@
           "expired"
         ]
       },
+      "ApprovePlanRequest": {
+        "required": [
+          "approver",
+          "approvalId"
+        ],
+        "type": "object",
+        "properties": {
+          "approver": {
+            "type": "string"
+          },
+          "approvalId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "ApproveReviewRequest": {
         "required": [
           "approver"
@@ -9169,6 +9197,21 @@
           },
           "status": {
             "type": "string"
+          },
+          "riskLevel": {
+            "type": "string"
+          },
+          "approvalId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "approvedBy": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

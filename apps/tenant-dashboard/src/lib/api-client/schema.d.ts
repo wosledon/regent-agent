@@ -5364,7 +5364,11 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ApprovePlanRequest"];
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -8671,6 +8675,10 @@ export interface components {
         };
         /** @enum {unknown} */
         ApprovalState: "pending" | "approved" | "rejected" | "expired";
+        ApprovePlanRequest: {
+            approver: string;
+            approvalId: null | string;
+        };
         ApproveReviewRequest: {
             approver: string;
         };
@@ -9192,6 +9200,9 @@ export interface components {
             tasks?: components["schemas"]["DeliveryTask"][];
             validationErrors?: string[];
             status?: string;
+            riskLevel?: string;
+            approvalId?: null | string;
+            approvedBy?: null | string;
         };
         Defect: {
             /** Format: uuid */

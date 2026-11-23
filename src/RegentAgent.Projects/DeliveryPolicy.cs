@@ -26,6 +26,7 @@ public static class DeliveryPolicy
     public static IReadOnlyList<string> ValidatePlan(DeliveryRequirement requirement, DecompositionPlan plan)
     {
         var errors = new List<string>();
+        if (plan.RiskLevel is not ("Low" or "Medium" or "High")) errors.Add("Plan risk level is invalid.");
         if (plan.RequirementVersion != requirement.Version) errors.Add("Requirement version changed; create a revised plan.");
         if (plan.Tasks.Count is < 3 or > 12) errors.Add("A plan requires 3 to 12 tasks.");
         if (requirement.TotalWeight <= 0 || plan.Tasks.Sum(x => x.Weight) != requirement.TotalWeight)

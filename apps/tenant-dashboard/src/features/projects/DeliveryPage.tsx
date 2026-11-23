@@ -94,7 +94,7 @@ export function DeliveryPage() {
       }));
       const plan = await api.proposePlan(projectId, {
         id: crypto.randomUUID(), requirementId, requirementVersion: requirement.version ?? 1,
-        tasks, validationErrors: [], status: 'Draft'
+        tasks, validationErrors: [], status: 'Draft', riskLevel: 'Low', approvalId: null, approvedBy: null
       });
       return api.approvePlan(projectId, plan.id ?? '');
     }, onSuccess: invalidate

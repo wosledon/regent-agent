@@ -562,9 +562,10 @@ delivery.MapPost("/plans", async (Guid projectId, DecompositionPlan plan, HttpCo
     DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ProposePlanAsync(Guid.Parse(CurrentTenant(context)), projectId, plan, cancellationToken)))
     .Produces<DecompositionPlan>().WithTags("Delivery");
-delivery.MapPost("/plans/{planId:guid}/approve", async (Guid projectId, Guid planId, HttpContext context,
-    DeliveryService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.ApprovePlanAsync(Guid.Parse(CurrentTenant(context)), projectId, planId, cancellationToken)))
+delivery.MapPost("/plans/{planId:guid}/approve", async (Guid projectId, Guid planId, ApprovePlanRequest request,
+    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ApprovePlanAsync(Guid.Parse(CurrentTenant(context)), projectId, planId,
+        request.Approver, request.ApprovalId, cancellationToken)))
     .Produces<DecompositionPlan>().WithTags("Delivery");
 delivery.MapPost("/tasks/{taskId:guid}/claim", async (Guid projectId, Guid taskId, ClaimTaskRequest request,
     HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
@@ -1481,6 +1482,7 @@ public sealed record OffboardRequest(string ApprovalId);
 public sealed record CreateCandidateRequest(Guid PositionId, string DisplayName, string ModelVersion);
 public sealed record HireCandidateRequest(string ApprovalId);
 public sealed record DecisionRequest(string Decision, string Rationale, IReadOnlyList<Guid> EvidenceIds, int Reround, string Decider);
+public sealed record ApprovePlanRequest(string Approver, string? ApprovalId);
 public sealed record ReadyRequirementRequest(int TotalWeight);
 public sealed record ClaimTaskRequest(string Assignee);
 public sealed record SubmitTaskRequest(string Author);

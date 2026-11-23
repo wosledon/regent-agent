@@ -63,6 +63,9 @@ public sealed class DecompositionPlan
     public IReadOnlyList<DeliveryTask> Tasks { get; set; } = [];
     public IReadOnlyList<string> ValidationErrors { get; set; } = [];
     public string Status { get; set; } = "Draft";
+    public string RiskLevel { get; set; } = "Low";
+    public string? ApprovalId { get; set; }
+    public string? ApprovedBy { get; set; }
 }
 
 public sealed class DeliveryTask

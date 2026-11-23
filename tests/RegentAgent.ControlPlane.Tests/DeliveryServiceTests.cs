@@ -186,6 +186,43 @@ public sealed class DeliveryServiceTests
     }
 
     [Fact]
+    public async Task High_risk_plan_requires_approval_before_tasks_are_created()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"delivery-plan-approval-{Guid.NewGuid():N}.json");
+        try
+        {
+            var tenantId = Guid.NewGuid();
+            var projectId = Guid.NewGuid();
+            var requirementId = Guid.NewGuid();
+            var plan = new DecompositionPlan
+            {
+                Id = Guid.NewGuid(), RequirementId = requirementId, RequirementVersion = 1, Status = "Proposed", RiskLevel = "High",
+                Tasks = Enumerable.Range(0, 3).Select(_ => new DeliveryTask { Id = Guid.NewGuid(), Title = "Task", Weight = 2 }).ToArray()
+            };
+            var store = new JsonDocumentStore<ProjectDeliveryState>(path);
+            await store.PutAsync(projectId.ToString(), new ProjectDeliveryState
+            {
+                TenantId = tenantId, ProjectId = projectId,
+                Decisions = [new GoNoGoDecision { Decision = "Go" }],
+                Requirements = [new DeliveryRequirement { Id = requirementId, TenantId = tenantId, ProjectId = projectId, Status = "Ready", TotalWeight = 6 }],
+                Plans = [plan]
+            }, CancellationToken.None);
+            var service = new DeliveryService(store, TimeProvider.System);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.ApprovePlanAsync(tenantId, projectId, plan.Id,
+                "Controller", null, CancellationToken.None));
+            var approved = await service.ApprovePlanAsync(tenantId, projectId, plan.Id, "Controller", "approval-1", CancellationToken.None);
+
+            Assert.Equal("approval-1", approved.ApprovalId);
+            Assert.Equal(3, (await service.GetAsync(tenantId, projectId, CancellationToken.None)).Tasks.Count);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Self_review_and_unverified_key_claims_are_rejected()
     {
         var path = Path.Combine(Path.GetTempPath(), $"delivery-{Guid.NewGuid():N}.json");

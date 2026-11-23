@@ -174,7 +174,7 @@ export const api = {
   proposePlan: (projectId: string, plan: Schema['DecompositionPlan']) =>
     post<Schema['DecompositionPlan']>(`/v1/projects/${projectId}/delivery/plans`, plan),
   approvePlan: (projectId: string, planId: string) =>
-    post<Schema['DecompositionPlan']>(`/v1/projects/${projectId}/delivery/plans/${planId}/approve`),
+    post<Schema['DecompositionPlan']>(`/v1/projects/${projectId}/delivery/plans/${planId}/approve`, { approver: 'Controller' }),
   reportDefect: (projectId: string, defect: Schema['Defect']) =>
     post<Schema['Defect']>(`/v1/projects/${projectId}/delivery/defects`, defect),
   fixDefect: (projectId: string, defectId: string, fixer = 'Engineer') =>
