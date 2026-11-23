@@ -56,6 +56,28 @@ export interface PlatformStatus {
   incidents: PlatformIncident[];
 }
 
+export interface ObservabilityProfile {
+  mode: string;
+  serviceName: string;
+  elasticEnabled: boolean;
+  metricIntervalSeconds: number;
+}
+
+export interface SloDefinition {
+  name: string;
+  metric: string;
+  target: number;
+  windowDays: number;
+}
+
+export interface SloEvaluation {
+  name: string;
+  actual: number;
+  target: number;
+  passed: boolean;
+  errorBudgetRemaining: number;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { credentials: 'include', ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
   if (!response.ok) throw new Error(`Request failed: ${response.status}`);
@@ -77,6 +99,10 @@ export const api = {
     method: 'POST', body: JSON.stringify({ title, severity, message })
   }),
   resolveIncident: (id: string) => request<PlatformIncident>(`/ops/status/incidents/${id}/resolve`, { method: 'POST' }),
+  observability: () => request<ObservabilityProfile>('/ops/observability/profile'),
+  saveObservability: (profile: ObservabilityProfile) => request<ObservabilityProfile>('/ops/observability/profile', { method: 'PUT', body: JSON.stringify(profile) }),
+  saveSlo: (slo: SloDefinition) => request<SloDefinition>('/ops/observability/slos', { method: 'POST', body: JSON.stringify(slo) }),
+  evaluateSlos: () => request<SloEvaluation[]>('/ops/observability/evaluation'),
   backups: () => request<BackupProfile[]>('/ops/backups'),
   setBackup: (enabled: boolean) => request<BackupProfile[]>('/ops/backups', { method: 'PUT', body: JSON.stringify({ enabled, components: enabled ? 'postgres,rustfs,keyvault' : 'none' }) }),
   audit: () => request<OpsAudit[]>('/ops/audit')

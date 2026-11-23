@@ -1914,7 +1914,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ImprovementProposal"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -1934,7 +1944,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
           }
         }
       }
@@ -2338,7 +2355,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEvolutionState"
+                }
+              }
+            }
           }
         }
       }
@@ -2360,7 +2384,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptBundle"
+                }
+              }
+            }
           }
         }
       }
@@ -2383,7 +2414,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptBundle"
+                }
+              }
+            }
           }
         }
       }
@@ -2405,7 +2443,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDefinition"
+                }
+              }
+            }
           }
         }
       }
@@ -2428,7 +2473,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDefinition"
+                }
+              }
+            }
           }
         }
       }
@@ -2450,7 +2502,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolDisclosurePolicy"
+                }
+              }
+            }
           }
         }
       }
@@ -2472,7 +2531,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolDisclosureResult"
+                }
+              }
+            }
           }
         }
       }
@@ -2518,7 +2584,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PerformanceActionRecord"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -2538,7 +2614,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceActionRecord"
+                }
+              }
+            }
           }
         }
       }
@@ -2570,7 +2653,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceActionRecord"
+                }
+              }
+            }
           }
         }
       }
@@ -5694,6 +5784,29 @@
           }
         }
       },
+      "AgentEvolutionState": {
+        "type": "object",
+        "properties": {
+          "prompts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PromptBundle"
+            }
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillDefinition"
+            }
+          },
+          "toolPolicies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ToolDisclosurePolicy"
+            }
+          }
+        }
+      },
       "AllocationRule": {
         "type": "object",
         "properties": {
@@ -7852,6 +7965,25 @@
           }
         }
       },
+      "DisclosedTool": {
+        "required": [
+          "name",
+          "level",
+          "summary"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          }
+        }
+      },
       "DispatchDecision": {
         "required": [
           "runNow",
@@ -8683,6 +8815,46 @@
           }
         }
       },
+      "ImprovementProposal": {
+        "required": [
+          "id",
+          "tenantId",
+          "employeeId",
+          "category",
+          "summary",
+          "expectedBenefit",
+          "status",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "employeeId": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "expectedBenefit": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "InjectionScanResult": {
         "type": "object",
         "properties": {
@@ -9429,6 +9601,53 @@
           }
         }
       },
+      "PerformanceActionRecord": {
+        "required": [
+          "id",
+          "tenantId",
+          "employeeId",
+          "actionType",
+          "status",
+          "approvalId",
+          "reason",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "employeeId": {
+            "type": "string"
+          },
+          "actionType": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "approvalId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "appealStatus": {
+            "type": "string",
+            "default": "None"
+          }
+        }
+      },
       "PositionDto": {
         "required": [
           "id",
@@ -9806,6 +10025,40 @@
           },
           "currency": {
             "type": "string"
+          }
+        }
+      },
+      "PromptBundle": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "content": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -10553,6 +10806,40 @@
           "critical"
         ]
       },
+      "SkillDefinition": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "promptBundleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "configJson": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
       "SoftDeleteRequest": {
         "required": [
           "resourceType",
@@ -10874,6 +11161,24 @@
             }
           },
           "restrictedActivated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ToolDisclosureResult": {
+        "required": [
+          "tools",
+          "permissionExpanded"
+        ],
+        "type": "object",
+        "properties": {
+          "tools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DisclosedTool"
+            }
+          },
+          "permissionExpanded": {
             "type": "boolean"
           }
         }

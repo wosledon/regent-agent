@@ -25,6 +25,9 @@ import { MessagesPage } from '../features/chat/MessagesPage';
 import { WorkflowsPage } from '../features/workflows/WorkflowsPage';
 import { MemoryPage } from '../features/memory/MemoryPage';
 import { PerformancePage } from '../features/performance/PerformancePage';
+import { PerformanceActionsPage } from '../features/performance/PerformanceActionsPage';
+import { RecruitmentPage } from '../features/performance/RecruitmentPage';
+import { AgentGovernancePage } from '../features/agents/AgentGovernancePage';
 import { EvaluationPage } from '../features/evaluation/EvaluationPage';
 import { BudgetPage } from '../features/budget/BudgetPage';
 import { RuntimePolicyPage } from '../features/budget/RuntimePolicyPage';
@@ -63,6 +66,9 @@ export function App() {
           <Route path="workflows" element={<WorkflowsPage />} />
           <Route path="knowledge" element={<MemoryPage />} />
           <Route path="performance" element={<PerformancePage />} />
+          <Route path="performance/actions" element={<PerformanceActionsPage />} />
+          <Route path="recruitment" element={<RecruitmentPage />} />
+          <Route path="agent-governance" element={<AgentGovernancePage />} />
           <Route path="evaluations" element={<EvaluationPage />} />
           <Route path="budget" element={<BudgetPage />} />
           <Route path="budget/runtime" element={<RuntimePolicyPage />} />

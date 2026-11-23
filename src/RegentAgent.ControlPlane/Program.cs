@@ -896,10 +896,12 @@ api.MapPost("/memories/decay", async (HttpContext context, MemoryService service
 }).WithTags("Memory");
 
 api.MapGet("/improvements", async (HttpContext context, ImprovementService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken))).WithTags("Performance");
+    CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken)))
+    .Produces<IReadOnlyList<ImprovementProposal>>().WithTags("Performance");
 api.MapPost("/improvements", async (CreateImprovementRequest request, HttpContext context,
     ImprovementService service, CancellationToken cancellationToken) => Results.Ok(await service.ProposeAsync(
-        CurrentTenant(context), request.EmployeeId, request.Category, request.Summary, request.ExpectedBenefit, cancellationToken))).WithTags("Performance");
+        CurrentTenant(context), request.EmployeeId, request.Category, request.Summary, request.ExpectedBenefit, cancellationToken)))
+    .Produces<ImprovementProposal>().WithTags("Performance");
 api.MapPost("/improvements/{id}/review", async (string id, ReviewImprovementRequest request,
     HttpContext context, ImprovementService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReviewAsync(id, CurrentTenant(context), request.Approved, cancellationToken))).WithTags("Performance");
@@ -947,25 +949,32 @@ api.MapPost("/task-governance/adjudications", async (AdjudicationTaskRecord adju
         Guid.Parse(CurrentTenant(context)), adjudication, cancellationToken))).Produces<AdjudicationTaskRecord>().WithTags("Task Governance");
 
 api.MapGet("/agent-evolution", async (HttpContext context, AgentEvolutionService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken))).WithTags("Agent Evolution");
+    CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<AgentEvolutionState>().WithTags("Agent Evolution");
 api.MapPost("/agent-evolution/prompts", async (CreatePromptRequest request, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.CreatePromptAsync(
-        Guid.Parse(CurrentTenant(context)), request.Name, request.Content, cancellationToken))).WithTags("Agent Evolution");
+        Guid.Parse(CurrentTenant(context)), request.Name, request.Content, cancellationToken)))
+    .Produces<PromptBundle>().WithTags("Agent Evolution");
 api.MapPost("/agent-evolution/prompts/{id:guid}/activate", async (Guid id, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.ActivatePromptAsync(
-        Guid.Parse(CurrentTenant(context)), id, cancellationToken))).WithTags("Agent Evolution");
+        Guid.Parse(CurrentTenant(context)), id, cancellationToken)))
+    .Produces<PromptBundle>().WithTags("Agent Evolution");
 api.MapPost("/agent-evolution/skills", async (CreateSkillRequest request, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.CreateSkillAsync(
-        Guid.Parse(CurrentTenant(context)), request.Name, request.PromptBundleId, request.ConfigJson, cancellationToken))).WithTags("Agent Evolution");
+        Guid.Parse(CurrentTenant(context)), request.Name, request.PromptBundleId, request.ConfigJson, cancellationToken)))
+    .Produces<SkillDefinition>().WithTags("Agent Evolution");
 api.MapPost("/agent-evolution/skills/{id:guid}/activate", async (Guid id, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.ActivateSkillAsync(
-        Guid.Parse(CurrentTenant(context)), id, cancellationToken))).WithTags("Agent Evolution");
+        Guid.Parse(CurrentTenant(context)), id, cancellationToken)))
+    .Produces<SkillDefinition>().WithTags("Agent Evolution");
 api.MapPost("/agent-evolution/tool-policies", async (ToolDisclosurePolicy policy, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.SetToolPolicyAsync(
-        Guid.Parse(CurrentTenant(context)), policy, cancellationToken))).WithTags("Agent Evolution");
+        Guid.Parse(CurrentTenant(context)), policy, cancellationToken)))
+    .Produces<ToolDisclosurePolicy>().WithTags("Agent Evolution");
 api.MapPost("/agent-evolution/tools/disclose", async (ToolDisclosureRequest request, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.DiscloseAsync(
-        Guid.Parse(CurrentTenant(context)), request, cancellationToken))).WithTags("Agent Evolution");
+        Guid.Parse(CurrentTenant(context)), request, cancellationToken)))
+    .Produces<ToolDisclosureResult>().WithTags("Agent Evolution");
 
 api.MapGet("/kpis", async (HttpContext context, PerformanceService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken)))
@@ -976,7 +985,8 @@ api.MapPost("/performance-reviews", async (CreateReviewRequest request, HttpCont
     .WithTags("Performance");
 
 api.MapGet("/performance-actions", async (HttpContext context, PerformanceActionService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken))).WithTags("Performance");
+    CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken)))
+    .Produces<IReadOnlyList<PerformanceActionRecord>>().WithTags("Performance");
 api.MapPost("/performance-actions", async (PerformActionRequest request, HttpContext context,
     PerformanceActionService service, RegentDbContext db, CancellationToken cancellationToken) =>
 {
@@ -991,10 +1001,11 @@ api.MapPost("/performance-actions", async (PerformActionRequest request, HttpCon
     }
     return Results.Ok(await service.PerformAsync(CurrentTenant(context), request.EmployeeId, request.ActionType,
         request.ApprovalId, request.Reason, cancellationToken));
-}).WithTags("Performance");
+}).Produces<PerformanceActionRecord>().WithTags("Performance");
 api.MapPost("/performance-actions/{id}/appeal", async (string id, AppealActionRequest request,
     HttpContext context, PerformanceActionService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.AppealAsync(id, CurrentTenant(context), request.Reason, cancellationToken))).WithTags("Performance");
+    Results.Ok(await service.AppealAsync(id, CurrentTenant(context), request.Reason, cancellationToken)))
+    .Produces<PerformanceActionRecord>().WithTags("Performance");
 
 api.MapGet("/communication/routes", (CommunicationRouter router) =>
 {

@@ -7,6 +7,7 @@ import { useAuth } from './app/useAuth';
 import { AuditPage } from './pages/AuditPage';
 import { BackupsPage } from './pages/BackupsPage';
 import { OverviewPage } from './pages/OverviewPage';
+import { ObservabilityPage } from './pages/ObservabilityPage';
 import { StatusPage } from './pages/StatusPage';
 import { SupportPage } from './pages/SupportPage';
 import { TenantsPage } from './pages/TenantsPage';
@@ -23,6 +24,7 @@ export function App() {
         <Route path="backups" element={<BackupsPage />} />
         <Route path="audit" element={<AuditPage />} />
         <Route path="platform" element={<StatusPage operational />} />
+        <Route path="observability" element={<ObservabilityPage />} />
       </Route>
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
@@ -46,7 +48,7 @@ function Shell() {
   const { user, logout } = useAuth();
   const links = [
     ['/', 'Overview'], ['/tenants', 'Tenants'], ['/support', 'Support grants'],
-    ['/backups', 'Backups'], ['/audit', 'Audit'], ['/platform', 'Platform status'], ['/status', 'Public status']
+    ['/backups', 'Backups'], ['/audit', 'Audit'], ['/platform', 'Platform status'], ['/observability', 'Observability'], ['/status', 'Public status']
   ];
   return <Box sx={{ display: 'flex' }}>
     <AppBar position="fixed"><Toolbar><SemanticIconButton label="Open navigation" color="inherit" onClick={() => setOpen(true)}><Icon name="dashboard" /></SemanticIconButton><Text variant="h2" sx={{ flexGrow: 1, color: 'inherit' }}>Regent Operations</Text><Button tone="neutral" onClick={logout}>Logout</Button></Toolbar></AppBar>

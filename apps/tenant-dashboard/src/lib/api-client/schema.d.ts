@@ -2613,7 +2613,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ImprovementProposal"][];
+                    };
                 };
             };
         };
@@ -2636,7 +2638,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ImprovementProposal"];
+                    };
                 };
             };
         };
@@ -3174,7 +3178,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["AgentEvolutionState"];
+                    };
                 };
             };
         };
@@ -3213,7 +3219,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["PromptBundle"];
+                    };
                 };
             };
         };
@@ -3248,7 +3256,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["PromptBundle"];
+                    };
                 };
             };
         };
@@ -3285,7 +3295,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["SkillDefinition"];
+                    };
                 };
             };
         };
@@ -3320,7 +3332,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["SkillDefinition"];
+                    };
                 };
             };
         };
@@ -3357,7 +3371,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ToolDisclosurePolicy"];
+                    };
                 };
             };
         };
@@ -3394,7 +3410,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["ToolDisclosureResult"];
+                    };
                 };
             };
         };
@@ -3495,7 +3513,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["PerformanceActionRecord"][];
+                    };
                 };
             };
         };
@@ -3518,7 +3538,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["PerformanceActionRecord"];
+                    };
                 };
             };
         };
@@ -3557,7 +3579,9 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": components["schemas"]["PerformanceActionRecord"];
+                    };
                 };
             };
         };
@@ -7127,6 +7151,11 @@ export interface components {
             prefixHash?: string;
             compressed?: boolean;
         };
+        AgentEvolutionState: {
+            prompts?: components["schemas"]["PromptBundle"][];
+            skills?: components["schemas"]["SkillDefinition"][];
+            toolPolicies?: components["schemas"]["ToolDisclosurePolicy"][];
+        };
         AllocationRule: {
             /** Format: uuid */
             id?: string;
@@ -7740,6 +7769,11 @@ export interface components {
             /** Format: uuid */
             tenantId?: null | string;
         };
+        DisclosedTool: {
+            name: string;
+            level: string;
+            summary: string;
+        };
         DispatchDecision: {
             runNow: boolean;
             reason: string;
@@ -7973,6 +8007,17 @@ export interface components {
             enabled: boolean;
             groupMappingJson: string;
         };
+        ImprovementProposal: {
+            id: string;
+            tenantId: string;
+            employeeId: string;
+            category: string;
+            summary: string;
+            expectedBenefit: string;
+            status: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
         InjectionScanResult: {
             safe?: boolean;
             taint?: string;
@@ -8194,6 +8239,19 @@ export interface components {
             approvalId: null | string;
             reason: string;
         };
+        PerformanceActionRecord: {
+            id: string;
+            tenantId: string;
+            employeeId: string;
+            actionType: string;
+            status: string;
+            approvalId: null | string;
+            reason: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @default None */
+            appealStatus: string;
+        };
         PositionDto: {
             /** Format: uuid */
             id: string;
@@ -8290,6 +8348,19 @@ export interface components {
             /** Format: int64 */
             costMinor: number | string;
             currency: string;
+        };
+        PromptBundle: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            name?: string;
+            /** Format: int32 */
+            version?: number | string;
+            content?: string;
+            status?: string;
+            /** Format: date-time */
+            createdAt?: string;
         };
         PurgeRequest: {
             confirmation: string;
@@ -8518,6 +8589,19 @@ export interface components {
         };
         /** @enum {unknown} */
         Severity: "low" | "medium" | "high" | "critical";
+        SkillDefinition: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            name?: string;
+            /** Format: int32 */
+            version?: number | string;
+            /** Format: uuid */
+            promptBundleId?: string;
+            configJson?: string;
+            status?: string;
+        };
         SoftDeleteRequest: {
             resourceType: string;
             resourceId: string;
@@ -8603,6 +8687,10 @@ export interface components {
         ToolDisclosureRequest: {
             capabilities: string[];
             restrictedActivated: boolean;
+        };
+        ToolDisclosureResult: {
+            tools: components["schemas"]["DisclosedTool"][];
+            permissionExpanded: boolean;
         };
         ToolLoopRequest: {
             /** Format: uuid */

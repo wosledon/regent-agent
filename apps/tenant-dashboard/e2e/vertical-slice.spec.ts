@@ -67,6 +67,8 @@ test('operations console supports tenant and grant views', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Platform status' })).toBeVisible();
   await page.getByRole('button', { name: 'Refresh health' }).click();
   await expect(page.getByText('ControlPlane')).toBeVisible();
+  await page.goto('http://localhost:4173/observability');
+  await expect(page.getByRole('heading', { name: 'Observability' })).toBeVisible();
 });
 
 test('organization, delivery, security, lifecycle and runtime pages work end to end', async ({ page }) => {
@@ -111,6 +113,13 @@ test('organization, delivery, security, lifecycle and runtime pages work end to 
   await page.getByPlaceholder('usage:unique-event').fill('e2e:usage');
   await page.getByRole('button', { name: 'Record cost once' }).click();
   await expect(page.getByRole('cell', { name: 'e2e:usage' }).first()).toBeVisible();
+
+  await page.goto('/recruitment');
+  await expect(page.getByRole('heading', { name: 'Recruitment governance' })).toBeVisible();
+  await page.goto('/performance/actions');
+  await expect(page.getByRole('heading', { name: 'Performance actions' })).toBeVisible();
+  await page.goto('/agent-governance');
+  await expect(page.getByRole('heading', { name: 'Agent & task governance' })).toBeVisible();
 });
 
 test('password registration issues recovery codes and session controls', async ({ page }) => {
