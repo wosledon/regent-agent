@@ -81,6 +81,7 @@
 | OpenAPI、认证、幂等、分页、错误和代码生成 | [47 OpenAPI 基线](./design/47-openapi-baseline.md) |
 | 前端页面、路由、权限、布局和组件映射 | [48 前端页面与路由地图](./design/48-frontend-route-map.md) |
 | 核心 ERD、Schema 所有权、RLS 和数据字典 | [49 核心 ERD 与数据字典](./design/49-core-data-model-and-erd.md) |
+| 已接受技术决策与替代方案 | [ADR 架构决策记录](./adr/README.md) |
 
 完整缺口登记和全局不变量见 [详细设计 README](./design/README.md)；四部分拓扑、工具调用、项目交付和模型预算流程见 [完整架构流程图](./Regent-Agent-架构流程图.md)。
 

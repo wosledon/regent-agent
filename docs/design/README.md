@@ -55,6 +55,7 @@
 | [47 OpenAPI 基线](./47-openapi-baseline.md) | OpenAPI 3.1、认证、幂等、分页、错误、版本和代码生成 |
 | [48 前端页面与路由地图](./48-frontend-route-map.md) | Tenant Dashboard 与 Ops Console 路由、权限、布局和组件映射 |
 | [49 核心 ERD 与数据字典](./49-core-data-model-and-erd.md) | 核心实体关系、Schema 所有权、RLS、保留和数据字典 |
+| [ADR 架构决策记录](../adr/README.md) | 已接受技术决策、背景、结果、替代方案和关联设计 |
 
 ## 2. 设计缺口登记
 
