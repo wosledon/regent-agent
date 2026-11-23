@@ -1479,6 +1479,79 @@
         }
       }
     },
+    "/v1/outbox": {
+      "get": {
+        "tags": [
+          "Messaging"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OutboxRecord"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Messaging"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishEventRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/outbox/process": {
+      "post": {
+        "tags": [
+          "Messaging"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/schema/version": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/v1/approvals": {
       "post": {
         "tags": [
@@ -1509,6 +1582,25 @@
       }
     },
     "/v1/audit/verify": {
+      "get": {
+        "tags": [
+          "Audit"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditVerificationDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/audit/anchors/verify": {
       "get": {
         "tags": [
           "Audit"
@@ -4168,6 +4260,36 @@
         }
       }
     },
+    "/v1/governance/incidents/{incidentId}/evidence/verify": {
+      "get": {
+        "tags": [
+          "Governance"
+        ],
+        "parameters": [
+          {
+            "name": "incidentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceVerificationDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/governance/incidents/{incidentId}/close": {
       "post": {
         "tags": [
@@ -4772,6 +4894,18 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/v1/lifecycle/run-due": {
+      "post": {
+        "tags": [
+          "Lifecycle"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
           }
         }
       }
@@ -8550,6 +8684,33 @@
           }
         }
       },
+      "EvidenceVerificationDto": {
+        "required": [
+          "valid",
+          "checkedEvidence",
+          "message"
+        ],
+        "type": "object",
+        "properties": {
+          "valid": {
+            "type": "boolean"
+          },
+          "checkedEvidence": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "message": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
       "ExternalLoginRequest": {
         "required": [
           "tenantId",
@@ -9545,6 +9706,47 @@
           }
         }
       },
+      "OutboxRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "eventType": {
+            "type": "string"
+          },
+          "payloadJson": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "attempts": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "processedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
       "OwnershipDelegationDto": {
         "required": [
           "id",
@@ -10060,6 +10262,19 @@
             "type": "string",
             "format": "date-time"
           }
+        }
+      },
+      "PublishEventRequest": {
+        "required": [
+          "eventType",
+          "payload"
+        ],
+        "type": "object",
+        "properties": {
+          "eventType": {
+            "type": "string"
+          },
+          "payload": { }
         }
       },
       "PurgeRequest": {
@@ -11556,6 +11771,12 @@
     },
     {
       "name": "Projects"
+    },
+    {
+      "name": "Messaging"
+    },
+    {
+      "name": "System"
     },
     {
       "name": "Approvals"

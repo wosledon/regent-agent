@@ -134,35 +134,35 @@ builder.Services.AddDbContext<RegentDbContext>(options =>
     }
 });
 
-RegisterTenantStore<WorkflowDefinition>(builder.Services);
-RegisterTenantStore<WorkflowRun>(builder.Services);
-RegisterTenantStore<MemoryClaim>(builder.Services);
-RegisterTenantStore<CorrectionTask>(builder.Services);
-RegisterTenantStore<KpiSnapshot>(builder.Services);
-RegisterTenantStore<PerformanceReview>(builder.Services);
-RegisterTenantStore<ImprovementProposal>(builder.Services);
-RegisterTenantStore<PerformanceActionRecord>(builder.Services);
-RegisterTenantStore<Conversation>(builder.Services);
-RegisterTenantStore<ChatMessage>(builder.Services);
-RegisterTenantStore<BenchmarkSuite>(builder.Services);
-RegisterTenantStore<EvaluationRun>(builder.Services);
-RegisterTenantStore<JudgeAssignment>(builder.Services);
-RegisterTenantStore<EvaluationQaState>(builder.Services);
-RegisterTenantStore<ComplianceProfile>(builder.Services);
-RegisterTenantStore<ProjectDeliveryState>(builder.Services);
-RegisterTenantStore<GovernanceState>(builder.Services);
-RegisterTenantStore<DataLifecycleState>(builder.Services);
-RegisterTenantStore<ModelPoolState>(builder.Services);
-RegisterTenantStore<RuntimePolicyState>(builder.Services);
-RegisterTenantStore<AuthSessionRecord>(builder.Services);
-RegisterTenantStore<IdentityProviderRecord>(builder.Services);
-RegisterTenantStore<InvitationRecord>(builder.Services);
-RegisterTenantStore<OwnershipDelegationRecord>(builder.Services);
-RegisterTenantStore<UserTenantProfileRecord>(builder.Services);
-RegisterTenantStore<ButlerReport>(builder.Services);
-RegisterTenantStore<ReportSchedule>(builder.Services);
-RegisterTenantStore<AgentEvolutionState>(builder.Services);
-RegisterTenantStore<TaskGovernanceState>(builder.Services);
+RegisterTenantStore<WorkflowDefinition>(builder.Services, "data/modules/workflows.json");
+RegisterTenantStore<WorkflowRun>(builder.Services, "data/modules/workflow-runs.json");
+RegisterTenantStore<MemoryClaim>(builder.Services, "data/modules/memory.json");
+RegisterTenantStore<CorrectionTask>(builder.Services, "data/modules/corrections.json");
+RegisterTenantStore<KpiSnapshot>(builder.Services, "data/modules/kpis.json");
+RegisterTenantStore<PerformanceReview>(builder.Services, "data/modules/reviews.json");
+RegisterTenantStore<ImprovementProposal>(builder.Services, "data/modules/improvements.json");
+RegisterTenantStore<PerformanceActionRecord>(builder.Services, "data/modules/performance-actions.json");
+RegisterTenantStore<Conversation>(builder.Services, "data/modules/conversations.json");
+RegisterTenantStore<ChatMessage>(builder.Services, "data/modules/messages.json");
+RegisterTenantStore<BenchmarkSuite>(builder.Services, "data/modules/suites.json");
+RegisterTenantStore<EvaluationRun>(builder.Services, "data/modules/evaluations.json");
+RegisterTenantStore<JudgeAssignment>(builder.Services, "data/modules/judges.json");
+RegisterTenantStore<EvaluationQaState>(builder.Services, "data/modules/evaluation-qa.json");
+RegisterTenantStore<ComplianceProfile>(builder.Services, "data/modules/compliance.json");
+RegisterTenantStore<ProjectDeliveryState>(builder.Services, "data/modules/project-delivery.json");
+RegisterTenantStore<GovernanceState>(builder.Services, "data/modules/governance.json");
+RegisterTenantStore<DataLifecycleState>(builder.Services, "data/modules/lifecycle.json");
+RegisterTenantStore<ModelPoolState>(builder.Services, "data/modules/model-pool.json");
+RegisterTenantStore<RuntimePolicyState>(builder.Services, "data/modules/runtime-policy.json");
+RegisterTenantStore<AuthSessionRecord>(builder.Services, "data/modules/sessions.json");
+RegisterTenantStore<IdentityProviderRecord>(builder.Services, "data/modules/identity-providers.json");
+RegisterTenantStore<InvitationRecord>(builder.Services, "data/modules/invitations.json");
+RegisterTenantStore<OwnershipDelegationRecord>(builder.Services, "data/modules/ownership-delegations.json");
+RegisterTenantStore<UserTenantProfileRecord>(builder.Services, "data/modules/profiles.json");
+RegisterTenantStore<ButlerReport>(builder.Services, "data/modules/butler-reports.json");
+RegisterTenantStore<ReportSchedule>(builder.Services, "data/modules/report-schedules.json");
+RegisterTenantStore<AgentEvolutionState>(builder.Services, "data/modules/agent-evolution.json");
+RegisterTenantStore<TaskGovernanceState>(builder.Services, "data/modules/task-governance.json");
 builder.Services.AddScoped<TenantPurgeService>();
 builder.Services.AddScoped<IdempotencyService>();
 builder.Services.AddScoped<OutboxService>();
@@ -1172,8 +1172,8 @@ static string CurrentUser(HttpContext context) => context.User.FindFirstValue(Cl
 static Guid CurrentUserId(HttpContext context) =>
     Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException("Missing user identity."));
 
-static void RegisterTenantStore<T>(IServiceCollection services) where T : class =>
-    services.AddSingleton<ITenantJsonDocumentStore>(sp => sp.GetRequiredService<JsonDocumentStore<T>>());
+static void RegisterTenantStore<T>(IServiceCollection services, string path) where T : class =>
+    services.AddSingleton<ITenantJsonDocumentStore>(new JsonDocumentStore<T>(path));
 
 static async Task<IResult> CompleteAuthAsync(HttpContext context, AuthResult result)
 {
