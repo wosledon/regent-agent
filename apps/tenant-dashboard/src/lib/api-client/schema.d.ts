@@ -4561,6 +4561,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agent-evolution/onboarding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["OnboardingRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OnboardingBaseline"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agent-evolution/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PublishAssetRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PublicAsset"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/agent-evolution/tool-policies": {
         parameters: {
             query?: never;
@@ -8620,6 +8698,8 @@ export interface components {
             prompts?: components["schemas"]["PromptBundle"][];
             skills?: components["schemas"]["SkillDefinition"][];
             toolPolicies?: components["schemas"]["ToolDisclosurePolicy"][];
+            onboardingBaselines?: components["schemas"]["OnboardingBaseline"][];
+            publicAssets?: components["schemas"]["PublicAsset"][];
         };
         AllocationRule: {
             /** Format: uuid */
@@ -9105,6 +9185,8 @@ export interface components {
         CreatePromptRequest: {
             name: string;
             content: string;
+            /** @default Operations */
+            kind: string;
         };
         CreateReportScheduleRequest: {
             kind: string;
@@ -9946,6 +10028,25 @@ export interface components {
         OffboardRequest: {
             approvalId: string;
         };
+        OnboardingBaseline: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            /** Format: uuid */
+            employeeId?: string;
+            /** Format: uuid */
+            promptBundleId?: string;
+            status?: string;
+            /** Format: date-time */
+            createdAt?: string;
+        };
+        OnboardingRequest: {
+            /** Format: uuid */
+            employeeId: string;
+            /** Format: uuid */
+            promptBundleId: string;
+        };
         OrgDelegationDto: {
             /** Format: uuid */
             id: string;
@@ -10121,8 +10222,29 @@ export interface components {
             version?: number | string;
             content?: string;
             status?: string;
+            kind?: string;
             /** Format: date-time */
             createdAt?: string;
+        };
+        PublicAsset: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            assetType?: string;
+            /** Format: uuid */
+            assetId?: string;
+            /** Format: int32 */
+            version?: number | string;
+            publishedBy?: string;
+            /** Format: date-time */
+            publishedAt?: string;
+        };
+        PublishAssetRequest: {
+            assetType: string;
+            /** Format: uuid */
+            assetId: string;
+            publisher: string;
         };
         PublishEventRequest: {
             eventType: string;

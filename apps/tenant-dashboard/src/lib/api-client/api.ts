@@ -272,7 +272,12 @@ export const api = {
   createReviewTask: (body: Schema['ReviewTaskRecord']) => post<Schema['ReviewTaskRecord']>('/v1/task-governance/reviews', body),
   approveReviewTask: (id: string, approver: string) => post<Schema['ReviewTaskRecord']>(`/v1/task-governance/reviews/${id}/approve`, { approver }),
   agentEvolution: () => request<Schema['AgentEvolutionState']>('/v1/agent-evolution'),
-  createPrompt: (name: string, content: string) => post<Schema['PromptBundle']>('/v1/agent-evolution/prompts', { name, content }),
+  createPrompt: (name: string, content: string, kind = 'Operations') =>
+    post<Schema['PromptBundle']>('/v1/agent-evolution/prompts', { name, content, kind }),
+  createOnboardingBaseline: (employeeId: string, promptBundleId: string) =>
+    post<Schema['OnboardingBaseline']>('/v1/agent-evolution/onboarding', { employeeId, promptBundleId }),
+  publishAgentAsset: (assetType: 'Prompt' | 'Skill', assetId: string) =>
+    post<Schema['PublicAsset']>('/v1/agent-evolution/assets', { assetType, assetId, publisher: 'Owner' }),
   activatePrompt: (id: string) => post<Schema['PromptBundle']>(`/v1/agent-evolution/prompts/${id}/activate`),
   createSkill: (name: string, promptBundleId: string, configJson: string) => post<Schema['SkillDefinition']>('/v1/agent-evolution/skills', { name, promptBundleId, configJson }),
   discloseTools: (capabilities: string[], restrictedActivated: boolean) => post<Schema['ToolDisclosureResult']>('/v1/agent-evolution/tools/disclose', { capabilities, restrictedActivated }),

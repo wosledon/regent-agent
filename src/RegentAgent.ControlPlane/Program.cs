@@ -1252,7 +1252,7 @@ api.MapGet("/agent-evolution", async (HttpContext context, AgentEvolutionService
     .Produces<AgentEvolutionState>().WithTags("Agent Evolution");
 api.MapPost("/agent-evolution/prompts", async (CreatePromptRequest request, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.CreatePromptAsync(
-        Guid.Parse(CurrentTenant(context)), request.Name, request.Content, cancellationToken)))
+        Guid.Parse(CurrentTenant(context)), request.Name, request.Content, request.Kind, cancellationToken)))
     .Produces<PromptBundle>().WithTags("Agent Evolution");
 api.MapPost("/agent-evolution/prompts/{id:guid}/activate", async (Guid id, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.ActivatePromptAsync(
@@ -1266,6 +1266,14 @@ api.MapPost("/agent-evolution/skills/{id:guid}/activate", async (Guid id, HttpCo
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.ActivateSkillAsync(
         Guid.Parse(CurrentTenant(context)), id, cancellationToken)))
     .Produces<SkillDefinition>().WithTags("Agent Evolution");
+api.MapPost("/agent-evolution/onboarding", async (OnboardingRequest request, HttpContext context,
+    AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.CreateOnboardingBaselineAsync(
+        Guid.Parse(CurrentTenant(context)), request.EmployeeId, request.PromptBundleId, cancellationToken)))
+    .Produces<OnboardingBaseline>().WithTags("Agent Evolution");
+api.MapPost("/agent-evolution/assets", async (PublishAssetRequest request, HttpContext context,
+    AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.PublishAssetAsync(
+        Guid.Parse(CurrentTenant(context)), request.AssetType, request.AssetId, request.Publisher, cancellationToken)))
+    .Produces<PublicAsset>().WithTags("Agent Evolution");
 api.MapPost("/agent-evolution/tool-policies", async (ToolDisclosurePolicy policy, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.SetToolPolicyAsync(
         Guid.Parse(CurrentTenant(context)), policy, cancellationToken)))
@@ -1523,7 +1531,9 @@ public sealed record RunEvaluationRequest(string SuiteId, string CandidateEmploy
 public sealed record CreateImprovementRequest(string EmployeeId, string Category, string Summary, string ExpectedBenefit);
 public sealed record ReviewImprovementRequest(bool Approved, string Reviewer, string Note);
 public sealed record ResolvePerformanceAppealRequest(string Reviewer, string Resolution, bool Upheld);
-public sealed record CreatePromptRequest(string Name, string Content);
+public sealed record CreatePromptRequest(string Name, string Content, string Kind = "Operations");
+public sealed record OnboardingRequest(Guid EmployeeId, Guid PromptBundleId);
+public sealed record PublishAssetRequest(string AssetType, Guid AssetId, string Publisher);
 public sealed record CreateSkillRequest(string Name, Guid PromptBundleId, string ConfigJson);
 public sealed record BuildContextRequest(Guid TaskId, string SystemPrefix, string TenantMemory, string TaskGrantJson,
     IReadOnlyList<string> ToolResultRefs, string CheckpointJson, bool Compressed);

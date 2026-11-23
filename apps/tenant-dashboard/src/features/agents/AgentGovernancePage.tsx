@@ -13,6 +13,9 @@ export function AgentGovernancePage() {
   const [dimension, setDimension] = useState('engineering');
   const [promptName, setPromptName] = useState('review');
   const [promptContent, setPromptContent] = useState('Review evidence independently.');
+  const [promptKind, setPromptKind] = useState('Operations');
+  const [onboardingEmployeeId, setOnboardingEmployeeId] = useState('');
+  const [onboardingPromptId, setOnboardingPromptId] = useState('');
   const [toolName, setToolName] = useState('research.search');
   const [level, setLevel] = useState('Primary');
   const [disclosureCapabilities, setDisclosureCapabilities] = useState('research.execute');
@@ -29,8 +32,11 @@ export function AgentGovernancePage() {
   ]);
   const registerType = useMutation({ mutationFn: () => api.registerTaskType({ taskType, requiredCapabilities: capabilities.split(',').map(x => x.trim()).filter(Boolean), toolProfile: 'Primary', doneTemplate: '{}', version: 1 }), onSuccess: invalidate });
   const assess = useMutation({ mutationFn: () => api.assessCapability({ employeeId, dimension, modelScore: 0.9, historyScore: 0.8, toolFit: 1, contextFit: 1, effectiveScore: 0, confidence: 0.9 }), onSuccess: invalidate });
-  const createPrompt = useMutation({ mutationFn: () => api.createPrompt(promptName, promptContent), onSuccess: async () => { setPromptContent(''); await invalidate(); } });
+  const createPrompt = useMutation({ mutationFn: () => api.createPrompt(promptName, promptContent, promptKind), onSuccess: async () => { setPromptContent(''); await invalidate(); } });
   const activatePrompt = useMutation({ mutationFn: api.activatePrompt, onSuccess: invalidate });
+  const activateSkill = useMutation({ mutationFn: api.activateSkill, onSuccess: invalidate });
+  const publishAsset = useMutation({ mutationFn: ({ type, id }: { type: 'Prompt' | 'Skill'; id: string }) => api.publishAgentAsset(type, id), onSuccess: invalidate });
+  const onboarding = useMutation({ mutationFn: () => api.createOnboardingBaseline(onboardingEmployeeId, onboardingPromptId), onSuccess: invalidate });
   const setPolicy = useMutation({ mutationFn: () => api.setToolPolicy({ toolName, level, requiredCapabilities: disclosureCapabilities.split(',').map(x => x.trim()).filter(Boolean), summary: 'Local governed tool' }), onSuccess: invalidate });
   const disclose = useMutation({ mutationFn: () => api.discloseTools(disclosureCapabilities.split(',').map(x => x.trim()).filter(Boolean), restricted), onSuccess: setDisclosed });
   const createReview = useMutation({ mutationFn: () => api.createReviewTask({ id: crypto.randomUUID(), subjectId: reviewSubject, author: 'Controller', requiredQuorum: 2, findings: [], approvers: [], status: 'Open' }), onSuccess: invalidate });
@@ -61,17 +67,26 @@ export function AgentGovernancePage() {
       <Card title="Prompt and skill evolution">
         <FormField label="Prompt name"><TextInput value={promptName} onChange={setPromptName} /></FormField>
         <FormField label="Prompt content"><TextInput value={promptContent} onChange={setPromptContent} multiline minRows={2} /></FormField>
+        <Select label="Prompt kind" value={promptKind} onChange={setPromptKind} options={['Recruitment', 'Onboarding', 'Operations'].map(value => ({ value, label: value }))} />
         <Button onClick={() => createPrompt.mutate()} disabled={!promptContent} loading={createPrompt.isPending}>Create version</Button>
         <DataTable rows={agentState?.prompts ?? []} getRowId={row => row.id ?? ''} columns={[
           { id: 'name', header: 'Prompt', render: row => row.name ?? '' },
           { id: 'version', header: 'Version', render: row => row.version ?? 1 },
+          { id: 'kind', header: 'Kind', render: row => row.kind ?? 'Operations' },
           { id: 'status', header: 'Status', render: row => <StatusChip label={row.status ?? ''} tone="info" /> },
-          { id: 'actions', header: 'Actions', render: row => <Button tone="neutral" onClick={() => activatePrompt.mutate(row.id ?? '')} disabled={row.status === 'Active'}>Activate</Button> }
+          { id: 'actions', header: 'Actions', render: row => <Stack direction="row" wrap>
+            <Button tone="neutral" onClick={() => activatePrompt.mutate(row.id ?? '')} disabled={row.status === 'Active'}>Activate</Button>
+            <Button tone="secondary" onClick={() => publishAsset.mutate({ type: 'Prompt', id: row.id ?? '' })} disabled={row.status !== 'Active'}>Publish</Button>
+          </Stack> }
         ]} />
         <DataTable rows={agentState?.skills ?? []} getRowId={row => row.id ?? ''} columns={[
           { id: 'name', header: 'Skill', render: row => row.name ?? '' },
           { id: 'version', header: 'Version', render: row => row.version ?? 1 },
-          { id: 'status', header: 'Status', render: row => row.status ?? '' }
+          { id: 'status', header: 'Status', render: row => row.status ?? '' },
+          { id: 'actions', header: 'Actions', render: row => <Stack direction="row" wrap>
+            <Button tone="neutral" onClick={() => activateSkill.mutate(row.id ?? '')} disabled={row.status === 'Active'}>Activate</Button>
+            <Button tone="secondary" onClick={() => publishAsset.mutate({ type: 'Skill', id: row.id ?? '' })} disabled={row.status !== 'Active'}>Publish</Button>
+          </Stack> }
         ]} />
       </Card>
     </Grid>
@@ -101,6 +116,23 @@ export function AgentGovernancePage() {
         ]} />
       </Card>
     </Grid>
+    <Card title="Onboarding baseline and public assets">
+      <Stack spacing={2}>
+        <FormField label="Employee ID"><TextInput value={onboardingEmployeeId} onChange={setOnboardingEmployeeId} /></FormField>
+        <FormField label="Active prompt bundle ID"><TextInput value={onboardingPromptId} onChange={setOnboardingPromptId} /></FormField>
+        <Button tone="secondary" disabled={!onboardingEmployeeId || !onboardingPromptId} loading={onboarding.isPending} onClick={() => onboarding.mutate()}>Create onboarding baseline</Button>
+        <DataTable rows={agentState?.onboardingBaselines ?? []} getRowId={row => row.id ?? ''} columns={[
+          { id: 'employee', header: 'Employee', render: row => row.employeeId ?? '' },
+          { id: 'prompt', header: 'Prompt', render: row => row.promptBundleId ?? '' },
+          { id: 'status', header: 'Status', render: row => row.status ?? '' }
+        ]} />
+        <DataTable rows={agentState?.publicAssets ?? []} getRowId={row => row.id ?? ''} columns={[
+          { id: 'asset', header: 'Asset', render: row => `${row.assetType}:${row.assetId}` },
+          { id: 'version', header: 'Version', render: row => row.version ?? 1 },
+          { id: 'publisher', header: 'Publisher', render: row => row.publishedBy ?? '' }
+        ]} />
+      </Stack>
+    </Card>
     <Card title="Approved task reassignment">
       <Stack spacing={2}>
         <FormField label="Task ID"><TextInput value={reassignTaskId} onChange={setReassignTaskId} /></FormField>

@@ -32,6 +32,32 @@ public sealed class EvolutionServiceTests
     }
 
     [Fact]
+    public async Task Recruitment_prompt_onboarding_and_public_assets_are_versioned()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"agent-assets-{Guid.NewGuid():N}.json");
+        try
+        {
+            var service = new AgentEvolutionService(new JsonDocumentStore<AgentEvolutionState>(path), TimeProvider.System);
+            var tenantId = Guid.NewGuid();
+            var employeeId = Guid.NewGuid();
+            var prompt = await service.CreatePromptAsync(tenantId, "interview", "Run a blind job-related interview", "Recruitment", CancellationToken.None);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateOnboardingBaselineAsync(tenantId, employeeId, prompt.Id, CancellationToken.None));
+            await service.ActivatePromptAsync(tenantId, prompt.Id, CancellationToken.None);
+            var baseline = await service.CreateOnboardingBaselineAsync(tenantId, employeeId, prompt.Id, CancellationToken.None);
+            var asset = await service.PublishAssetAsync(tenantId, "Prompt", prompt.Id, "Owner", CancellationToken.None);
+
+            Assert.Equal("Recruitment", prompt.Kind);
+            Assert.Equal(employeeId, baseline.EmployeeId);
+            Assert.Equal(1, asset.Version);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.PublishAssetAsync(tenantId, "Prompt", prompt.Id, "Owner", CancellationToken.None));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Prompt_versions_and_restricted_tools_are_deterministic()
     {
         var path = Path.Combine(Path.GetTempPath(), $"agent-evolution-{Guid.NewGuid():N}.json");

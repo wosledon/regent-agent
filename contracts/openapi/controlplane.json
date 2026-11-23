@@ -3573,6 +3573,64 @@
         }
       }
     },
+    "/v1/agent-evolution/onboarding": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingBaseline"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/assets": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishAssetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicAsset"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/agent-evolution/tool-policies": {
       "post": {
         "tags": [
@@ -7093,6 +7151,18 @@
             "items": {
               "$ref": "#/components/schemas/ToolDisclosurePolicy"
             }
+          },
+          "onboardingBaselines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OnboardingBaseline"
+            }
+          },
+          "publicAssets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicAsset"
+            }
           }
         }
       },
@@ -8830,6 +8900,10 @@
           },
           "content": {
             "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "default": "Operations"
           }
         }
       },
@@ -11846,6 +11920,51 @@
           }
         }
       },
+      "OnboardingBaseline": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "employeeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "promptBundleId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "OnboardingRequest": {
+        "required": [
+          "employeeId",
+          "promptBundleId"
+        ],
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "promptBundleId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "OrgDelegationDto": {
         "required": [
           "id",
@@ -12494,9 +12613,67 @@
           "status": {
             "type": "string"
           },
+          "kind": {
+            "type": "string"
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "PublicAsset": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "assetType": {
+            "type": "string"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "publishedBy": {
+            "type": "string"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "PublishAssetRequest": {
+        "required": [
+          "assetType",
+          "assetId",
+          "publisher"
+        ],
+        "type": "object",
+        "properties": {
+          "assetType": {
+            "type": "string"
+          },
+          "assetId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "publisher": {
+            "type": "string"
           }
         }
       },
