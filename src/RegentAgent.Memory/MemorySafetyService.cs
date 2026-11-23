@@ -9,6 +9,7 @@ public sealed partial class MemorySafetyService(
     JsonDocumentStore<CorrectionTask> corrections,
     JsonDocumentStore<MemoryFinding> findings,
     JsonDocumentStore<MemoryImpactRecord> impacts,
+    JsonDocumentStore<MemoryContextBinding> contexts,
     MemoryIndexService index,
     TimeProvider clock)
 {
@@ -79,6 +80,7 @@ public sealed partial class MemorySafetyService(
         await findings.PutAsync(finding.Id, finding, cancellationToken);
         await claims.PutAsync(claim.Id, claim with { Status = "Quarantined" }, cancellationToken);
         await index.RemoveFromRecallAsync(tenantId, claim.Id, cancellationToken);
+        await InvalidateClaimContextsAsync(tenantId, claim.Id, cancellationToken);
         await EnsureCorrectionTaskAsync(finding, claim, request.ReviewerId, cancellationToken);
         return finding;
     }
@@ -172,6 +174,7 @@ public sealed partial class MemorySafetyService(
         await claims.PutAsync(current.Id, current with { Status = "Superseded" }, cancellationToken);
         await claims.PutAsync(corrected.Id, corrected, cancellationToken);
         await index.ReplaceClaimAsync(tenantId, current.Id, corrected, cancellationToken);
+        await InvalidateClaimContextsAsync(tenantId, current.Id, cancellationToken);
         await corrections.PutAsync(task.Id, task with { Status = "Completed" }, cancellationToken);
         if (task.FindingId is { } findingId)
         {
@@ -252,9 +255,45 @@ public sealed partial class MemorySafetyService(
         (await corrections.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId)
             .OrderByDescending(x => x.CreatedAt).ToArray();
 
+    public async Task<MemoryContextBinding> BindContextAsync(MemoryContextRequest request, string tenantId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.TaskId) || request.ClaimIds.Count == 0)
+            throw new InvalidOperationException("Task and at least one claim are required.");
+        foreach (var claimId in request.ClaimIds.Distinct(StringComparer.Ordinal))
+        {
+            var claim = await claims.GetAsync(claimId, cancellationToken);
+            if (claim is null || claim.TenantId != tenantId) throw new KeyNotFoundException("Claim does not belong to this tenant.");
+        }
+        var binding = new MemoryContextBinding(request.TaskId, tenantId, request.ClaimIds.Distinct(StringComparer.Ordinal).ToArray(),
+            "Active", clock.GetUtcNow());
+        await contexts.PutAsync(request.TaskId, binding, cancellationToken);
+        return binding;
+    }
+
+    public async Task<MemoryContextBinding?> GetContextAsync(string taskId, string tenantId,
+        CancellationToken cancellationToken)
+    {
+        var binding = await contexts.GetAsync(taskId, cancellationToken);
+        return binding is not null && binding.TenantId == tenantId ? binding : null;
+    }
+
+    public async Task<IReadOnlyList<MemoryContextBinding>> ListStaleContextsAsync(string tenantId,
+        CancellationToken cancellationToken) =>
+        (await contexts.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId && x.Status == "Stale").ToArray();
+
+    public async Task InvalidateClaimContextsAsync(string tenantId, string claimId,
+        CancellationToken cancellationToken)
+    {
+        foreach (var binding in (await contexts.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId
+                     && x.Status == "Active" && x.ClaimIds.Contains(claimId, StringComparer.Ordinal)).ToArray())
+            await contexts.PutAsync(binding.TaskId, binding with { Status = "Stale", InvalidatedAt = clock.GetUtcNow() }, cancellationToken);
+    }
+
     public async Task PurgeClaimDataAsync(string tenantId, IReadOnlyList<string> claimIds,
         CancellationToken cancellationToken)
     {
+        foreach (var claimId in claimIds) await InvalidateClaimContextsAsync(tenantId, claimId, cancellationToken);
         foreach (var finding in (await findings.GetAllAsync(cancellationToken))
                      .Where(x => x.TenantId == tenantId && claimIds.Contains(x.ClaimId)).ToArray())
             await findings.DeleteAsync(finding.Id, cancellationToken);
@@ -285,6 +324,7 @@ public sealed partial class MemorySafetyService(
         {
             await claims.PutAsync(claim.Id, claim with { Status = "Quarantined" }, cancellationToken);
             await index.RemoveFromRecallAsync(claim.TenantId, claim.Id, cancellationToken);
+            await InvalidateClaimContextsAsync(claim.TenantId, claim.Id, cancellationToken);
             await EnsureCorrectionTaskAsync(finding, claim, reviewer, cancellationToken);
         }
         return finding;

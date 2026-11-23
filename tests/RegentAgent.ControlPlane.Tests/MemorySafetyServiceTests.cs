@@ -213,6 +213,25 @@ public sealed class MemorySafetyServiceTests
     }
 
     [Fact]
+    public async Task Correction_marks_bound_task_contexts_stale()
+    {
+        using var fixture = new MemoryFixture();
+        var original = await fixture.Memory.CaptureAsync(Tenant, "organization", "Original release fact", "source:fact",
+            0.8, "trusted", "Controller", CancellationToken.None);
+        await fixture.Safety.BindContextAsync(new MemoryContextRequest("task-1", [original.Id]), Tenant, CancellationToken.None);
+        var correction = await fixture.Safety.CreateCorrectionAsync(original.Id, Tenant,
+            new MemoryCorrectionRequest(original.Id, "Corrected release fact", "Evidence updated", "Boss"), CancellationToken.None);
+
+        await fixture.Safety.ApproveCorrectionAsync(correction.Id, Tenant,
+            new MemoryCorrectionApprovalRequest("Boss"), CancellationToken.None);
+        var context = await fixture.Safety.GetContextAsync("task-1", Tenant, CancellationToken.None);
+
+        Assert.Equal("Stale", context!.Status);
+        Assert.NotNull(context.InvalidatedAt);
+        Assert.Single(await fixture.Safety.ListStaleContextsAsync(Tenant, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Cross_tenant_claim_access_is_rejected()
     {
         using var fixture = new MemoryFixture();
@@ -231,6 +250,7 @@ public sealed class MemorySafetyServiceTests
         public JsonDocumentStore<MemoryVectorRecord> Vectors { get; }
         public JsonDocumentStore<MemoryFinding> Findings { get; }
         public JsonDocumentStore<MemoryImpactRecord> Impacts { get; }
+        public JsonDocumentStore<MemoryContextBinding> Contexts { get; }
         public JsonDocumentStore<MemoryGraphNode> Nodes { get; }
         public JsonDocumentStore<MemoryGraphEdge> Edges { get; }
         public MemoryGraphService Graph { get; }
@@ -245,11 +265,12 @@ public sealed class MemorySafetyServiceTests
             Vectors = new JsonDocumentStore<MemoryVectorRecord>(Path.Combine(root, "vectors.json"));
             Findings = new JsonDocumentStore<MemoryFinding>(Path.Combine(root, "findings.json"));
             Impacts = new JsonDocumentStore<MemoryImpactRecord>(Path.Combine(root, "impacts.json"));
+            Contexts = new JsonDocumentStore<MemoryContextBinding>(Path.Combine(root, "contexts.json"));
             Nodes = new JsonDocumentStore<MemoryGraphNode>(Path.Combine(root, "nodes.json"));
             Edges = new JsonDocumentStore<MemoryGraphEdge>(Path.Combine(root, "edges.json"));
             Graph = new MemoryGraphService(Nodes, Edges);
             Index = new MemoryIndexService(Claims, Vectors, Findings, Graph, TimeProvider.System);
-            Safety = new MemorySafetyService(Claims, Corrections, Findings, Impacts, Index, TimeProvider.System);
+            Safety = new MemorySafetyService(Claims, Corrections, Findings, Impacts, Contexts, Index, TimeProvider.System);
             Memory = new MemoryService(Claims, Corrections, Index, Safety);
         }
 

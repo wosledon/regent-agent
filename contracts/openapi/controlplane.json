@@ -2351,6 +2351,86 @@
         }
       }
     },
+    "/v1/memory/contexts": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryContextRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryContextBinding"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/tasks/{taskId}/context": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryContextBinding"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory/contexts/stale": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MemoryContextBinding"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memory/review-queue": {
       "get": {
         "tags": [
@@ -11165,6 +11245,62 @@
               "string"
             ],
             "format": "date-time"
+          }
+        }
+      },
+      "MemoryContextBinding": {
+        "required": [
+          "taskId",
+          "tenantId",
+          "claimIds",
+          "status",
+          "boundAt"
+        ],
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "claimIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string"
+          },
+          "boundAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "invalidatedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          }
+        }
+      },
+      "MemoryContextRequest": {
+        "required": [
+          "taskId",
+          "claimIds"
+        ],
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "claimIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

@@ -78,6 +78,7 @@ builder.Services.AddSingleton(new JsonDocumentStore<CorrectionTask>("data/module
 builder.Services.AddSingleton(new JsonDocumentStore<MemoryVectorRecord>("data/modules/memory-vectors.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<MemoryFinding>("data/modules/memory-findings.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<MemoryImpactRecord>("data/modules/memory-impacts.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<MemoryContextBinding>("data/modules/memory-contexts.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<MemoryGraphNode>("data/modules/memory-graph-nodes.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<MemoryGraphEdge>("data/modules/memory-graph-edges.json"));
 builder.Services.AddSingleton<MemoryGraphService>();
@@ -152,6 +153,7 @@ RegisterTenantStore<CorrectionTask>(builder.Services, "data/modules/corrections.
 RegisterTenantStore<MemoryVectorRecord>(builder.Services, "data/modules/memory-vectors.json");
 RegisterTenantStore<MemoryFinding>(builder.Services, "data/modules/memory-findings.json");
 RegisterTenantStore<MemoryImpactRecord>(builder.Services, "data/modules/memory-impacts.json");
+RegisterTenantStore<MemoryContextBinding>(builder.Services, "data/modules/memory-contexts.json");
 RegisterTenantStore<MemoryGraphNode>(builder.Services, "data/modules/memory-graph-nodes.json");
 RegisterTenantStore<MemoryGraphEdge>(builder.Services, "data/modules/memory-graph-edges.json");
 RegisterTenantStore<KpiSnapshot>(builder.Services, "data/modules/kpis.json");
@@ -1027,6 +1029,17 @@ api.MapGet("/memories/{id}", async (string id, HttpContext context, MemoryServic
         return claim is null ? Results.NotFound() : Results.Ok(claim);
     })
     .Produces<MemoryClaim>().Produces(StatusCodes.Status404NotFound).WithTags("Memory");
+api.MapPost("/memory/contexts", async (MemoryContextRequest request, HttpContext context,
+    MemorySafetyService safety, CancellationToken cancellationToken) =>
+    Results.Ok(await safety.BindContextAsync(request, CurrentTenant(context), cancellationToken)))
+    .Produces<MemoryContextBinding>().WithTags("Memory");
+api.MapGet("/memory/tasks/{taskId}/context", async (string taskId, HttpContext context,
+    MemorySafetyService safety, CancellationToken cancellationToken) =>
+    await safety.GetContextAsync(taskId, CurrentTenant(context), cancellationToken) is { } binding
+        ? Results.Ok(binding) : Results.NotFound()).Produces<MemoryContextBinding>().WithTags("Memory");
+api.MapGet("/memory/contexts/stale", async (HttpContext context, MemorySafetyService safety,
+    CancellationToken cancellationToken) => Results.Ok(await safety.ListStaleContextsAsync(CurrentTenant(context), cancellationToken)))
+    .Produces<IReadOnlyList<MemoryContextBinding>>().WithTags("Memory");
 api.MapGet("/memory/review-queue", async (HttpContext context, MemoryService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListReviewQueueAsync(CurrentTenant(context), cancellationToken)))
     .Produces<IReadOnlyList<MemoryClaim>>().WithTags("Memory");
