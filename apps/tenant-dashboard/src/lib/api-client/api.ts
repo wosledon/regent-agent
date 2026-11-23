@@ -150,6 +150,12 @@ export const api = {
     post<Schema['AcceptanceReport']>(`/v1/projects/${projectId}/delivery/acceptance-reports`, report),
   releaseProject: (projectId: string, version: string, artifactRef: string) =>
     post<Schema['ReleaseRecord']>(`/v1/projects/${projectId}/delivery/releases`, { version, artifactRef }),
+  retestDefect: (projectId: string, defectId: string, passed: boolean, retester: string) =>
+    post<Schema['Defect']>(`/v1/projects/${projectId}/delivery/defects/${defectId}/retest`, { passed, retester }),
+  observeRelease: (projectId: string, releaseId: string, healthy: boolean, metricsJson: string) =>
+    post<Schema['ReleaseRecord']>(`/v1/projects/${projectId}/delivery/releases/${releaseId}/observe`, { healthy, metricsJson }),
+  terminateProject: (projectId: string, retrospective: Schema['Retrospective']) =>
+    post<Schema['Retrospective']>(`/v1/projects/${projectId}/delivery/terminate`, retrospective),
   governance: () => request<Schema['GovernanceState']>('/v1/governance'),
   registerTool: (tool: Schema['ToolManifest']) => post<Schema['ToolManifest']>('/v1/governance/tools', tool),
   admitTool: (id: string, reviewer: string) => post<Schema['ToolAdmissionReview']>(`/v1/governance/tools/${id}/admit`, { reviewer }),

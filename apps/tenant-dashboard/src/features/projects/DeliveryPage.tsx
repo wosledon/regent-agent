@@ -35,6 +35,19 @@ export function DeliveryPage() {
   const [defectSeverity, setDefectSeverity] = useState('P2');
   const [version, setVersion] = useState('v1.0.0');
   const [artifactRef, setArtifactRef] = useState('artifact:release');
+  const [acceptanceRequirement, setAcceptanceRequirement] = useState('');
+  const [acceptanceReviewer, setAcceptanceReviewer] = useState('Independent Reviewer');
+  const [functionalScore, setFunctionalScore] = useState('90');
+  const [usabilityScore, setUsabilityScore] = useState('88');
+  const [designScore, setDesignScore] = useState('85');
+  const [accessibilityScore, setAccessibilityScore] = useState('80');
+  const [observedReleaseId, setObservedReleaseId] = useState('');
+  const [releaseHealthy, setReleaseHealthy] = useState('true');
+  const [metricsJson, setMetricsJson] = useState('{"error_rate":0.01}');
+  const [terminationOutcome, setTerminationOutcome] = useState('');
+  const [whatWorked, setWhatWorked] = useState('');
+  const [whatFailed, setWhatFailed] = useState('');
+  const [lessons, setLessons] = useState('');
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['delivery', projectId] });
 
   const addFinding = useMutation({
@@ -95,6 +108,24 @@ export function DeliveryPage() {
   });
   const release = useMutation({
     mutationFn: () => api.releaseProject(projectId, version, artifactRef), onSuccess: invalidate
+  });
+  const retest = useMutation({ mutationFn: (id: string) => api.retestDefect(projectId, id, true, 'Quality Reviewer'), onSuccess: invalidate });
+  const acceptance = useMutation({
+    mutationFn: () => api.addAcceptanceReport(projectId, {
+      id: crypto.randomUUID(), requirementId: acceptanceRequirement, reviewer: acceptanceReviewer,
+      functionalScore: Number(functionalScore), usabilityScore: Number(usabilityScore),
+      designScore: Number(designScore), accessibilityScore: Number(accessibilityScore),
+      evidence: [{ id: 'acceptance-evidence', kind: 'report', location: 'local' }]
+    }), onSuccess: invalidate
+  });
+  const observe = useMutation({
+    mutationFn: () => api.observeRelease(projectId, observedReleaseId, releaseHealthy === 'true', metricsJson), onSuccess: invalidate
+  });
+  const terminate = useMutation({
+    mutationFn: () => api.terminateProject(projectId, {
+      id: crypto.randomUUID(), outcome: terminationOutcome, whatWorked, whatFailed,
+      lessons: lessons.split('\n').map(value => value.trim()).filter(Boolean)
+    }), onSuccess: invalidate
   });
 
   if (delivery.isLoading) return <LoadingState />;
@@ -169,8 +200,18 @@ export function DeliveryPage() {
         <DataTable rows={state.defects ?? []} getRowId={row => row.id ?? ''} columns={[
           { id: 'title', header: 'Defect', render: row => row.title ?? '' },
           { id: 'severity', header: 'Severity', render: row => row.severity ?? '' },
-          { id: 'status', header: 'Status', render: row => row.status ?? '' }
+          { id: 'status', header: 'Status', render: row => row.status ?? '' },
+          { id: 'actions', header: 'Actions', render: row => <Button tone="neutral" onClick={() => retest.mutate(row.id ?? '')} disabled={row.status === 'Closed'}>Retest</Button> }
         ]} />
+      </Card>
+      <Card title="Independent acceptance">
+        <Select label="Requirement" value={acceptanceRequirement} onChange={setAcceptanceRequirement} options={[{ value: '', label: 'Select requirement' }, ...(state.requirements ?? []).map(item => ({ value: item.id ?? '', label: item.title ?? '' }))]} />
+        <FormField label="Reviewer"><TextInput value={acceptanceReviewer} onChange={setAcceptanceReviewer} /></FormField>
+        <FormField label="Functional score"><TextInput value={functionalScore} onChange={setFunctionalScore} /></FormField>
+        <FormField label="Usability score"><TextInput value={usabilityScore} onChange={setUsabilityScore} /></FormField>
+        <FormField label="Design score"><TextInput value={designScore} onChange={setDesignScore} /></FormField>
+        <FormField label="Accessibility score"><TextInput value={accessibilityScore} onChange={setAccessibilityScore} /></FormField>
+        <Button onClick={() => acceptance.mutate()} disabled={!acceptanceRequirement || !acceptanceReviewer} loading={acceptance.isPending}>Submit acceptance report</Button>
       </Card>
       <Grid columns={2}>
         <Card title="Release">
@@ -178,6 +219,10 @@ export function DeliveryPage() {
           <FormField label="Artifact reference"><TextInput value={artifactRef} onChange={setArtifactRef} /></FormField>
           <Button onClick={() => release.mutate()} disabled={!version || !artifactRef} loading={release.isPending}>Run release gate</Button>
           {(state.releases?.length ?? 0) === 0 ? <EmptyState title="No release yet" description="Accept every requirement and close P0/P1 defects first." /> : null}
+          <Select label="Observe release" value={observedReleaseId} onChange={setObservedReleaseId} options={[{ value: '', label: 'Select release' }, ...(state.releases ?? []).map(item => ({ value: item.id ?? '', label: item.version ?? '' }))]} />
+          <Select label="Health" value={releaseHealthy} onChange={setReleaseHealthy} options={[{ value: 'true', label: 'Healthy' }, { value: 'false', label: 'Degraded' }]} />
+          <FormField label="Metrics JSON"><TextInput value={metricsJson} onChange={setMetricsJson} /></FormField>
+          <Button tone="secondary" onClick={() => observe.mutate()} disabled={!observedReleaseId} loading={observe.isPending}>Record observation</Button>
         </Card>
         <Card title="Evidence summary">
           <Text>{state.findings?.length ?? 0} findings · {state.reviews?.length ?? 0} reviews</Text>
@@ -189,6 +234,13 @@ export function DeliveryPage() {
           ]} />
         </Card>
       </Grid>
+      <Card title="Terminate project">
+        <FormField label="Outcome"><TextInput value={terminationOutcome} onChange={setTerminationOutcome} /></FormField>
+        <FormField label="What worked"><TextInput value={whatWorked} onChange={setWhatWorked} multiline minRows={2} /></FormField>
+        <FormField label="What failed"><TextInput value={whatFailed} onChange={setWhatFailed} multiline minRows={2} /></FormField>
+        <FormField label="Lessons (one per line)"><TextInput value={lessons} onChange={setLessons} multiline minRows={2} /></FormField>
+        <Button tone="danger" onClick={() => terminate.mutate()} disabled={!terminationOutcome || !lessons} loading={terminate.isPending}>Terminate and save retrospective</Button>
+      </Card>
     </Stack>
   );
 }
