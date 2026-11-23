@@ -2014,6 +2014,119 @@
         }
       }
     },
+    "/v1/memory-graph/nodes": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryGraphNode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryGraphNode"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory-graph/edges": {
+      "post": {
+        "tags": [
+          "Memory"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemoryGraphEdge"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryGraphEdge"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/memory-graph/query": {
+      "get": {
+        "tags": [
+          "Memory"
+        ],
+        "parameters": [
+          {
+            "name": "startClaimId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "maxDepth",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          },
+          {
+            "name": "maxNodes",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "pattern": "^-?(?:0|[1-9]\\d*)$",
+              "type": [
+                "integer",
+                "string"
+              ],
+              "format": "int32"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryGraphQueryResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/memories/decay": {
       "post": {
         "tags": [
@@ -2264,6 +2377,35 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ClaimScoreDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/auto-assign": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoAssignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoAssignResult"
                 }
               }
             }
@@ -5661,6 +5803,67 @@
         }
       }
     },
+    "/v1/evaluation/qa/schedules": {
+      "get": {
+        "tags": [
+          "Evaluation QA"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/EvaluationScheduleRecord"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Evaluation QA"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvaluationScheduleRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvaluationScheduleRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/evaluation/qa/schedules/run-due": {
+      "post": {
+        "tags": [
+          "Evaluation QA"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/v1/evaluation/qa/gate": {
       "post": {
         "tags": [
@@ -6312,6 +6515,113 @@
               "null",
               "string"
             ]
+          }
+        }
+      },
+      "AutoAssignCandidate": {
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "currentWip": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "wipLimit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "historySuccess": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "toolFit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "costEfficiency": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "independent": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AutoAssignRequest": {
+        "required": [
+          "taskId",
+          "taskType",
+          "candidates"
+        ],
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskType": {
+            "type": "string"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AutoAssignCandidate"
+            }
+          }
+        }
+      },
+      "AutoAssignResult": {
+        "required": [
+          "assigned",
+          "employeeId",
+          "score",
+          "reason"
+        ],
+        "type": "object",
+        "properties": {
+          "assigned": {
+            "type": "boolean"
+          },
+          "employeeId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "score": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "reason": {
+            "type": "string"
           }
         }
       },
@@ -8730,6 +9040,106 @@
             "items": {
               "$ref": "#/components/schemas/EvaluationQaGate"
             }
+          },
+          "schedules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EvaluationScheduleRecord"
+            }
+          }
+        }
+      },
+      "EvaluationScheduleRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "suiteId": {
+            "type": "string"
+          },
+          "candidateEmployeeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "frequency": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "nextRunAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastRunAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "repeats": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "sampleCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "successes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "baselineSuccesses": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "discordantA": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "discordantB": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "calibrationPassed": {
+            "type": "boolean"
           }
         }
       },
@@ -9457,6 +9867,77 @@
               "string"
             ],
             "format": "double"
+          }
+        }
+      },
+      "MemoryGraphEdge": {
+        "required": [
+          "id",
+          "tenantId",
+          "fromClaimId",
+          "toClaimId",
+          "relation"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "fromClaimId": {
+            "type": "string"
+          },
+          "toClaimId": {
+            "type": "string"
+          },
+          "relation": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryGraphNode": {
+        "required": [
+          "id",
+          "tenantId",
+          "claimId",
+          "label"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "claimId": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "MemoryGraphQueryResult": {
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryGraphNode"
+            }
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MemoryGraphEdge"
+            }
           }
         }
       },
@@ -11165,6 +11646,38 @@
           }
         }
       },
+      "TaskAssignmentRecord": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskType": {
+            "type": "string"
+          },
+          "employeeId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "score": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "assignedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "TaskCheckpoint": {
         "required": [
           "leaseToken",
@@ -11219,6 +11732,12 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CapabilityAssessment"
+            }
+          },
+          "assignments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskAssignmentRecord"
             }
           },
           "ledger": {

@@ -110,6 +110,59 @@ public sealed class EvaluationQaService(JsonDocumentStore<EvaluationQaState> sto
         return (true, gate);
     }, cancellationToken);
 
+    public Task<EvaluationScheduleRecord> SaveScheduleAsync(Guid tenantId, EvaluationScheduleRecord schedule,
+        CancellationToken cancellationToken)
+    {
+        if (schedule.Frequency is not ("Daily" or "Weekly" or "Monthly")) throw new InvalidOperationException("Invalid evaluation frequency.");
+        schedule.TenantId = tenantId;
+        schedule.NextRunAt = NextRun(schedule.Frequency, DateTimeOffset.UtcNow);
+        return MutateAsync(tenantId, state =>
+        {
+            state.Schedules.RemoveAll(x => x.Id == schedule.Id);
+            state.Schedules.Add(schedule);
+            return (true, schedule);
+        }, cancellationToken);
+    }
+
+    public async Task<int> RunDueAsync(CancellationToken cancellationToken)
+    {
+        var states = await store.GetAllAsync(cancellationToken);
+        var executed = 0;
+        foreach (var state in states)
+        {
+            var due = state.Schedules.Where(x => x.Enabled && x.NextRunAt <= DateTimeOffset.UtcNow).ToArray();
+            foreach (var schedule in due)
+            {
+                try
+                {
+                    await EvaluateGateAsync(state.TenantId, schedule.SuiteId, schedule.CandidateEmployeeId,
+                        schedule.Repeats, schedule.SampleCount, schedule.Successes, schedule.BaselineSuccesses,
+                        schedule.DiscordantA, schedule.DiscordantB, schedule.CalibrationPassed, cancellationToken);
+                    schedule.LastRunAt = DateTimeOffset.UtcNow;
+                    schedule.LastError = null;
+                }
+                catch (Exception exception)
+                {
+                    schedule.LastError = exception.Message;
+                }
+                schedule.NextRunAt = NextRun(schedule.Frequency, DateTimeOffset.UtcNow);
+                await MutateAsync(state.TenantId, current =>
+                {
+                    current.Schedules.RemoveAll(x => x.Id == schedule.Id);
+                    current.Schedules.Add(schedule);
+                    return (true, true);
+                }, cancellationToken);
+                executed++;
+            }
+        }
+        return executed;
+    }
+
+    private static DateTimeOffset NextRun(string frequency, DateTimeOffset now) => frequency switch
+    {
+        "Daily" => now.AddDays(1), "Weekly" => now.AddDays(7), "Monthly" => now.AddMonths(1), _ => now
+    };
+
     private async Task<T> MutateAsync<T>(Guid tenantId, Func<EvaluationQaState, (bool Changed, T Result)> mutation,
         CancellationToken cancellationToken)
     {

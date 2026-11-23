@@ -54,6 +54,26 @@ public sealed class EvaluationQaGate
     public string Reason { get; set; } = string.Empty;
 }
 
+public sealed class EvaluationScheduleRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public string SuiteId { get; set; } = string.Empty;
+    public Guid CandidateEmployeeId { get; set; }
+    public string Frequency { get; set; } = "Weekly";
+    public bool Enabled { get; set; } = true;
+    public DateTimeOffset NextRunAt { get; set; }
+    public DateTimeOffset? LastRunAt { get; set; }
+    public string? LastError { get; set; }
+    public int Repeats { get; set; } = 3;
+    public int SampleCount { get; set; } = 100;
+    public int Successes { get; set; } = 92;
+    public int BaselineSuccesses { get; set; } = 85;
+    public int DiscordantA { get; set; } = 10;
+    public int DiscordantB { get; set; } = 2;
+    public bool CalibrationPassed { get; set; } = true;
+}
+
 public sealed class EvaluationQaState
 {
     public Guid TenantId { get; set; }
@@ -61,4 +81,5 @@ public sealed class EvaluationQaState
     public List<JudgeProfile> Judges { get; set; } = [];
     public List<CalibrationReport> Calibrations { get; set; } = [];
     public List<EvaluationQaGate> Gates { get; set; } = [];
+    public List<EvaluationScheduleRecord> Schedules { get; set; } = [];
 }

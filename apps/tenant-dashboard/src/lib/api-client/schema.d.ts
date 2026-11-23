@@ -2741,6 +2741,123 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/memory-graph/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryGraphNode"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryGraphNode"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory-graph/edges": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MemoryGraphEdge"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryGraphEdge"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/memory-graph/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    startClaimId: string;
+                    maxDepth: number | string;
+                    maxNodes: number | string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemoryGraphQueryResult"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/memories/decay": {
         parameters: {
             query?: never;
@@ -3091,6 +3208,45 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["ClaimScoreDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/task-governance/auto-assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AutoAssignRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AutoAssignResult"];
                     };
                 };
             };
@@ -7220,6 +7376,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/evaluation/qa/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EvaluationScheduleRecord"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["EvaluationScheduleRecord"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EvaluationScheduleRecord"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/evaluation/qa/schedules/run-due": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/evaluation/qa/gate": {
         parameters: {
             query?: never;
@@ -7510,6 +7757,35 @@ export interface components {
             /** Format: int64 */
             brokenAtSeq: null | number | string;
             message: null | string;
+        };
+        AutoAssignCandidate: {
+            /** Format: uuid */
+            employeeId?: string;
+            /** Format: int32 */
+            currentWip?: number | string;
+            /** Format: int32 */
+            wipLimit?: number | string;
+            /** Format: double */
+            historySuccess?: number | string;
+            /** Format: double */
+            toolFit?: number | string;
+            /** Format: double */
+            costEfficiency?: number | string;
+            independent?: boolean;
+        };
+        AutoAssignRequest: {
+            /** Format: uuid */
+            taskId: string;
+            taskType: string;
+            candidates: components["schemas"]["AutoAssignCandidate"][];
+        };
+        AutoAssignResult: {
+            assigned: boolean;
+            /** Format: uuid */
+            employeeId: null | string;
+            /** Format: double */
+            score: number | string;
+            reason: string;
         };
         BackupRequest: {
             profile: string;
@@ -8186,6 +8462,36 @@ export interface components {
             judges?: components["schemas"]["JudgeProfile"][];
             calibrations?: components["schemas"]["CalibrationReport"][];
             gates?: components["schemas"]["EvaluationQaGate"][];
+            schedules?: components["schemas"]["EvaluationScheduleRecord"][];
+        };
+        EvaluationScheduleRecord: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            tenantId?: string;
+            suiteId?: string;
+            /** Format: uuid */
+            candidateEmployeeId?: string;
+            frequency?: string;
+            enabled?: boolean;
+            /** Format: date-time */
+            nextRunAt?: string;
+            /** Format: date-time */
+            lastRunAt?: null | string;
+            lastError?: null | string;
+            /** Format: int32 */
+            repeats?: number | string;
+            /** Format: int32 */
+            sampleCount?: number | string;
+            /** Format: int32 */
+            successes?: number | string;
+            /** Format: int32 */
+            baselineSuccesses?: number | string;
+            /** Format: int32 */
+            discordantA?: number | string;
+            /** Format: int32 */
+            discordantB?: number | string;
+            calibrationPassed?: boolean;
         };
         EvidenceRef: {
             id: string;
@@ -8401,6 +8707,23 @@ export interface components {
             discordantB: number | string;
             /** Format: double */
             pValue: number | string;
+        };
+        MemoryGraphEdge: {
+            id: string;
+            tenantId: string;
+            fromClaimId: string;
+            toClaimId: string;
+            relation: string;
+        };
+        MemoryGraphNode: {
+            id: string;
+            tenantId: string;
+            claimId: string;
+            label: string;
+        };
+        MemoryGraphQueryResult: {
+            nodes: components["schemas"]["MemoryGraphNode"][];
+            edges: components["schemas"]["MemoryGraphEdge"][];
         };
         ModelCatalogEntry: {
             provider?: string;
@@ -8901,6 +9224,19 @@ export interface components {
             /** Format: uuid */
             tenantId: string;
         };
+        TaskAssignmentRecord: {
+            /** Format: uuid */
+            id?: string;
+            /** Format: uuid */
+            taskId?: string;
+            taskType?: string;
+            /** Format: uuid */
+            employeeId?: string;
+            /** Format: double */
+            score?: number | string;
+            /** Format: date-time */
+            assignedAt?: string;
+        };
         TaskCheckpoint: {
             leaseToken: string;
             checkpointJson: string;
@@ -8914,6 +9250,7 @@ export interface components {
         TaskGovernanceState: {
             taskTypes?: components["schemas"]["TaskTypeDefinition"][];
             capabilities?: components["schemas"]["CapabilityAssessment"][];
+            assignments?: components["schemas"]["TaskAssignmentRecord"][];
             ledger?: components["schemas"]["WorkLedgerEntry"][];
             reviews?: components["schemas"]["ReviewTaskRecord"][];
             debates?: components["schemas"]["DebateTaskRecord"][];

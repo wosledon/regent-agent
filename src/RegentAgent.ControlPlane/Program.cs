@@ -172,6 +172,7 @@ builder.Services.AddScoped<IdempotencyService>();
 builder.Services.AddScoped<OutboxService>();
 builder.Services.AddScoped<SchemaVersionService>();
 builder.Services.AddHostedService<OutboxWorker>();
+builder.Services.AddHostedService<EvaluationRegressionWorker>();
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
@@ -1144,6 +1145,14 @@ evaluationQa.MapPost("/judges/assign", async (JudgeAssignmentRequest request, Ht
 evaluationQa.MapPost("/calibration", async (CalibrationRequest request, HttpContext context, EvaluationQaService service,
     CancellationToken cancellationToken) => Results.Ok(await service.CalibrateAsync(Guid.Parse(CurrentTenant(context)),
         request.SuiteId, request.SuiteSize, request.Samples, cancellationToken))).Produces<CalibrationReport>().WithTags("Evaluation QA");
+evaluationQa.MapGet("/schedules", async (HttpContext context, EvaluationQaService service,
+    CancellationToken cancellationToken) => Results.Ok((await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)).Schedules))
+    .Produces<IReadOnlyList<EvaluationScheduleRecord>>().WithTags("Evaluation QA");
+evaluationQa.MapPost("/schedules", async (EvaluationScheduleRecord schedule, HttpContext context,
+    EvaluationQaService service, CancellationToken cancellationToken) => Results.Ok(await service.SaveScheduleAsync(
+        Guid.Parse(CurrentTenant(context)), schedule, cancellationToken))).Produces<EvaluationScheduleRecord>().WithTags("Evaluation QA");
+evaluationQa.MapPost("/schedules/run-due", async (EvaluationQaService service, CancellationToken cancellationToken) =>
+    Results.Ok(new { executed = await service.RunDueAsync(cancellationToken) })).WithTags("Evaluation QA");
 evaluationQa.MapPost("/gate", async (EvaluationGateRequest request, HttpContext context, EvaluationQaService service,
     CancellationToken cancellationToken) => Results.Ok(await service.EvaluateGateAsync(Guid.Parse(CurrentTenant(context)),
         request.SuiteId, request.CandidateEmployeeId, request.Repeats, request.SampleCount, request.Successes,
