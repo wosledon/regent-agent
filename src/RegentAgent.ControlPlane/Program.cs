@@ -23,6 +23,7 @@ using RegentAgent.Workflows;
 using RegentAgent.Contracts.Agents;
 using RegentAgent.Contracts.Artifacts;
 using RegentAgent.Contracts.Dashboard;
+using RegentAgent.Contracts.Enums;
 using RegentAgent.Contracts.Evaluation;
 using RegentAgent.Contracts.Governance;
 using RegentAgent.Contracts.Identity;
@@ -77,6 +78,8 @@ builder.Services.AddSingleton(sp => new PerformanceService(
     new JsonDocumentStore<PerformanceReview>("data/modules/reviews.json")));
 builder.Services.AddSingleton(sp => new ImprovementService(
     new JsonDocumentStore<ImprovementProposal>("data/modules/improvements.json")));
+builder.Services.AddSingleton(sp => new PerformanceActionService(
+    new JsonDocumentStore<PerformanceActionRecord>("data/modules/performance-actions.json")));
 builder.Services.AddSingleton(sp => new AgentEvolutionService(
     new JsonDocumentStore<AgentEvolutionState>("data/modules/agent-evolution.json"), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new AgentRuntimeService(
@@ -417,6 +420,29 @@ api.MapPost("/candidates/{candidateId:guid}/hire", async (Guid candidateId, Hire
     OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.HireCandidateAsync(candidateId, request.ApprovalId, cancellationToken)))
     .Produces<EmployeeSummary>().WithTags("Recruitment");
+api.MapGet("/recruitment/interviews", async (Guid? candidateId, OrganizationService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ListInterviewStagesAsync(candidateId, cancellationToken)))
+    .Produces<IReadOnlyList<InterviewStageDto>>().WithTags("Recruitment");
+api.MapPost("/recruitment/interviews", async (InterviewStageDto stage, OrganizationService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.RecordInterviewStageAsync(stage, cancellationToken)))
+    .Produces<InterviewStageDto>().WithTags("Recruitment");
+api.MapGet("/recruitment/appeals", async (OrganizationService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ListCandidateAppealsAsync(cancellationToken)))
+    .Produces<IReadOnlyList<CandidateAppealDto>>().WithTags("Recruitment");
+api.MapPost("/recruitment/appeals", async (CandidateAppealDto appeal, OrganizationService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.AppealCandidateAsync(appeal, cancellationToken)))
+    .Produces<CandidateAppealDto>().WithTags("Recruitment");
+api.MapPost("/recruitment/appeals/{appealId:guid}/resolve", async (Guid appealId, ResolveAppealRequest request,
+    OrganizationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ResolveCandidateAppealAsync(appealId, request.Resolution, cancellationToken)))
+    .Produces<CandidateAppealDto>().WithTags("Recruitment");
+api.MapPost("/recruitment/fairness-audits", async (FairnessAuditRequest request, OrganizationService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.RunFairnessAuditAsync(request.PositionId,
+        request.Period, request.SampleSize, request.SelectionRateRatio, cancellationToken)))
+    .Produces<FairnessAuditDto>().WithTags("Recruitment");
+api.MapGet("/recruitment/fairness-audits", async (OrganizationService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ListFairnessAuditsAsync(cancellationToken)))
+    .Produces<IReadOnlyList<FairnessAuditDto>>().WithTags("Recruitment");
 
 api.MapGet("/dashboard/summary", async (DashboardService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetAsync(cancellationToken)))
@@ -504,6 +530,14 @@ delivery.MapPost("/releases", async (Guid projectId, ReleaseRequest request, Htt
     DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReleaseAsync(Guid.Parse(CurrentTenant(context)), projectId, request.Version,
         request.ArtifactRef, cancellationToken))).Produces<ReleaseRecord>().WithTags("Delivery");
+delivery.MapPost("/releases/{releaseId:guid}/observe", async (Guid projectId, Guid releaseId, ObserveReleaseRequest request,
+    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ObserveReleaseAsync(Guid.Parse(CurrentTenant(context)), projectId, releaseId,
+        request.Healthy, request.MetricsJson, cancellationToken))).Produces<ReleaseRecord>().WithTags("Delivery");
+delivery.MapPost("/terminate", async (Guid projectId, Retrospective retrospective, HttpContext context,
+    DeliveryService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.TerminateProjectAsync(Guid.Parse(CurrentTenant(context)), projectId, retrospective, cancellationToken)))
+    .Produces<Retrospective>().WithTags("Delivery");
 delivery.MapPost("/releases/{releaseId:guid}/rollback", async (Guid projectId, Guid releaseId,
     RollbackRequest request, HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RollbackAsync(Guid.Parse(CurrentTenant(context)), projectId, releaseId,
@@ -921,6 +955,27 @@ api.MapPost("/performance-reviews", async (CreateReviewRequest request, HttpCont
         request.EmployeeId, CurrentTenant(context), request.Conclusion, request.EvidenceJson, cancellationToken)))
     .WithTags("Performance");
 
+api.MapGet("/performance-actions", async (HttpContext context, PerformanceActionService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken))).WithTags("Performance");
+api.MapPost("/performance-actions", async (PerformActionRequest request, HttpContext context,
+    PerformanceActionService service, RegentDbContext db, CancellationToken cancellationToken) =>
+{
+    if (request.ActionType == "Terminate")
+    {
+        var tenantId = Guid.Parse(CurrentTenant(context));
+        var approvalId = Guid.TryParse(request.ApprovalId, out var parsedApprovalId) ? parsedApprovalId : Guid.Empty;
+        var approved = await db.Approvals.AnyAsync(x => x.TenantId == tenantId
+            && x.Id == approvalId && x.State == ApprovalState.Approved
+            && x.ActionType == "employee.terminate", cancellationToken);
+        if (!approved) throw new InvalidOperationException("Human Boss approval is required for termination.");
+    }
+    return Results.Ok(await service.PerformAsync(CurrentTenant(context), request.EmployeeId, request.ActionType,
+        request.ApprovalId, request.Reason, cancellationToken));
+}).WithTags("Performance");
+api.MapPost("/performance-actions/{id}/appeal", async (string id, AppealActionRequest request,
+    HttpContext context, PerformanceActionService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.AppealAsync(id, CurrentTenant(context), request.Reason, cancellationToken))).WithTags("Performance");
+
 api.MapGet("/communication/routes", (CommunicationRouter router) =>
 {
     var nodes = new[]
@@ -1105,3 +1160,8 @@ public sealed record ClaimScoreRequest(Guid EmployeeId, string TaskType, int Cur
     decimal HistorySuccess, decimal ToolFit, decimal CostEfficiency, bool Independent);
 public sealed record ApproveReviewRequest(string Approver);
 public sealed record DecideDebateRequest(string Decision);
+public sealed record ResolveAppealRequest(string Resolution);
+public sealed record FairnessAuditRequest(Guid PositionId, string Period, int SampleSize, decimal SelectionRateRatio);
+public sealed record ObserveReleaseRequest(bool Healthy, string MetricsJson);
+public sealed record PerformActionRequest(string EmployeeId, string ActionType, string? ApprovalId, string Reason);
+public sealed record AppealActionRequest(string Reason);

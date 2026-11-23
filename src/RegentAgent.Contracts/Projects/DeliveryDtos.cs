@@ -121,6 +121,7 @@ public sealed class AcceptanceReport
     public Guid ProjectId { get; set; }
     public Guid RequirementId { get; set; }
     public string Reviewer { get; set; } = string.Empty;
+    public string? AuthorEmployeeId { get; set; }
     public int FunctionalScore { get; set; }
     public int UsabilityScore { get; set; }
     public int DesignScore { get; set; }
@@ -137,6 +138,8 @@ public sealed class ReleaseRecord
     public string Version { get; set; } = string.Empty;
     public string ArtifactRef { get; set; } = string.Empty;
     public string Status { get; set; } = "Released";
+    public string ObservationStatus { get; set; } = "Observing";
+    public string MetricsJson { get; set; } = "{}";
     public string? RolledBackTo { get; set; }
     public DateTimeOffset ReleasedAt { get; set; }
 }
@@ -170,6 +173,7 @@ public sealed class ProjectDeliveryState
 {
     public Guid TenantId { get; set; }
     public Guid ProjectId { get; set; }
+    public string ProjectStatus { get; set; } = "Active";
     public List<ResearchFinding> Findings { get; set; } = [];
     public List<ProductBrief> Briefs { get; set; } = [];
     public List<GoNoGoDecision> Decisions { get; set; } = [];

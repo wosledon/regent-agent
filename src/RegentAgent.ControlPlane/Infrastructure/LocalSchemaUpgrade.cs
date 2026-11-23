@@ -44,6 +44,23 @@ public static class LocalSchemaUpgrade
                 AssessmentJson TEXT NOT NULL, FairnessJson TEXT NOT NULL, CreatedAt TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS IX_Candidates_TenantId_PositionId_Status ON Candidates (TenantId, PositionId, Status);
+            CREATE TABLE IF NOT EXISTS InterviewStages (
+                Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL, CandidateId TEXT NOT NULL,
+                Stage TEXT NOT NULL, Status TEXT NOT NULL, Score REAL NOT NULL,
+                EvidenceJson TEXT NOT NULL, CreatedAt TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_InterviewStages_TenantId_CandidateId_Stage ON InterviewStages (TenantId, CandidateId, Stage);
+            CREATE TABLE IF NOT EXISTS CandidateAppeals (
+                Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL, CandidateId TEXT NOT NULL,
+                Reason TEXT NOT NULL, Status TEXT NOT NULL, Resolution TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_CandidateAppeals_TenantId_CandidateId_Status ON CandidateAppeals (TenantId, CandidateId, Status);
+            CREATE TABLE IF NOT EXISTS FairnessAudits (
+                Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL, PositionId TEXT NOT NULL,
+                Period TEXT NOT NULL, SampleSize INTEGER NOT NULL, SelectionRateRatio REAL NOT NULL,
+                Status TEXT NOT NULL, DetailsJson TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_FairnessAudits_TenantId_PositionId_Period ON FairnessAudits (TenantId, PositionId, Period);
             CREATE TABLE IF NOT EXISTS AuditCheckpoints (
                 Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL,
                 ThroughSeq INTEGER NOT NULL, MerkleRoot TEXT NOT NULL,

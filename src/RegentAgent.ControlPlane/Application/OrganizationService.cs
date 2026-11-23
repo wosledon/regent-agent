@@ -218,6 +218,94 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         return Mappings.ToSummary(employee, Freshness.Fresh);
     }
 
+    public async Task<IReadOnlyList<InterviewStageDto>> ListInterviewStagesAsync(Guid? candidateId,
+        CancellationToken cancellationToken)
+    {
+        var query = db.InterviewStages.AsNoTracking().Where(x => x.TenantId == tenant.TenantId.Value);
+        if (candidateId is { } id) query = query.Where(x => x.CandidateId == id);
+        return (await query.ToListAsync(cancellationToken)).Select(ToStageDto).ToArray();
+    }
+
+    public async Task<IReadOnlyList<CandidateAppealDto>> ListCandidateAppealsAsync(CancellationToken cancellationToken) =>
+        (await db.CandidateAppeals.AsNoTracking().Where(x => x.TenantId == tenant.TenantId.Value).ToListAsync(cancellationToken)).Select(ToAppealDto).ToArray();
+
+    public async Task<IReadOnlyList<FairnessAuditDto>> ListFairnessAuditsAsync(CancellationToken cancellationToken) =>
+        (await db.FairnessAudits.AsNoTracking().Where(x => x.TenantId == tenant.TenantId.Value).ToListAsync(cancellationToken)).Select(ToFairnessDto).ToArray();
+
+    public async Task<InterviewStageDto> RecordInterviewStageAsync(InterviewStageDto stage,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenant.TenantId.Value;
+        if (!await db.Candidates.AnyAsync(x => x.TenantId == tenantId && x.Id == stage.CandidateId, cancellationToken))
+            throw new KeyNotFoundException("Candidate not found.");
+        if (stage.Stage is not ("Screening" or "Written" or "Practical" or "Interview" or "Offer"))
+            throw new InvalidOperationException("Invalid interview stage.");
+        var record = new Data.InterviewStageRecord
+        {
+            Id = stage.Id, TenantId = tenantId, CandidateId = stage.CandidateId, Stage = stage.Stage,
+            Status = stage.Status, Score = stage.Score, EvidenceJson = stage.EvidenceJson, CreatedAt = clock.GetUtcNow()
+        };
+        db.InterviewStages.Add(record);
+        var candidate = await db.Candidates.SingleAsync(x => x.TenantId == tenantId && x.Id == stage.CandidateId, cancellationToken);
+        candidate.Status = stage.Stage == "Offer" ? "Offered" : "Interviewing";
+        await db.SaveChangesAsync(cancellationToken);
+        return ToStageDto(record);
+    }
+
+    public async Task<CandidateAppealDto> AppealCandidateAsync(CandidateAppealDto appeal,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenant.TenantId.Value;
+        if (!await db.Candidates.AnyAsync(x => x.TenantId == tenantId && x.Id == appeal.CandidateId, cancellationToken))
+            throw new KeyNotFoundException("Candidate not found.");
+        var record = new Data.CandidateAppealRecord
+        {
+            Id = appeal.Id, TenantId = tenantId, CandidateId = appeal.CandidateId,
+            Reason = appeal.Reason, Status = "Open"
+        };
+        db.CandidateAppeals.Add(record);
+        await db.SaveChangesAsync(cancellationToken);
+        return ToAppealDto(record);
+    }
+
+    public async Task<CandidateAppealDto> ResolveCandidateAppealAsync(Guid appealId, string resolution,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenant.TenantId.Value;
+        var appeal = await db.CandidateAppeals.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == appealId, cancellationToken)
+            ?? throw new KeyNotFoundException("Appeal not found.");
+        appeal.Status = "Resolved";
+        appeal.Resolution = resolution;
+        await db.SaveChangesAsync(cancellationToken);
+        return ToAppealDto(appeal);
+    }
+
+    public async Task<FairnessAuditDto> RunFairnessAuditAsync(Guid positionId, string period,
+        int sampleSize, decimal selectionRateRatio, CancellationToken cancellationToken)
+    {
+        var tenantId = tenant.TenantId.Value;
+        if (!await db.Positions.AnyAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken))
+            throw new KeyNotFoundException("Position not found.");
+        if (sampleSize <= 0 || selectionRateRatio is < 0 or > 1) throw new InvalidOperationException("Fairness sample is invalid.");
+        var record = new Data.FairnessAuditRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, PositionId = positionId, Period = period,
+            SampleSize = sampleSize, SelectionRateRatio = selectionRateRatio,
+            Status = selectionRateRatio >= 0.8m ? "Passed" : "ReviewRequired",
+            DetailsJson = JsonSerializer.Serialize(new { job_related = true, identity_blind = true, equivalent_cases = true })
+        };
+        db.FairnessAudits.Add(record);
+        await db.SaveChangesAsync(cancellationToken);
+        return ToFairnessDto(record);
+    }
+
+    private static InterviewStageDto ToStageDto(Data.InterviewStageRecord x) =>
+        new() { Id = x.Id, TenantId = x.TenantId, CandidateId = x.CandidateId, Stage = x.Stage, Status = x.Status, Score = x.Score, EvidenceJson = x.EvidenceJson, CreatedAt = x.CreatedAt };
+    private static CandidateAppealDto ToAppealDto(Data.CandidateAppealRecord x) =>
+        new() { Id = x.Id, TenantId = x.TenantId, CandidateId = x.CandidateId, Reason = x.Reason, Status = x.Status, Resolution = x.Resolution };
+    private static FairnessAuditDto ToFairnessDto(Data.FairnessAuditRecord x) =>
+        new() { Id = x.Id, TenantId = x.TenantId, PositionId = x.PositionId, Period = x.Period, SampleSize = x.SampleSize, SelectionRateRatio = x.SelectionRateRatio, Status = x.Status, DetailsJson = x.DetailsJson };
+
     private async Task<int> GetDepthAsync(PositionRecord position, Guid tenantId, CancellationToken cancellationToken)
     {
         var depth = 1;

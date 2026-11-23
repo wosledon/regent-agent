@@ -170,6 +170,7 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
         AcceptanceReport report, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
         {
             var requirement = Find(state.Requirements, tenantId, report.RequirementId);
+            if (report.AuthorEmployeeId == report.Reviewer) throw new InvalidOperationException("Author cannot perform independent acceptance.");
             report.TenantId = tenantId;
             report.ProjectId = projectId;
             state.AcceptanceReports.Add(report);
@@ -193,6 +194,28 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
             state.Releases.Add(record);
             return (true, record);
         }, cancellationToken);
+
+    public Task<ReleaseRecord> ObserveReleaseAsync(Guid tenantId, Guid projectId, Guid releaseId,
+        bool healthy, string metricsJson, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+    {
+        var release = Find(state.Releases, tenantId, releaseId);
+        release.ObservationStatus = healthy ? "Healthy" : "Degraded";
+        release.MetricsJson = metricsJson;
+        release.Status = healthy ? "Released" : "RollbackRecommended";
+        return (true, release);
+    }, cancellationToken);
+
+    public Task<Retrospective> TerminateProjectAsync(Guid tenantId, Guid projectId, Retrospective retrospective,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+    {
+        if (string.IsNullOrWhiteSpace(retrospective.Outcome) || retrospective.Lessons.Count == 0)
+            throw new InvalidOperationException("Termination requires outcome and lessons.");
+        retrospective.TenantId = tenantId;
+        retrospective.ProjectId = projectId;
+        state.ProjectStatus = "Cancelled";
+        state.Retrospectives.Add(retrospective);
+        return (true, retrospective);
+    }, cancellationToken);
 
     public Task<ReleaseRecord> RollbackAsync(Guid tenantId, Guid projectId, Guid releaseId,
         string targetVersion, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>

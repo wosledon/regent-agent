@@ -13,6 +13,9 @@ public sealed class RegentDbContext(DbContextOptions<RegentDbContext> options) :
     public DbSet<EmploymentPeriodRecord> EmploymentPeriods => Set<EmploymentPeriodRecord>();
     public DbSet<OrgDelegationRecord> OrgDelegations => Set<OrgDelegationRecord>();
     public DbSet<CandidateRecord> Candidates => Set<CandidateRecord>();
+    public DbSet<InterviewStageRecord> InterviewStages => Set<InterviewStageRecord>();
+    public DbSet<CandidateAppealRecord> CandidateAppeals => Set<CandidateAppealRecord>();
+    public DbSet<FairnessAuditRecord> FairnessAudits => Set<FairnessAuditRecord>();
     public DbSet<EmployeeRecord> Employees => Set<EmployeeRecord>();
     public DbSet<ProjectRecord> Projects => Set<ProjectRecord>();
     public DbSet<MilestoneRecord> Milestones => Set<MilestoneRecord>();
@@ -59,6 +62,19 @@ public sealed class RegentDbContext(DbContextOptions<RegentDbContext> options) :
         modelBuilder.Entity<CandidateRecord>(entity =>
         {
             entity.HasIndex(x => new { x.TenantId, x.PositionId, x.Status });
+        });
+
+        modelBuilder.Entity<InterviewStageRecord>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.CandidateId, x.Stage });
+        });
+        modelBuilder.Entity<CandidateAppealRecord>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.CandidateId, x.Status });
+        });
+        modelBuilder.Entity<FairnessAuditRecord>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.PositionId, x.Period });
         });
 
         modelBuilder.Entity<EmployeeRecord>(entity =>

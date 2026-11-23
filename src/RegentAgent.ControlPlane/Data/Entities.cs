@@ -87,6 +87,40 @@ public sealed class CandidateRecord
     public DateTimeOffset CreatedAt { get; set; }
 }
 
+public sealed class InterviewStageRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid CandidateId { get; set; }
+    public string Stage { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public decimal Score { get; set; }
+    public string EvidenceJson { get; set; } = "{}";
+    public DateTimeOffset CreatedAt { get; set; }
+}
+
+public sealed class CandidateAppealRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid CandidateId { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Resolution { get; set; }
+}
+
+public sealed class FairnessAuditRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid PositionId { get; set; }
+    public string Period { get; set; } = string.Empty;
+    public int SampleSize { get; set; }
+    public decimal SelectionRateRatio { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string DetailsJson { get; set; } = "{}";
+}
+
 public sealed class EmployeeRecord
 {
     public Guid Id { get; set; }
