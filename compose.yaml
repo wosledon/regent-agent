@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:17-alpine
+    profiles: ["postgres"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-regent}
       POSTGRES_USER: ${POSTGRES_USER:-regent}
@@ -13,6 +14,27 @@ services:
       timeout: 3s
       retries: 20
 
+  rustfs:
+    image: rustfs/rustfs:1.0.0
+    profiles: ["rustfs"]
+    environment:
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:-regent}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:-regent_dev_only}
+      RUSTFS_VOLUMES: /data
+    volumes:
+      - rustfs-data:/data
+    ports:
+      - "9000:9000"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.120.0
+    profiles: ["observability"]
+    command: ["--config=/etc/otelcol-contrib/config.yaml"]
+    volumes:
+      - ./deploy/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - "4317:4317"
+
   controlplane:
     build:
       context: .
@@ -23,16 +45,22 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_HTTP_PORTS: "8080"
-      Storage__Provider: "Postgres"
+      Storage__Provider: "${Storage__Provider:-Sqlite}"
       Storage__UseInMemory: "false"
       ConnectionStrings__Postgres: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-regent};Username=${POSTGRES_USER:-regent};Password=${POSTGRES_PASSWORD:-regent_dev_only}"
+      Storage__ObjectProvider: "${Storage__ObjectProvider:-Local}"
+      Storage__S3__ServiceUrl: "${Storage__S3__ServiceUrl:-}"
+      Storage__S3__Region: "${Storage__S3__Region:-us-east-1}"
+      Storage__S3__Bucket: "${Storage__S3__Bucket:-}"
+      Storage__S3__AccessKey: "${Storage__S3__AccessKey:-}"
+      Storage__S3__SecretKey: "${Storage__S3__SecretKey:-}"
+      Audit__AnchorProvider: "${Audit__AnchorProvider:-Local}"
+      Observability__Profile: "${Observability__Profile:-local}"
+      Observability__OtlpEndpoint: "${Observability__OtlpEndpoint:-http://otel-collector:4317}"
       Frontend__Origins__0: "http://localhost:5173"
       Frontend__Origins__1: "http://localhost:4173"
     ports:
       - "5080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
 
   gateway:
     build:
@@ -44,6 +72,11 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_HTTP_PORTS: "8080"
+      Gateway__ProviderMode: "${Gateway__ProviderMode:-local}"
+      Gateway__KeyVault__Provider: "${Gateway__KeyVault__Provider:-local}"
+      Gateway__KeyVault__ConnectionString: "${Gateway__KeyVault__ConnectionString:-}"
+      Observability__Profile: "${Observability__Profile:-local}"
+      Observability__OtlpEndpoint: "${Observability__OtlpEndpoint:-http://otel-collector:4317}"
     ports:
       - "5081:8080"
     depends_on:
@@ -59,6 +92,8 @@ services:
     environment:
       ControlPlane__BaseUrl: "http://controlplane:8080"
       Gateway__BaseUrl: "http://gateway:8080"
+      Observability__Profile: "${Observability__Profile:-local}"
+      Observability__OtlpEndpoint: "${Observability__OtlpEndpoint:-http://otel-collector:4317}"
     depends_on:
       - controlplane
       - gateway
@@ -73,10 +108,10 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_HTTP_PORTS: "8080"
+      Observability__Profile: "${Observability__Profile:-local}"
+      Observability__OtlpEndpoint: "${Observability__OtlpEndpoint:-http://otel-collector:4317}"
     ports:
       - "5082:8080"
-    depends_on:
-      - postgres
 
   tenant-dashboard:
     build:
@@ -104,3 +139,4 @@ services:
 
 volumes:
   postgres-data:
+  rustfs-data:

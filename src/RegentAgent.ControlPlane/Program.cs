@@ -222,18 +222,22 @@ builder.Services.AddHostedService<DataLifecycleWorker>();
 builder.Services.AddDbContext<RegentDbContext>(options =>
 {
     var provider = builder.Configuration["Storage:Provider"] ?? "Sqlite";
-    if (builder.Configuration.GetValue<bool>("Storage:UseInMemory") || provider == "InMemory")
+    if (provider.Trim().ToLowerInvariant() is not ("sqlite" or "postgres" or "inmemory"))
+        throw new InvalidOperationException("Storage provider must be Sqlite, Postgres, or InMemory.");
+    if (builder.Configuration.GetValue<bool>("Storage:UseInMemory") || provider.Equals("InMemory", StringComparison.OrdinalIgnoreCase))
     {
         options.UseInMemoryDatabase("regent-controlplane");
     }
-    else if (provider == "Sqlite")
+    else if (provider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
     {
         Directory.CreateDirectory("data");
         options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite") ?? "Data Source=data/regent.db");
     }
     else
     {
-        options.UseNpgsql(builder.Configuration.GetConnectionString("Postgres"));
+        var connection = builder.Configuration.GetConnectionString("Postgres");
+        if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("Postgres connection string is required.");
+        options.UseNpgsql(connection);
     }
 });
 
@@ -348,6 +352,13 @@ if (app.Environment.IsDevelopment())
     await scope.ServiceProvider.GetRequiredService<ComplianceService>().SeedAsync(CancellationToken.None);
     foreach (var tenantId in await db.Tenants.Select(x => x.Id).ToListAsync(CancellationToken.None))
         await scope.ServiceProvider.GetRequiredService<ModelOperationsService>().SeedAsync(tenantId, CancellationToken.None);
+}
+else
+{
+    await using var scope = app.Services.CreateAsyncScope();
+    var db = scope.ServiceProvider.GetRequiredService<RegentDbContext>();
+    await scope.ServiceProvider.GetRequiredService<SchemaVersionService>().ValidateAsync(CancellationToken.None, false);
+    await PostgresRlsValidator.ValidateAsync(db, CancellationToken.None);
 }
 
 app.UseCors("frontend");
