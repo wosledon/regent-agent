@@ -37,6 +37,7 @@
 | [0010](./0010-internal-notifications.md) | 通知仅通过仪表盘内部投递 | Accepted | 41 |
 | [0011](./0011-configurable-compliance.md) | 合规通过 ComplianceProfile 配置并 fail closed | Accepted | 45 |
 | [0012](./0012-single-node-capacity.md) | 当前只承诺单租户单机聚合容量 | Accepted | 44 |
+| [0013](./0013-pluggable-external-adapters.md) | 外部能力采用可插拔适配，本地模式为默认 | Accepted | 03、15、17、26、27、31、50 |
 
 ## 3. 新 ADR 模板
 
