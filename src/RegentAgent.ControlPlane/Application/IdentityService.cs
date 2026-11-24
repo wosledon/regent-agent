@@ -61,6 +61,12 @@ public sealed partial class IdentityService(
         var credential = await credentials.GetAsync(user.Id.ToString(), cancellationToken);
         if (credential is null || !VerifyPassword(request.Password, credential.PasswordHash))
             throw new UnauthorizedAccessException("Invalid email or password.");
+        if (PasswordHasher.IsLegacy(credential.PasswordHash))
+        {
+            credential.PasswordHash = HashPassword(request.Password);
+            credential.UpdatedAt = clock.GetUtcNow();
+            await credentials.PutAsync(user.Id.ToString(), credential, cancellationToken);
+        }
         var memberships = await db.Memberships.AsNoTracking().Where(x => x.UserId == user.Id).ToListAsync(cancellationToken);
         var membership = memberships.FirstOrDefault(x => request.TenantId is null || x.TenantId == request.TenantId)
             ?? memberships.FirstOrDefault() ?? throw new UnauthorizedAccessException("No tenant membership.");
@@ -303,21 +309,8 @@ public sealed partial class IdentityService(
         return string.IsNullOrWhiteSpace(suffix) ? fallback : $"{fallback} {suffix}";
     }
 
-    private static string HashPassword(string password)
-    {
-        var salt = RandomNumberGenerator.GetBytes(16);
-        var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 100_000, HashAlgorithmName.SHA256, 32);
-        return $"100000.{Convert.ToBase64String(salt)}.{Convert.ToBase64String(hash)}";
-    }
-
-    private static bool VerifyPassword(string password, string stored)
-    {
-        var parts = stored.Split('.');
-        if (parts.Length != 3 || !int.TryParse(parts[0], out var iterations)) return false;
-        var expected = Convert.FromBase64String(parts[2]);
-        var actual = Rfc2898DeriveBytes.Pbkdf2(password, Convert.FromBase64String(parts[1]), iterations, HashAlgorithmName.SHA256, expected.Length);
-        return CryptographicOperations.FixedTimeEquals(expected, actual);
-    }
+    private static string HashPassword(string password) => PasswordHasher.Hash(password);
+    private static bool VerifyPassword(string password, string stored) => PasswordHasher.Verify(password, stored);
 
     private static string HashRecoveryCode(string code) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(code.Trim().ToUpperInvariant()))).ToLowerInvariant();

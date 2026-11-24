@@ -20,6 +20,9 @@ public sealed class IdentityServiceTests
             var service = CreateService(db, root);
             var registered = await service.RegisterAsync(new RegisterRequest("owner@identity.test", "strong-password-123", "Owner", "Identity Co"), CancellationToken.None);
             Assert.Equal(10, registered.RecoveryCodes.Count);
+            var credential = await new JsonDocumentStore<CredentialRecord>(Path.Combine(root, "credentials.json"))
+                .GetAsync(registered.UserId.ToString(), CancellationToken.None);
+            Assert.StartsWith("$argon2id$", credential!.PasswordHash);
             var login = await service.LoginAsync(new LoginRequest("owner@identity.test", "strong-password-123"), CancellationToken.None);
             Assert.Equal(registered.UserId, login.UserId);
             await service.RevokeSessionAsync(registered.UserId, login.SessionId, CancellationToken.None);
