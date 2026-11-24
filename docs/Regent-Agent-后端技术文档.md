@@ -46,6 +46,7 @@
 - Gateway 通过 `ProviderMode` 选择本地或远程适配；OpenAI/Anthropic 适配透传原生 JSON、密钥和错误响应，并实施有界超时、重试和 `Retry-After`。模型目录通过 `IModelCatalogSource` 选择本地或 models.dev 源，快照保存原始 JSON 与 checksum。
 - 外部身份通过 `Identity:Mode` 选择本地测试适配、GitHub Code Exchange 或 OIDC discovery/JWKS 校验；client secret 只从 secret_ref 解析，OIDC 强制校验 issuer、audience、nonce 和已验证邮箱。
 - 四个服务统一接入 `RegentAgent.Observability`，按 `off/local/otlp/elastic` Profile 选择 Console 或 OTLP Exporter；指标、日志、追踪可独立开关，启动时校验采样和 endpoint。
+- 审计检查点通过 `IAuditAnchorStore` 选择本地 JSONL 或对象存储锚定，验证时按租户和检查点序号读取并比对 Merkle 根。
 
 ## 2. 技术栈总览
 

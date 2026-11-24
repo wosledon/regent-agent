@@ -160,6 +160,13 @@ else if (objectProvider.Equals("S3", StringComparison.OrdinalIgnoreCase))
     builder.Services.AddSingleton<IObjectStore>(S3ObjectStore.Create(s3Options));
 }
 else throw new InvalidOperationException("Object storage provider must be Local or S3.");
+var auditAnchorProvider = builder.Configuration["Audit:AnchorProvider"] ?? "Local";
+if (auditAnchorProvider.Equals("Local", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddSingleton<IAuditAnchorStore>(new LocalFileAuditAnchorStore("data/audit-anchors"));
+else if (auditAnchorProvider.Equals("ObjectStore", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddSingleton<IAuditAnchorStore>(provider =>
+        new ObjectStoreAuditAnchorStore(provider.GetRequiredService<IObjectStore>()));
+else throw new InvalidOperationException("Audit anchor provider must be Local or ObjectStore.");
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<LoginRateLimiter>();
 builder.Services.AddSingleton(new JsonDocumentStore<CredentialRecord>("data/modules/credentials.json"));

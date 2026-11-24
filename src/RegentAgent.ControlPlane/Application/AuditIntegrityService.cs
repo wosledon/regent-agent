@@ -4,11 +4,14 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RegentAgent.Contracts.Governance;
 using RegentAgent.ControlPlane.Data;
+using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class AuditIntegrityService(RegentDbContext db, TimeProvider clock)
+public sealed class AuditIntegrityService(RegentDbContext db, TimeProvider clock,
+    IAuditAnchorStore? anchors = null)
 {
+    private readonly IAuditAnchorStore anchors = anchors ?? new LocalFileAuditAnchorStore("data/audit-anchors");
     private static readonly JsonSerializerOptions CanonicalOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -92,37 +95,28 @@ public sealed class AuditIntegrityService(RegentDbContext db, TimeProvider clock
         db.AuditCheckpoints.Add(checkpoint);
         await db.SaveChangesAsync(cancellationToken);
         if (profile is "worm" or "anchored")
-        {
-            var directory = Path.Combine("data", "audit-anchors");
-            Directory.CreateDirectory(directory);
-            var path = Path.Combine(directory, $"{tenantId:N}.jsonl");
-            await File.AppendAllTextAsync(path,
-                JsonSerializer.Serialize(new { checkpoint.TenantId, checkpoint.ThroughSeq, checkpoint.MerkleRoot, checkpoint.CreatedAt }) + Environment.NewLine,
-                cancellationToken);
-        }
+            await anchors.StoreAsync(new AuditAnchorRecord(tenantId, checkpoint.ThroughSeq, root, checkpoint.CreatedAt), cancellationToken);
         return new AuditCheckpointDto(checkpoint.Id, checkpoint.ThroughSeq, root, profile, checkpoint.CreatedAt);
     }
 
     public async Task<AuditVerificationDto> VerifyAnchorsAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var path = Path.Combine("data", "audit-anchors", $"{tenantId:N}.jsonl");
-        if (!File.Exists(path)) return new AuditVerificationDto(true, 0, null, "No external anchors recorded.");
-        var lines = await File.ReadAllLinesAsync(path, cancellationToken);
+        var checkpoints = await db.AuditCheckpoints.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && (x.Profile == "worm" || x.Profile == "anchored"))
+            .OrderBy(x => x.ThroughSeq).ToListAsync(cancellationToken);
+        if (checkpoints.Count == 0) return new AuditVerificationDto(true, 0, null, "No external anchors recorded.");
         var checkedCount = 0;
-        foreach (var line in lines)
+        foreach (var checkpoint in checkpoints)
         {
-            var anchor = JsonSerializer.Deserialize<AnchorRecord>(line);
-            if (anchor is null || anchor.TenantId != tenantId) return new AuditVerificationDto(false, checkedCount, null, "Anchor tenant mismatch.");
-            var checkpoint = await db.AuditCheckpoints.AsNoTracking().SingleOrDefaultAsync(
-                x => x.TenantId == tenantId && x.ThroughSeq == anchor.ThroughSeq, cancellationToken);
-            if (checkpoint is null || checkpoint.MerkleRoot != anchor.MerkleRoot)
-                return new AuditVerificationDto(false, checkedCount, anchor.ThroughSeq, "Anchor checksum mismatch.");
+            var anchor = await anchors.GetAsync(tenantId, checkpoint.ThroughSeq, cancellationToken);
+            if (anchor is null || anchor.TenantId != tenantId)
+                return new AuditVerificationDto(false, checkedCount, checkpoint.ThroughSeq, "Audit anchor is missing.");
+            if (anchor.MerkleRoot != checkpoint.MerkleRoot)
+                return new AuditVerificationDto(false, checkedCount, checkpoint.ThroughSeq, "Anchor checksum mismatch.");
             checkedCount++;
         }
         return new AuditVerificationDto(true, checkedCount, null, "Audit anchors verified.");
     }
-
-    private sealed record AnchorRecord(Guid TenantId, long ThroughSeq, string MerkleRoot, DateTimeOffset CreatedAt);
 
     private static string ComputeHash(AuditRecord record, string previousHash) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
         JsonSerializer.Serialize(new
