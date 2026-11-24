@@ -54,6 +54,7 @@ public sealed class Worker(
                 var evidence = result.EvidenceRefs.Append($"sandbox:{sandboxResult.Sha256}").ToArray();
                 using var completeRequest = new HttpRequestMessage(HttpMethod.Post, $"/agent/v1/tasks/{task.TaskId}/complete");
                 completeRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", task.AssignmentToken);
+                completeRequest.Headers.Add("Idempotency-Key", $"task:{task.TaskId}:complete");
                 completeRequest.Content = JsonContent.Create(new TaskCompletion(task.LeaseToken, result.Output, result.Status, evidence));
                 using var completeResponse = await control.SendAsync(completeRequest, stoppingToken);
                 completeResponse.EnsureSuccessStatusCode();

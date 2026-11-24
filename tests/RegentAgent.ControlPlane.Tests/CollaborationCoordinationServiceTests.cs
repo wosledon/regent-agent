@@ -248,7 +248,7 @@ public sealed class CollaborationCoordinationServiceTests
             var audit = new AuditIntegrityService(db, TimeProvider.System);
             var options = new CollaborationOptions { DefaultWipLimit = 10 };
             var service = new CollaborationCoordinationService(db, TimeProvider.System, audit,
-                new IdempotencyService(db, TimeProvider.System), options);
+                new IdempotencyService(db, TimeProvider.System), options, new CursorCodec("test-cursor-key"));
             var identityOptions = new AgentIdentityOptions { SigningKey = new string('k', 32), KeyPath = Path.Combine(root, "agent.key") };
             var tokens = new AgentAssignmentTokenService(new FixedAgentKeyProvider(), identityOptions);
             var execution = new TaskExecutionService(db, new LocalFileObjectStore(root), TimeProvider.System, audit, tokens);

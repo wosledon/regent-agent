@@ -45,7 +45,7 @@ test('employee Agent creates groups and the control plane observes the trace', a
   };
   const token = await issueToken(engineering.id);
   const groupResponse = await page.request.post('/agent/v1/conversations', {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
     data: {
       title: 'Agent Release Room', kind: 'Project',
       memberEmployeeIds: [engineering.id, quality.id], scopeType: 'Project'
@@ -57,7 +57,7 @@ test('employee Agent creates groups and the control plane observes the trace', a
   expect(group.createdByEmployeeId).toBe(engineering.id);
 
   const messageResponse = await page.request.post(`/agent/v1/conversations/${group.id}/messages`, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
     data: {
       body: 'Agent checkpoint is ready for independent review.', priority: 'P1',
       messageType: 'ReviewRequest', evidenceRefs: ['task:agent-group-review']
@@ -92,7 +92,7 @@ test('employee Agent invokes governed tools with task-scoped identity', async ({
     data: { tenantId: '11111111-1111-1111-1111-111111111111', employeeId: engineering.id, taskId }
   });
   const token = (await tokenResponse.json()).token as string;
-  const headers = { Authorization: `Bearer ${token}` };
+  const headers = { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() };
   const discovered = await (await page.request.get('/agent/v1/tools/discover', { headers })).json();
   expect(discovered.some((tool: { name: string }) => tool.name === 'memory.capture')).toBeTruthy();
 
@@ -117,7 +117,7 @@ test('employee Agent invokes governed tools with task-scoped identity', async ({
   expect(repeated.auditHash).toBe(first.auditHash);
 
   const denied = await page.request.post('/agent/v1/tools/invoke', {
-    headers,
+    headers: { ...headers, 'Idempotency-Key': crypto.randomUUID() },
     data: {
       toolName: 'organization.create_position', version: '1.0.0', capability: 'org.design',
       taskGrant: '*', taint: 'Low', argumentsJson: JSON.stringify({ operation: 'create_position' })
@@ -141,7 +141,7 @@ test('additional domain tools preserve Agent and human boundaries', async ({ pag
   };
   const invoke = async (token: string, toolName: string, capability: string, argumentsJson: object) =>
     page.request.post('/agent/v1/tools/invoke', {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${token}`, 'Idempotency-Key': crypto.randomUUID() },
       data: {
         toolName, version: '1.0.0', capability, taskGrant: '*', taint: 'Low',
         argumentsJson: JSON.stringify(argumentsJson)

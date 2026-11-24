@@ -174,6 +174,7 @@ test('approval can be decided once', async ({ page }) => {
   await page.goto('/login');
   await page.getByRole('button', { name: 'Sign in' }).click();
   const created = await page.request.post('/v1/approvals', {
+    headers: { 'Idempotency-Key': crypto.randomUUID() },
     data: {
       actionType: 'e2e.approval', title: 'E2E approval', impact: 'Repeatable E2E decision',
       severity: 'high', requester: 'E2E', expiresInMinutes: 60, evidenceRefs: ['e2e:evidence']

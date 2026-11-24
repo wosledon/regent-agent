@@ -1,6 +1,4 @@
-using System.Text;
 using System.Text.Json;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using AgentIdentityModel = RegentAgent.AgentIdentity.AgentIdentity;
 using RegentAgent.AgentIdentity;
@@ -16,7 +14,8 @@ public sealed partial class CollaborationCoordinationService(
     TimeProvider clock,
     AuditIntegrityService audit,
     IdempotencyService idempotency,
-    CollaborationOptions options)
+    CollaborationOptions options,
+    CursorCodec cursorCodec)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -36,9 +35,15 @@ public sealed partial class CollaborationCoordinationService(
             items = query.IncomingOnly == true
                 ? items.Where(x => x.TargetEmployeeId == employeeId)
                 : items.Where(x => x.RequesterEmployeeId == employeeId || x.TargetEmployeeId == employeeId);
-        if (TryReadCursor(query.Cursor, out var cursorSortKey)) items = items.Where(x => x.SortKey.CompareTo(cursorSortKey) < 0);
+        var snapshotAt = clock.GetUtcNow();
+        var filter = CursorCodec.Filter(query.Kind, query.Status, query.EmployeeId, query.IncomingOnly);
+        if (!string.IsNullOrWhiteSpace(query.Cursor))
+        {
+            var cursorSortKey = cursorCodec.Decode(query.Cursor, tenantId, filter);
+            items = items.Where(x => x.SortKey.CompareTo(cursorSortKey) < 0);
+        }
         var records = await items.OrderByDescending(x => x.SortKey).Take(limit + 1).ToListAsync(cancellationToken);
-        var nextCursor = records.Count > limit ? EncodeCursor(records[limit - 1].SortKey) : null;
+        var nextCursor = records.Count > limit ? cursorCodec.Encode(tenantId, filter, snapshotAt, records[limit - 1].SortKey) : null;
         return new Page<TaskCoordinationDto>(records.Take(limit).Select(ToDto).ToArray(), nextCursor, clock.GetUtcNow());
     }
 
@@ -208,13 +213,5 @@ public sealed partial class CollaborationCoordinationService(
         record.DetailsJson, record.ResponseJson, record.CreatedAt, record.UpdatedAt, record.Deadline,
         record.CompletedAt, record.Version);
 
-    private static string EncodeCursor(string sortKey) => WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(sortKey));
 
-    private static bool TryReadCursor(string? cursor, out string sortKey)
-    {
-        sortKey = string.Empty;
-        if (string.IsNullOrWhiteSpace(cursor)) return false;
-        try { sortKey = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(cursor)); return sortKey.Length > 0; }
-        catch (FormatException) { throw new InvalidOperationException("Pagination cursor is invalid."); }
-    }
 }

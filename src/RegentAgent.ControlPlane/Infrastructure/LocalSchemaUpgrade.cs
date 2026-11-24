@@ -132,6 +132,14 @@ public static class LocalSchemaUpgrade
             CREATE INDEX IF NOT EXISTS IX_Tasks_TenantId_AssigneeEmployeeId_Status
             ON Tasks (TenantId, AssigneeEmployeeId, Status);
             """, cancellationToken);
+        var idempotencyColumns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('IdempotencyRecords')").ToListAsync(cancellationToken);
+        if (!idempotencyColumns.Contains("RequestHash"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE IdempotencyRecords ADD COLUMN RequestHash TEXT NOT NULL DEFAULT '';", cancellationToken);
+        if (!idempotencyColumns.Contains("StatusCode"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE IdempotencyRecords ADD COLUMN StatusCode INTEGER NOT NULL DEFAULT 200;", cancellationToken);
+        if (!idempotencyColumns.Contains("ContentType"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE IdempotencyRecords ADD COLUMN ContentType TEXT NOT NULL DEFAULT 'application/json';", cancellationToken);
         var membershipColumns = await db.Database.SqlQueryRaw<string>(
             "SELECT name FROM pragma_table_info('Memberships')").ToListAsync(cancellationToken);
         if (!membershipColumns.Contains("CapabilitiesJson"))

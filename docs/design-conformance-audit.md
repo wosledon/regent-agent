@@ -72,7 +72,7 @@
 | 44 容量性能 | 队列上限、背压、租户公平、容量脚本 | 符合（本地） | 生产 soak/混沌未执行 |
 | 45 企业合规 | ComplianceProfile、fail closed、证据、支持边界 | 符合（本地） | 不宣称认证或商业 SLA |
 | 46 评测 QA | Judge 校准、污染检测、统计门槛、复测 | 符合（本地） | 无 |
-| 47 OpenAPI | OpenAPI 3.1、错误模型、TS 生成 | 部分（生产） | `Idempotency-Key`、`If-Match`、游标分页尚未全端点强制 |
+| 47 OpenAPI | OpenAPI 3.1、全局幂等/版本中间件、request_id、稳定错误码、签名游标和 TS 生成 | 符合（本地） | 生产多实例幂等仍需 Postgres 唯一约束与事务保证 |
 | 48 前端路由 | Tenant/Ops 独立应用、路由、权限、共享组件、协作工作台 | 符合（本地） | 无 |
 | 49 核心 ERD | 实体、租户字段、Schema 所有权、保留规则 | 部分（生产） | 生产迁移与 RLS 集成测试未执行 |
 | 50 可插拔适配 | Provider、目录、S3、KeyVault、身份、OTel、锚定、备份、Compose | 符合（适配） | 真实组件连通性按约束未调试 |

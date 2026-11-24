@@ -1,6 +1,6 @@
 # 47 OpenAPI 基线
 
-- 版本：v0.1（待评审）
+- 版本：v0.2（本地全局写契约与签名游标已验收）
 - 范围：内部 HTTP API 的 OpenAPI、认证、幂等、分页、错误、版本、限流和代码生成
 - 关联设计：[01 基础契约与状态模型](./01-contracts-and-state.md)、[42 内部 API 与扩展边界](./42-internal-api-and-extension-boundary.md)、[后端技术文档](../Regent-Agent-后端技术文档.md)、[前端技术文档](../Regent-Agent-前端技术文档.md)
 
@@ -141,6 +141,15 @@
 - 长任务返回 `202` 和任务/作业 ID，客户端通过状态端点轮询或 SignalR 接收完成事件。
 - 重试只适用于幂等安全操作。
 - 非幂等外部动作在结果未知时进入核对，不盲目重放。
+
+### 8.1 当前强制边界
+
+- `/v1` 与 `/agent/v1` 的所有 POST/PUT/PATCH/DELETE 请求必须携带 `Idempotency-Key`；中间件在调用端点前写入 InProgress 记录，成功后保存状态码、Content-Type 和响应体。
+- 相同租户、操作和幂等键只能重放字节一致的请求；请求哈希不同返回 `409 IDEMPOTENCY_CONFLICT`，原请求仍在进行或结果未知时返回 `409 IDEMPOTENCY_IN_PROGRESS`。
+- PUT/PATCH/DELETE 必须携带 `If-Match`；请求体含 `version`/`rowVersion` 时必须精确匹配，无版本字段的动作型更新只能使用 `If-Match: *`，不匹配返回 `412 VERSION_CONFLICT`。
+- 所有响应携带 `X-Request-Id`；错误体统一使用 `request_id` 与稳定 `error.code`。
+- 游标使用 HMAC 签名的不透明字符串，绑定租户、筛选条件、快照时间和排序键；跨租户、跨筛选、篡改或过期游标均拒绝。
+- Tenant Dashboard API Client 自动生成幂等键、请求 ID 和版本条件；Runner 完成任务使用稳定幂等键，支持安全重试。
 
 ## 9. 限流与背压
 

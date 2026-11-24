@@ -260,6 +260,9 @@ public sealed class IdempotencyRecord
     public string Key { get; set; } = string.Empty;
     public string Operation { get; set; } = string.Empty;
     public string ResponseJson { get; set; } = "null";
+    public string RequestHash { get; set; } = string.Empty;
+    public int StatusCode { get; set; } = 200;
+    public string ContentType { get; set; } = "application/json";
     public string Status { get; set; } = "Completed";
     public DateTimeOffset CreatedAt { get; set; }
 }

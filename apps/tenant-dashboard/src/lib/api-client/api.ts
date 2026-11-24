@@ -25,14 +25,19 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    credentials: 'include',
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...init?.headers
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const headers = new Headers(init?.headers);
+  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (!headers.has('X-Request-Id')) headers.set('X-Request-Id', crypto.randomUUID());
+  if ((path.startsWith('/v1') || path.startsWith('/agent/v1')) && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    if (!headers.has('Idempotency-Key')) headers.set('Idempotency-Key', crypto.randomUUID());
+    if (['PUT', 'PATCH', 'DELETE'].includes(method) && !headers.has('If-Match')) {
+      let version: unknown;
+      try { version = typeof init?.body === 'string' ? JSON.parse(init.body).version : undefined; } catch { /* server validates JSON */ }
+      headers.set('If-Match', typeof version === 'number' ? `"${version}"` : '*');
     }
-  });
+  }
+  const response = await fetch(path, { credentials: 'include', ...init, headers });
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
     throw new ApiError(response.status, body?.error?.code ?? 'UNKNOWN', body?.error?.message ?? response.statusText);

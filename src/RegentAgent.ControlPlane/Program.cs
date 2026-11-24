@@ -319,6 +319,7 @@ RegisterTenantStore<AgentEvolutionState>(builder.Services, "data/modules/agent-e
 RegisterTenantStore<TaskGovernanceState>(builder.Services, "data/modules/task-governance.json");
 builder.Services.AddScoped<TenantPurgeService>();
 builder.Services.AddScoped<IdempotencyService>();
+builder.Services.AddSingleton(new CursorCodec(builder.Configuration["Api:CursorKey"] ?? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))));
 builder.Services.AddScoped<OutboxService>();
 builder.Services.AddScoped<SchemaVersionService>();
 builder.Services.AddHostedService<OutboxWorker>();
@@ -377,7 +378,8 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
         _ => (StatusCodes.Status500InternalServerError, "INTERNAL_ERROR", "An unexpected error occurred.")
     };
     context.Response.StatusCode = status;
-    await context.Response.WriteAsJsonAsync(new { error = new { code, message }, trace_id = context.TraceIdentifier });
+    context.Response.Headers["X-Request-Id"] = context.TraceIdentifier;
+    await context.Response.WriteAsJsonAsync(new { request_id = context.TraceIdentifier, error = new { code, message, retryable = false } });
 }));
 
 if (app.Environment.IsDevelopment())
@@ -480,6 +482,7 @@ app.Use(async (context, next) =>
     }
     await next();
 });
+app.UseMiddleware<ApiContractMiddleware>();
 app.UseAuthorization();
 app.MapOpenApi("/openapi/{documentName}.json").AllowAnonymous();
 
