@@ -24,9 +24,9 @@
 
 | 设计 | 主要实现证据 | 结论 | 剩余边界 |
 |---|---|---|---|
-| 01 基础契约与状态 | ControlPlane Cookie 认证、租户上下文、Outbox、幂等服务 | 部分（生产） | 完整 JWT audience/scope/JWKS 与 Employee Assignment Token 尚未实现 |
+| 01 基础契约与状态 | Cookie 控制面 + Agent Assignment Token、租户上下文、Outbox、幂等服务 | 部分（生产） | 生产 JWKS 轮换与完整 Token 吊销传播尚未实现 |
 | 02 运行时可靠性 | `TaskExecutionService`、租约/fencing、Outbox/Inbox、本地沙箱 | 符合（本地） | 真实多 Worker 故障演练未执行 |
-| 03 模型、计量与预算 | Provider 路由、原生 HTTP/SSE、KeyVault、用量 JSONL、预算服务 | 部分（生产） | 预算仍为本地令牌计数，未完成按租户金额预留/结算与 Provider 账单对账 |
+| 03 模型、计量与预算 | Provider 路由、原生 HTTP/SSE、Agent JWT、KeyVault、租户预算与用量归因 | 部分（生产） | 预算仍为本地令牌计数，未完成金额预留/结算与 Provider 账单对账 |
 | 04 安全、治理与恢复 | Tool PEP、审批、审计、DLP、事件响应、备份脚本 | 部分（生产） | 容器隔离、真实 WORM 与异地恢复按约束未执行 |
 | 05 产品交付闭环 | `DeliveryPolicy`、`DeliveryService`、独立验收、发布/回滚 | 符合（本地） | 容器发布未执行 |
 | 06 主控与动态组织 | `OrganizationService`、能力授权、组织调整、继任 | 符合（本地） | 无 |
@@ -36,7 +36,7 @@
 | 10 绩效与自我改进 | 改进审查、KPI、绩效动作、申诉反转 | 符合（本地） | 无 |
 | 11 项目管理 | 需求/任务/缺陷状态机、自动认领、评审、裁决 | 符合（本地） | 无 |
 | 12 通信与路由 | `CommunicationRouter`、管理链/专业链、项目覆盖 | 符合（本地） | 无 |
-| 13 Agent 聊天协作 | 会话、消息、群成员、回复/@、证据、可视化追溯 | 符合（本地） | 完整委派/交接 UI 仍未实现 |
+| 13 Agent 聊天协作 | Agent Token、群成员、回复/@、证据、只读可视化追溯 | 符合（本地） | 通用 Tool 调用与完整委派/交接 UI 仍未实现 |
 | 14 模型评测回归 | 版本化评测、密封/污染检测、回归计划 | 符合（本地） | 真实模型回归未执行 |
 | 15 数据 Schema 与事务 | SQLite/JSON/对象存储、Outbox、启动 SchemaVersion | 部分（生产） | 尚缺完整 Postgres 基线迁移和全部租户表 RLS SQL |
 | 16 部署升级迁移 | Compose Profile、生产启动校验、版本脚本 | 部分（生产） | Expand/Contract 与混版本回滚未在容器环境演练 |
@@ -78,7 +78,7 @@
 ## 3. 验证结果
 
 - `dotnet build RegentAgent.slnx --no-restore`：通过，0 警告、0 错误。
-- `DOTNET_ROLL_FORWARD=Major dotnet test RegentAgent.slnx --no-build --no-restore`：88 项通过（Contracts 1、Gateway 12、ControlPlane 75）。
+- `DOTNET_ROLL_FORWARD=Major dotnet test RegentAgent.slnx --no-build --no-restore`：91 项通过（Contracts 1、Gateway 12、ControlPlane 78）。
 - `corepack pnpm typecheck`、`corepack pnpm lint`、`corepack pnpm test`、`corepack pnpm build`：全部通过；Vitest 共 7 项通过。
 - `corepack pnpm test:e2e`：10 项 Playwright 全部通过，覆盖协作四视图、群聊创建、成员追溯和移动端。
 - OpenAPI 与 Tenant Dashboard TypeScript schema 已从当前 ControlPlane 重新生成。

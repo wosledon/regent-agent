@@ -262,7 +262,7 @@ chat.open_attachment
 | POST | `/collaboration/delegations` | 发起委派 |
 | POST | `/collaboration/handoffs` | 发起交接 |
 
-所有写 API 幂等并审计；实时推送可用 SignalR，消息表仍是权威源。
+所有写 API 幂等并审计；实时推送可用 SignalR，消息表仍是权威源。群聊创建、成员管理、消息、回复、@ 和证据关联只能由 `/agent/v1/conversations` 的 Employee Assignment Token 发起；控制面 `/v1/conversations` 仅提供只读观察。
 
 ### 14.1 可视化与过程追溯
 

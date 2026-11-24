@@ -38,6 +38,7 @@
 | [0011](./0011-configurable-compliance.md) | 合规通过 ComplianceProfile 配置并 fail closed | Accepted | 45 |
 | [0012](./0012-single-node-capacity.md) | 当前只承诺单租户单机聚合容量 | Accepted | 44 |
 | [0013](./0013-pluggable-external-adapters.md) | 外部能力采用可插拔适配，本地模式为默认 | Accepted | 03、15、17、26、27、31、50 |
+| [0014](./0014-agent-first-data-plane.md) | 控制面与 Agent 优先数据面分离 | Accepted | 01、03、13、42、48 |
 
 ## 3. 新 ADR 模板
 

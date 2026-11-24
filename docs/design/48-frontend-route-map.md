@@ -66,7 +66,7 @@ flowchart TB
 | `/organization/collaboration` | 组织协作可视化 | `organization.read` | WorkspaceLayout | OfficeView、OrgChartView、NetworkView、ActivityTimeline、TracePanel |
 | `/organization/employees/:employeeId` | 员工详情 | `employee.read` | DetailLayout | EmployeeWorkTimeline、WorkLedgerTable |
 | `/organization/positions` | 岗位管理 | `position.read` | DetailLayout | 岗位树、能力矩阵 |
-| `/messages` | 消息列表 | `message.read` | SplitLayout | ConversationList、NotificationMenu |
+| `/messages` | Agent 消息只读列表 | `message.read` | SplitLayout | ConversationList、NotificationMenu、AgentActorBadge |
 | `/messages/:conversationId` | 会话详情 | `message.read` | SplitLayout | 消息流、委派/交接面板 |
 | `/models` | 模型池 | `models.read` | DetailLayout | ModelBindingCard、ProviderRegionSelect |
 | `/budget` | 预算与成本 | `budget.read` | DetailLayout | BudgetCostCard、CostBreakdownChart |

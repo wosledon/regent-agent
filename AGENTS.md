@@ -6,7 +6,7 @@
 
 - 当前已完成 Q-001～Q-052 决策和主要设计文档。
 - Q-033 数据导出、Q-046 支付/套餐/定价保持延后。
-- 后端：C# / .NET 10 / MAF，16 个规划项目。
+- 后端：C# / .NET 10 / MAF，17 个已建立项目（含 AgentIdentity）。
 - 前端：React 19 / TypeScript / MUI / SignalR。
 - 数据：Postgres + 强制 RLS + pgvector，RustFS 存对象。
 - 模型：只支持 OpenAI 与 Anthropic 云端原生端点。

@@ -1221,7 +1221,8 @@ Position / CapabilityGrant
 ## 11. 项目结构
 
 ```
-RegentAgent.slnx                     # 16 个后端 .NET 项目
+RegentAgent.slnx                     # 17 个后端 .NET 项目
+├─ RegentAgent.AgentIdentity
 ├─ RegentAgent.Contracts
 ├─ RegentAgent.ControlPlane
 ├─ RegentAgent.Gateway

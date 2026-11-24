@@ -90,6 +90,13 @@ public interface IExternalIdentityProvider
 - `IBackupTarget` 负责备份对象写入、读取、校验和删除；本地目录为默认，S3/NAS/外置盘通过配置选择。
 - 备份默认关闭；未配置目标时恢复返回 `not_configured`，不得伪造 RPO/RTO 或成功状态。
 
+## 7.1 Agent 身份配置
+
+- ControlPlane 与 Gateway 使用同一 `AgentIdentity:KeyPath` 或秘密系统注入的同一 `SigningKey`。
+- 本地默认在仓库根目录 `data/secrets/agent-token.key` 生成 32 字节密钥，文件权限仅所有者可读写。
+- Compose 通过 `agent-identity-data` 卷共享密钥，生产必须使用外部秘密挂载或轮换策略。
+- Token 默认 15 分钟，audience 分为 `regent-agent` 与 `regent-gateway`，ClockSkew 默认 60 秒。
+
 ## 8. 配置草案
 
 ```yaml

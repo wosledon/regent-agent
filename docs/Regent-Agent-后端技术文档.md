@@ -5,7 +5,7 @@
 - 读者：后端研发、架构、QA、SRE、安全评审
 - 关联文档：[技术设计总览](./Regent-Agent-技术设计.md)、[完整架构流程图](./Regent-Agent-架构流程图.md)、[OpenAPI 基线](./design/47-openapi-baseline.md)、[核心 ERD 与数据字典](./design/49-core-data-model-and-erd.md)、[详细设计索引](./design/README.md)
 
-> 当前 16 个后端项目已建立，ControlPlane、Gateway、Runner、Operations 和主要领域模块可在本地 SQLite/JSON/文件模式下运行；本地密码、恢复码、会话、邀请、所有权委托和 OIDC/GitHub 适配边界已实现，真实远程 IdP、Provider 和生产存储仍未接入。
+> 当前 17 个后端项目已建立，ControlPlane、Gateway、Runner、Operations 和主要领域模块可在本地 SQLite/JSON/文件模式下运行；本地密码、恢复码、会话、邀请、所有权委托和 OIDC/GitHub 适配边界已实现，真实远程 IdP、Provider 和生产存储仍未接入。
 
 ## 1. 文档定位
 
@@ -19,7 +19,8 @@
 - 单租户、单机自托管为 MVP 基线。
 - 四个部署服务：ControlPlane、AI Gateway、Runner、Operations Platform。
 - 两个独立前端：Tenant Dashboard、Ops Console。
-- 模型只支持 OpenAI 与 Anthropic 云端原生端点。
+- 模型只支持 OpenAI 与 Anthropic 云端原生端点；Gateway 模型调用必须使用员工 Assignment Token。
+- 控制面 `/v1` 用于人类治理与只读观察；`/agent/v1` 使用短期员工 Token，绑定租户、员工、任务、Runner、scope 和有效期。
 - API、Tool、MCP 和通知均只用于系统内部。
 - GitHub 只保存源码和版本 Tag；本地用 Docker Compose 构建。
 - Q-033 数据导出、Q-046 支付/套餐/定价保持延后。
@@ -210,7 +211,7 @@ flowchart TB
 
 ## 5. 解决方案项目与模块
 
-共 19 个模块：16 个后端 .NET 项目、2 个 TypeScript SPA、1 个 TypeScript UI 包。`RegentAgent.slnx` 只包含后端 .NET 项目，前端使用独立 workspace。
+共 20 个模块：17 个后端 .NET 项目、2 个 TypeScript SPA、1 个 TypeScript UI 包。`RegentAgent.slnx` 只包含后端 .NET 项目，前端使用独立 workspace。
 
 ### 5.1 项目总表
 

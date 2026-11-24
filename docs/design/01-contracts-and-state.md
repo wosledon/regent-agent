@@ -91,8 +91,8 @@ scopes: space-separated permissions
 1. 运营方在控制面生成一次性 enrollment token。
 2. Runner 使用 token 注册，控制面返回 `runner_id` 和长期 credential。
 3. Runner 用 credential 换取 deployment token。
-4. Runner 长轮询领取任务，控制面为每个任务签发 employee assignment token。
-5. Runner 只在该任务的生命周期内使用 assignment token；任务结束即失效。
+4. Runner 长轮询领取任务，控制面为每个任务签发 employee assignment token，返回租户、员工、任务、Runner、scopes 和过期时间。
+5. Runner 只在该任务的生命周期内使用 assignment token；任务结束即失效。Gateway 与 `/agent/v1` 都验证该 Token，不信任请求体或 Header 身份。
 
 **管家调用网关**
 
@@ -191,6 +191,7 @@ scopes: space-separated permissions
 | 模型 | `/admin/tenants/{tenant}/models`、`/test`、`/rotate`、`DELETE` |
 | 计量 | `/internal/llm-usage`、`/internal/tool-usage`、`/usage/reconcile` |
 | 运维 | `/gateways/register`、`/gateways/{id}/heartbeat`、`/backups` |
+| Agent 数据面 | `/agent/v1/me`、`/agent/v1/tasks/{id}`、`/agent/v1/conversations`、`/agent/v1/agent-runtime` |
 | 运营 | `/ops/tenants`、`/ops/quotas`、`/ops/runner-pools`、`/ops/incidents`、`/ops/support-grants`、`/ops/audit-events` |
 
 ### 4.4 Tool 契约
