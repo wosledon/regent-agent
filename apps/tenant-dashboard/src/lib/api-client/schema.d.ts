@@ -10513,6 +10513,10 @@ export interface components {
             snapshotDate: string;
             source: string;
             immutable: boolean;
+            rawJson?: null | string;
+            checksum?: null | string;
+            /** Format: date-time */
+            fetchedAt?: null | string;
         };
         ModelTestResult: {
             provider: string;

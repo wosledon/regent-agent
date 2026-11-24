@@ -6,7 +6,56 @@ using RegentAgent.Providers;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddOpenApi("v1");
 builder.Services.AddProblemDetails();
-builder.Services.AddSingleton<IProviderClient, LocalProviderClient>();
+var providerMode = builder.Configuration["Gateway:ProviderMode"] ?? "local";
+if (providerMode.Trim().ToLowerInvariant() is not ("local" or "remote"))
+    throw new InvalidOperationException("Gateway provider mode must be local or remote.");
+var providerHttpOptions = new ProviderHttpOptions
+{
+    OpenAI = new ProviderEndpointOptions
+    {
+        BaseUrl = builder.Configuration["Gateway:Providers:OpenAI:BaseUrl"] ?? "https://api.openai.com/v1",
+        TimeoutSeconds = builder.Configuration.GetValue("Gateway:Providers:OpenAI:TimeoutSeconds", 120),
+        MaxResponseBytes = builder.Configuration.GetValue("Gateway:Providers:OpenAI:MaxResponseBytes", 4 * 1024 * 1024),
+        MaxRetries = builder.Configuration.GetValue("Gateway:Providers:OpenAI:MaxRetries", 2),
+        BaseDelayMilliseconds = builder.Configuration.GetValue("Gateway:Providers:OpenAI:BaseDelayMilliseconds", 200)
+    },
+    Anthropic = new ProviderEndpointOptions
+    {
+        BaseUrl = builder.Configuration["Gateway:Providers:Anthropic:BaseUrl"] ?? "https://api.anthropic.com/v1",
+        TimeoutSeconds = builder.Configuration.GetValue("Gateway:Providers:Anthropic:TimeoutSeconds", 120),
+        MaxResponseBytes = builder.Configuration.GetValue("Gateway:Providers:Anthropic:MaxResponseBytes", 4 * 1024 * 1024),
+        MaxRetries = builder.Configuration.GetValue("Gateway:Providers:Anthropic:MaxRetries", 2),
+        BaseDelayMilliseconds = builder.Configuration.GetValue("Gateway:Providers:Anthropic:BaseDelayMilliseconds", 200)
+    }
+};
+if (providerMode.Equals("remote", StringComparison.OrdinalIgnoreCase))
+{
+    providerHttpOptions.OpenAI.Validate("OpenAI");
+    providerHttpOptions.Anthropic.Validate("Anthropic");
+}
+builder.Services.AddSingleton(new ProviderRoutingOptions { Mode = providerMode });
+builder.Services.AddSingleton(providerHttpOptions);
+builder.Services.AddHttpClient("openai", (provider, client) =>
+{
+    var options = provider.GetRequiredService<ProviderHttpOptions>().OpenAI;
+    client.BaseAddress = new Uri(options.BaseUrl);
+    client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+});
+builder.Services.AddHttpClient("anthropic", (provider, client) =>
+{
+    var options = provider.GetRequiredService<ProviderHttpOptions>().Anthropic;
+    client.BaseAddress = new Uri(options.BaseUrl);
+    client.Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds);
+});
+builder.Services.AddSingleton<LocalProviderClient>();
+builder.Services.AddSingleton<IProviderClient>(provider => new OpenAiProviderClient(
+    provider.GetRequiredService<IHttpClientFactory>().CreateClient("openai"),
+    provider.GetRequiredService<ProviderHttpOptions>().OpenAI));
+builder.Services.AddSingleton<IProviderClient>(provider => new AnthropicProviderClient(
+    provider.GetRequiredService<IHttpClientFactory>().CreateClient("anthropic"),
+    provider.GetRequiredService<ProviderHttpOptions>().Anthropic));
+builder.Services.AddSingleton<IProviderClient>(provider => provider.GetRequiredService<LocalProviderClient>());
+builder.Services.AddSingleton<IProviderRouter, ProviderRouter>();
 builder.Services.AddSingleton<IUsageJournal>(sp =>
     new JsonlUsageJournal(builder.Configuration["Gateway:UsagePath"] ?? "data/gateway-usage.jsonl"));
 builder.Services.AddSingleton<IKeyVault>(sp =>
@@ -19,11 +68,39 @@ builder.Services.AddSingleton<IKeyVault>(sp =>
 builder.Services.AddSingleton(sp => new LocalBudgetService(
     sp.GetRequiredService<IConfiguration>().GetValue<long>("Gateway:MonthlyLimit", 8_000_000)));
 var app = builder.Build();
+app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
+{
+    var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
+    if (exception is ProviderRequestException providerException)
+    {
+        context.Response.StatusCode = providerException.StatusCode is >= 400 and < 500
+            ? providerException.StatusCode.Value
+            : providerException.ErrorCode == "PROVIDER_TIMEOUT" ? 504 : 502;
+        if (!string.IsNullOrWhiteSpace(providerException.NativeErrorJson))
+        {
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(providerException.NativeErrorJson, context.RequestAborted);
+            return;
+        }
+        await context.Response.WriteAsJsonAsync(new
+        {
+            error = new { code = providerException.ErrorCode, message = providerException.Message, retryable = providerException.Retryable },
+            trace_id = context.TraceIdentifier
+        });
+        return;
+    }
+    context.Response.StatusCode = exception is InvalidOperationException ? 409 : 500;
+    await context.Response.WriteAsJsonAsync(new
+    {
+        error = new { code = exception is InvalidOperationException ? "INVALID_STATE" : "INTERNAL_ERROR", message = "Gateway request failed." },
+        trace_id = context.TraceIdentifier
+    });
+}));
 app.MapOpenApi("/openapi/{documentName}.json").AllowAnonymous();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" })).AllowAnonymous();
-app.MapGet("/health/ready", () => Results.Ok(new { status = "ready", mode = "local" })).AllowAnonymous();
+app.MapGet("/health/ready", () => Results.Ok(new { status = "ready", mode = providerMode })).AllowAnonymous();
 
-app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderClient provider,
+app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderRouter provider,
     IKeyVault keyVault, IUsageJournal usage, LocalBudgetService budget, CancellationToken cancellationToken) =>
 {
     var body = await ReadBodyAsync(context, cancellationToken);
@@ -39,9 +116,10 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderClient 
             ["error"] = new { code = "BUDGET_HARD_LIMIT", message = "Local monthly limit reached.", retryable = false }
         });
     }
-    var response = await provider.CompleteAsync(new ProviderRequest("openai", model, "openai_chat_completions", prompt, maxOutput, key), cancellationToken);
+    var response = await provider.CompleteAsync(new ProviderRequest("openai", model, "openai_chat_completions", prompt, maxOutput, key, body?.ToJsonString()), cancellationToken);
     await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, tenant, "openai", model,
         response.InputTokens, response.OutputTokens, response.ProviderRequestId), cancellationToken);
+    if (response.NativeResponseJson is { } nativeResponse) return Results.Content(nativeResponse, "application/json");
     return Results.Json(new
     {
         id = $"chatcmpl-{response.ProviderRequestId}",
@@ -53,7 +131,7 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderClient 
     });
 }).AllowAnonymous();
 
-app.MapPost("/v1/messages", async (HttpContext context, IProviderClient provider,
+app.MapPost("/v1/messages", async (HttpContext context, IProviderRouter provider,
     IKeyVault keyVault, IUsageJournal usage, LocalBudgetService budget, CancellationToken cancellationToken) =>
 {
     var body = await ReadBodyAsync(context, cancellationToken);
@@ -69,9 +147,10 @@ app.MapPost("/v1/messages", async (HttpContext context, IProviderClient provider
             ["error"] = new { code = "BUDGET_HARD_LIMIT", message = "Local monthly limit reached.", retryable = false }
         });
     }
-    var response = await provider.CompleteAsync(new ProviderRequest("anthropic", model, "anthropic_messages", prompt, maxOutput, key), cancellationToken);
+    var response = await provider.CompleteAsync(new ProviderRequest("anthropic", model, "anthropic_messages", prompt, maxOutput, key, body?.ToJsonString()), cancellationToken);
     await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, tenant, "anthropic", model,
         response.InputTokens, response.OutputTokens, response.ProviderRequestId), cancellationToken);
+    if (response.NativeResponseJson is { } nativeResponse) return Results.Content(nativeResponse, "application/json");
     return Results.Json(new
     {
         id = $"msg-{response.ProviderRequestId}",
@@ -140,7 +219,7 @@ static string ExtractAnthropicPrompt(JsonNode? body)
 static async Task<string?> ResolveKeyAsync(HttpContext context, string tenant, IKeyVault keyVault, CancellationToken cancellationToken)
 {
     var keyRef = Header(context, "X-Regent-Key-Ref");
-    return string.IsNullOrWhiteSpace(keyRef) ? "local-development-key" : await keyVault.UnlockAsync(tenant, keyRef, cancellationToken);
+    return string.IsNullOrWhiteSpace(keyRef) ? null : await keyVault.UnlockAsync(tenant, keyRef, cancellationToken);
 }
 
 public sealed record SetKeyRequest(string ApiKey);

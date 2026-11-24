@@ -17,8 +17,8 @@
 
 | 能力 | 当前实现 | 现有边界 | 需要补齐 |
 |---|---|---|---|
-| 模型调用 | `IProviderClient` + `LocalProviderClient` | Gateway 只注册单一本地实现 | OpenAI/Anthropic HTTP 适配、路由器、原生请求/响应透传 |
-| 模型目录 | `LocalModelCatalog` 静态快照 | `ModelOperationsService` 直接依赖静态类 | `IModelCatalogSource`、models.dev HTTP 源、快照校验与离线缓存 |
+| 模型调用 | `IProviderClient` + `LocalProviderClient` + `IProviderRouter` | 默认本地，可配置 remote；OpenAI/Anthropic HTTP 适配已实现 | 流式与真实契约冒烟仍按约束不调试 |
+| 模型目录 | `IModelCatalogSource` + 本地/models.dev 源 | `ModelOperationsService` 通过端口选择，快照保存 raw JSON/checksum | 自动分档与真实远程同步仍按约束不调试 |
 | 关系存储 | EF Core SQLite/Postgres 分支 | 可选择 Provider，但无 RLS/生产迁移作业 | 启动校验、迁移边界、RLS 集成测试与角色配置 |
 | 对象存储 | `IObjectStore` + `LocalFileObjectStore` | ControlPlane 硬编码本地实现 | S3/RustFS 适配与 `IObjectStoreFactory` |
 | Gateway 密钥 | `IKeyVault` + 本地文件密钥库 | 已有信封加密端口 | Postgres `keyvault` 适配、配置选择与迁移脚本 |
@@ -54,9 +54,9 @@ public interface IModelCatalogSource
 }
 ```
 
-- Gateway 增加 `IProviderRouter`，按端点协议选择 OpenAI、Anthropic 或 Local 客户端。
-- 远程客户端必须接收并透传 provider 原生 JSON，只注入实际 model 和密钥；不得用统一 Prompt DTO 重建工具、流式或错误结构。
-- models.dev 适配保存原始响应、checksum、获取时间和解析结果；失败时保留最近有效快照。
+- Gateway 已实现 `IProviderRouter`，按 `Gateway:ProviderMode=local|remote` 和端点协议选择 OpenAI、Anthropic 或 Local 客户端。
+- 远程客户端接收并透传 provider 原生 JSON，只注入实际 model 和密钥；成功响应和原生错误响应保持 provider 形状，并使用有界超时、重试和 `Retry-After`。
+- models.dev 适配保存原始响应、checksum、获取时间和解析结果；失败时保留最近有效快照，本地源与远程源使用同一快照契约。
 - 本地源与远程源使用同一快照契约，价格字段保持 `models.dev`/`manual` 来源和 `Unpriced` 语义。
 
 ## 5. 存储与密钥端口

@@ -6,14 +6,16 @@ public sealed record ProviderRequest(
     string Protocol,
     string Prompt,
     int MaxOutputTokens,
-    string? ApiKey);
+    string? ApiKey,
+    string? NativeRequestJson = null);
 
 public sealed record ProviderResponse(
     string ProviderRequestId,
     string Text,
     int InputTokens,
     int OutputTokens,
-    long LatencyMs);
+    long LatencyMs,
+    string? NativeResponseJson = null);
 
 public interface IProviderClient
 {

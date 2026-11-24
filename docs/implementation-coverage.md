@@ -3,7 +3,7 @@
 - 更新日期：2026-11-23
 - 范围：FR-001～FR-090
 - 状态口径：已实现 = 当前用户约束的本地模式已完整验收，具备 API、页面和测试证据；部分实现 = 本地验收仍有缺口；未实现 = 当前无有效实现；已延后 = 决策明确不在当前范围。
-- 生产适配边界：真实 OpenAI/Anthropic 调用、models.dev 远程同步、Postgres/RustFS、远程 OIDC/GitHub、OTLP/Elastic、生产 WORM/异地备份和容器发布按用户约束未连接或未执行，不表述为生产能力。
+- 生产适配边界：OpenAI/Anthropic 与 models.dev 已实现可插拔适配但默认不启用；Postgres/RustFS、远程 OIDC/GitHub、OTLP/Elastic、生产 WORM/异地备份和容器发布按用户约束未连接或未执行，不表述为生产能力。
 - 本地验收汇总：87 项已实现、3 项明确延后、0 项部分实现、0 项未实现。
 
 | 编号 | 需求 | 状态 | 当前证据或缺口 |

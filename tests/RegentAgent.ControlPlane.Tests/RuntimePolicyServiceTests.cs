@@ -1,6 +1,7 @@
 using RegentAgent.ControlPlane.Application;
 using RegentAgent.Contracts.Models;
 using RegentAgent.Contracts.Operations;
+using RegentAgent.Providers;
 using RegentAgent.Storage;
 using Xunit;
 
@@ -83,6 +84,38 @@ public sealed class RuntimePolicyServiceTests
     }
 
     [Fact]
+    public async Task Model_catalog_source_is_pluggable_and_manual_prices_survive_refresh()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"model-catalog-source-{Guid.NewGuid():N}.json");
+        try
+        {
+            var service = new ModelOperationsService(new JsonDocumentStore<ModelPoolState>(path), TimeProvider.System,
+                new StubCatalogSource());
+            var tenantId = Guid.NewGuid();
+            await service.SeedAsync(tenantId, CancellationToken.None);
+            await service.SetManualPriceAsync(tenantId, new ManualModelPrice
+            {
+                Provider = "OpenAI", ModelId = "custom", InputPricePerMillion = 0.4m,
+                OutputPricePerMillion = 0.8m, Currency = "USD", Reason = "Test"
+            }, CancellationToken.None);
+
+            await service.RefreshSnapshotAsync(tenantId, new DateOnly(2026, 11, 25), CancellationToken.None);
+            var state = await service.GetAsync(tenantId, CancellationToken.None);
+
+            Assert.Equal(2, state.Snapshots.Count);
+            Assert.All(state.Snapshots, snapshot => Assert.Equal("stub-catalog", snapshot.Source));
+            var model = Assert.Single(state.Catalog);
+            Assert.Equal(0.4m, model.InputPricePerMillion);
+            Assert.Equal(0.8m, model.OutputPricePerMillion);
+            Assert.Equal("manual-price", model.Source);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Costs_are_idempotent_currency_safe_and_schedule_aware()
     {
         var path = Path.Combine(Path.GetTempPath(), $"runtime-{Guid.NewGuid():N}.json");
@@ -111,6 +144,25 @@ public sealed class RuntimePolicyServiceTests
         finally
         {
             if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    private sealed class StubCatalogSource : IModelCatalogSource
+    {
+        public string SourceId => "stub-catalog";
+
+        public Task<ModelCatalogSnapshot> FetchAsync(DateOnly snapshotDate, CancellationToken cancellationToken)
+        {
+            var entry = new ModelCatalogEntry
+            {
+                Provider = "OpenAI", ModelId = "custom", Version = "1", Protocol = "OpenAI",
+                PriceState = "Unpriced", Currency = "USD", Tier = "Unassigned", Source = SourceId
+            };
+            var snapshot = new ModelSnapshot($"stub-{snapshotDate:yyyyMMdd}", snapshotDate, SourceId, true)
+            {
+                RawJson = "[]", Checksum = "stub", FetchedAt = DateTimeOffset.UtcNow
+            };
+            return Task.FromResult(new ModelCatalogSnapshot(snapshot, [entry], "[]", "stub", DateTimeOffset.UtcNow));
         }
     }
 }

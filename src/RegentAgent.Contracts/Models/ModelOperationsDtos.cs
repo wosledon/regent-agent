@@ -1,6 +1,11 @@
 namespace RegentAgent.Contracts.Models;
 
-public sealed record ModelSnapshot(string Id, DateOnly SnapshotDate, string Source, bool Immutable);
+public sealed record ModelSnapshot(string Id, DateOnly SnapshotDate, string Source, bool Immutable)
+{
+    public string? RawJson { get; init; }
+    public string? Checksum { get; init; }
+    public DateTimeOffset? FetchedAt { get; init; }
+}
 
 public sealed class ModelCatalogEntry
 {

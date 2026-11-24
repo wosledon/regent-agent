@@ -4,47 +4,29 @@ using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class ModelOperationsService(JsonDocumentStore<ModelPoolState> store, TimeProvider clock)
+public sealed class ModelOperationsService(JsonDocumentStore<ModelPoolState> store, TimeProvider clock,
+    IModelCatalogSource? catalog = null)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
+    private readonly IModelCatalogSource catalog = catalog ?? new LocalModelCatalogSource(clock);
 
-    public async Task SeedAsync(Guid tenantId, CancellationToken cancellationToken)
+    public Task SeedAsync(Guid tenantId, CancellationToken cancellationToken) =>
+        MutateAsync(tenantId, async state =>
     {
-        var key = tenantId.ToString();
-        var state = await store.GetAsync(key, cancellationToken) ?? new ModelPoolState();
-        if (state.Snapshots.Count > 0) return;
+        if (state.Snapshots.Count > 0) return (false, state);
         var today = DateOnly.FromDateTime(clock.GetUtcNow().UtcDateTime);
-        var (snapshot, entries) = LocalModelCatalog.CreateSnapshot(today);
-        state.Snapshots.Add(snapshot);
-        state.Catalog.AddRange(entries);
-        await store.PutAsync(key, state, cancellationToken);
-    }
+        ApplySnapshot(state, await catalog.FetchAsync(today, cancellationToken));
+        return (true, state);
+    }, cancellationToken);
 
     public Task<ModelPoolState> GetAsync(Guid tenantId, CancellationToken cancellationToken) =>
         MutateAsync(tenantId, state => (false, state), cancellationToken);
 
     public Task<ModelPoolState> RefreshSnapshotAsync(Guid tenantId, DateOnly date, CancellationToken cancellationToken) =>
-        MutateAsync(tenantId, state =>
+        MutateAsync(tenantId, async state =>
     {
         if (state.Snapshots.Any(x => x.SnapshotDate == date)) return (false, state);
-        var (snapshot, entries) = LocalModelCatalog.CreateSnapshot(date);
-        state.Snapshots.Add(snapshot);
-        state.Catalog = entries.ToList();
-        foreach (var price in state.ManualPrices)
-        {
-            var entry = state.Catalog.FirstOrDefault(x => x.Provider == price.Provider && x.ModelId == price.ModelId);
-            if (entry is null) continue;
-            entry.InputPricePerMillion = price.InputPricePerMillion;
-            entry.OutputPricePerMillion = price.OutputPricePerMillion;
-            entry.Currency = price.Currency;
-            entry.PriceState = "Priced";
-            entry.Source = "manual-price";
-        }
-        foreach (var assignment in state.TierAssignments)
-        {
-            var entry = state.Catalog.FirstOrDefault(x => x.Provider == assignment.Provider && x.ModelId == assignment.ModelId);
-            if (entry is not null) entry.Tier = assignment.Tier;
-        }
+        ApplySnapshot(state, await catalog.FetchAsync(date, cancellationToken));
         return (true, state);
     }, cancellationToken);
 
@@ -165,6 +147,42 @@ public sealed class ModelOperationsService(JsonDocumentStore<ModelPoolState> sto
             return (false, new ModelTestResult(provider, modelId, model.Protocol, supported,
                 supported ? "Local contract test passed." : "Unsupported protocol."));
         }, cancellationToken);
+
+    private async Task<T> MutateAsync<T>(Guid tenantId, Func<ModelPoolState, Task<(bool Changed, T Result)>> mutation,
+        CancellationToken cancellationToken)
+    {
+        await gate.WaitAsync(cancellationToken);
+        try
+        {
+            var key = tenantId.ToString();
+            var state = await store.GetAsync(key, cancellationToken) ?? new ModelPoolState();
+            var (changed, result) = await mutation(state);
+            if (changed) await store.PutAsync(key, state, cancellationToken);
+            return result;
+        }
+        finally { gate.Release(); }
+    }
+
+    private static void ApplySnapshot(ModelPoolState state, ModelCatalogSnapshot snapshot)
+    {
+        state.Snapshots.Add(snapshot.Snapshot);
+        state.Catalog = snapshot.Entries.ToList();
+        foreach (var price in state.ManualPrices)
+        {
+            var entry = state.Catalog.FirstOrDefault(x => x.Provider == price.Provider && x.ModelId == price.ModelId);
+            if (entry is null) continue;
+            entry.InputPricePerMillion = price.InputPricePerMillion;
+            entry.OutputPricePerMillion = price.OutputPricePerMillion;
+            entry.Currency = price.Currency;
+            entry.PriceState = "Priced";
+            entry.Source = "manual-price";
+        }
+        foreach (var assignment in state.TierAssignments)
+        {
+            var entry = state.Catalog.FirstOrDefault(x => x.Provider == assignment.Provider && x.ModelId == assignment.ModelId);
+            if (entry is not null) entry.Tier = assignment.Tier;
+        }
+    }
 
     private async Task<T> MutateAsync<T>(Guid tenantId, Func<ModelPoolState, (bool Changed, T Result)> mutation,
         CancellationToken cancellationToken)

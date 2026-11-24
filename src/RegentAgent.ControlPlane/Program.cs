@@ -19,6 +19,7 @@ using RegentAgent.Evaluation;
 using RegentAgent.Memory;
 using RegentAgent.Performance;
 using RegentAgent.Projects;
+using RegentAgent.Providers;
 using RegentAgent.Workflows;
 using RegentAgent.Contracts.Agents;
 using RegentAgent.Contracts.Artifacts;
@@ -68,8 +69,30 @@ builder.Services.AddSingleton(sp => new GovernanceService(
     sp.GetRequiredService<LocalArtifactSigner>(), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(new JsonDocumentStore<DataLifecycleState>("data/modules/lifecycle.json"));
 builder.Services.AddScoped<DataLifecycleService>();
+var modelCatalogMode = builder.Configuration["ModelCatalog:Mode"] ?? "local";
+var modelsDevOptions = new ModelsDevCatalogOptions
+{
+    Url = builder.Configuration["ModelCatalog:ModelsDevUrl"] ?? "https://models.dev/api.json",
+    TimeoutSeconds = builder.Configuration.GetValue("ModelCatalog:TimeoutSeconds", 30),
+    MaxResponseBytes = builder.Configuration.GetValue("ModelCatalog:MaxResponseBytes", 16 * 1024 * 1024),
+    MaxRetries = builder.Configuration.GetValue("ModelCatalog:MaxRetries", 2),
+    BaseDelayMilliseconds = builder.Configuration.GetValue("ModelCatalog:BaseDelayMilliseconds", 200)
+};
+if (modelCatalogMode.Equals("models-dev", StringComparison.OrdinalIgnoreCase)) modelsDevOptions.Validate();
+builder.Services.AddSingleton(modelsDevOptions);
+builder.Services.AddHttpClient("models-dev", (provider, client) =>
+    client.Timeout = TimeSpan.FromSeconds(provider.GetRequiredService<ModelsDevCatalogOptions>().TimeoutSeconds));
+builder.Services.AddSingleton<IModelCatalogSource>(provider => modelCatalogMode.Trim().ToLowerInvariant() switch
+{
+    "local" => new LocalModelCatalogSource(provider.GetRequiredService<TimeProvider>()),
+    "models-dev" => new ModelsDevCatalogSource(provider.GetRequiredService<IHttpClientFactory>().CreateClient("models-dev"),
+        provider.GetRequiredService<ModelsDevCatalogOptions>(), provider.GetRequiredService<TimeProvider>()),
+    _ => throw new InvalidOperationException("Model catalog mode must be local or models-dev.")
+});
+builder.Services.AddSingleton(new JsonDocumentStore<ModelPoolState>("data/modules/model-pool.json"));
 builder.Services.AddSingleton(sp => new ModelOperationsService(
-    new JsonDocumentStore<ModelPoolState>("data/modules/model-pool.json"), sp.GetRequiredService<TimeProvider>()));
+    sp.GetRequiredService<JsonDocumentStore<ModelPoolState>>(), sp.GetRequiredService<TimeProvider>(),
+    sp.GetRequiredService<IModelCatalogSource>()));
 builder.Services.AddSingleton(sp => new RuntimePolicyService(
     new JsonDocumentStore<RuntimePolicyState>("data/modules/runtime-policy.json"), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new WorkflowService(
