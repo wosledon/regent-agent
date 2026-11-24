@@ -20,6 +20,7 @@ public sealed class RegentDbContext(DbContextOptions<RegentDbContext> options) :
     public DbSet<ProjectRecord> Projects => Set<ProjectRecord>();
     public DbSet<MilestoneRecord> Milestones => Set<MilestoneRecord>();
     public DbSet<TaskRecord> Tasks => Set<TaskRecord>();
+    public DbSet<TaskCoordinationRecord> TaskCoordinations => Set<TaskCoordinationRecord>();
     public DbSet<WorkEntryRecord> WorkEntries => Set<WorkEntryRecord>();
     public DbSet<ApprovalRecord> Approvals => Set<ApprovalRecord>();
     public DbSet<AuditRecord> AuditRecords => Set<AuditRecord>();
@@ -89,7 +90,17 @@ public sealed class RegentDbContext(DbContextOptions<RegentDbContext> options) :
 
         modelBuilder.Entity<TaskRecord>(entity =>
         {
+            entity.Property(x => x.Version).IsConcurrencyToken();
             entity.HasIndex(x => new { x.TenantId, x.ProjectId, x.Status });
+            entity.HasIndex(x => new { x.TenantId, x.AssigneeEmployeeId, x.Status });
+        });
+
+        modelBuilder.Entity<TaskCoordinationRecord>(entity =>
+        {
+            entity.Property(x => x.Version).IsConcurrencyToken();
+            entity.HasIndex(x => new { x.TenantId, x.Kind, x.Status, x.SortKey });
+            entity.HasIndex(x => new { x.TenantId, x.TargetEmployeeId, x.Status, x.SortKey });
+            entity.HasIndex(x => new { x.TenantId, x.TaskId, x.Kind, x.Status });
         });
 
         modelBuilder.Entity<WorkEntryRecord>(entity =>

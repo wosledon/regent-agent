@@ -74,6 +74,9 @@ public sealed class LocalExternalIdentityProvider : IExternalIdentityProvider
             request.Email, true, request.DisplayName ?? request.Email, new Dictionary<string, string>
             {
                 ["iss"] = request.Issuer, ["sub"] = request.Subject, ["email"] = request.Email
-            }));
+            })
+            {
+                AuthTime = DateTimeOffset.UtcNow
+            });
     }
 }

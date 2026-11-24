@@ -1,6 +1,6 @@
 # 27 企业 OIDC 与认证策略
 
-- 版本：v0.1（待评审）
+- 版本：v0.2（本地实现已验收；真实 IdP 连通性未验证）
 - 范围：租户 OIDC、issuer+sub、邀请预置、组映射、IdP MFA、SSO 模式和紧急恢复
 - 对应需求：FR-069、BR-088、BR-089、BR-090
 - 对应缺口：G-40
@@ -214,15 +214,24 @@ required 模式必须包含：
 
 ## 13. API
 
-- `GET /auth/oidc/{provider}/start`。
-- `GET /auth/oidc/{provider}/callback`。
-- `POST /admin/oidc/providers`：创建配置。
-- `POST /admin/oidc/providers/{id}/activate`：激活配置。
-- `POST /admin/oidc/invitations`：邀请用户。
-- `DELETE /admin/oidc/invitations/{id}`：撤销邀请。
-- `PUT /admin/oidc/group-mapping`：更新能力映射。
-- `POST /admin/oidc/emergency-access`：紧急访问。
+- `GET /auth/{provider}/start`、`GET /auth/{provider}/callback`：授权事务与回调。
+- `PUT /v1/tenants/{tenantId}/identity-providers/{provider}`：保存配置草稿。
+- `POST /v1/tenants/{tenantId}/identity-providers/{provider}/activate`：验证并激活。
+- `GET|PUT /v1/tenants/{tenantId}/authentication-policy`：读取和更新 SSO 策略。
+- `PUT /v1/tenants/{tenantId}/oidc/group-mapping`：更新组能力映射并撤销变化权限的会话。
+- `POST /v1/tenants/{tenantId}/oidc/group-mapping/refresh`：按绑定中的组声明重新计算能力。
+- `POST /v1/tenants/{tenantId}/emergency-access`：Owner 配置紧急凭据。
+- `POST /auth/emergency-access`：使用紧急凭据，创建 15 分钟受限会话并返回轮换凭据。
 - `POST /auth/logout`：撤销本地会话。
+
+## 13.1 当前实现状态
+
+- required 模式启用前校验 active HTTPS OIDC 与未过期紧急凭据；启用后撤销非 OIDC 会话并禁止密码、GitHub 和非 OIDC 租户切换。
+- OIDC 策略执行 `acr`、`amr`、`auth_time` 和必需组声明；组只映射显式能力，禁止 Owner 与高影响治理能力。
+- 会话中间件校验持久会话、用户/租户绑定、绝对过期和空闲超时；组能力变化撤销受影响会话。
+- 紧急会话只允许 `sso.restore` 与 `account.access`，普通 `/v1`、`/agent/v1` 和 Hub 请求返回 403；凭据单次使用后轮换并写入审计与安全通知。
+- Tenant Dashboard 设置页提供策略、Provider、组映射和紧急凭据管理；登录页提供受限紧急恢复入口。
+- 真实 IdP、JWKS 轮换和跨区域容灾仍按约束未连接验证；SAML、BFF、设备管理和本地 WebAuthn/TOTP 保持后置。
 
 ## 14. 审计事件
 

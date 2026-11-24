@@ -5,7 +5,7 @@ namespace RegentAgent.ControlPlane.Application;
 
 public sealed class SchemaVersionService(RegentDbContext db, TimeProvider clock)
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
 
     public async Task ValidateAsync(CancellationToken cancellationToken, bool allowBootstrap = true)
     {

@@ -218,6 +218,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/emergency-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["EmergencyAccessRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EmergencyAccessResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/github/login": {
         parameters: {
             query?: never;
@@ -1106,7 +1145,29 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantId: string;
+                    provider: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IdentityProviderDto"];
+                    };
+                };
+            };
+        };
         put: {
             parameters: {
                 query?: never;
@@ -1135,6 +1196,219 @@ export interface paths {
             };
         };
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants/{tenantId}/identity-providers/{provider}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantId: string;
+                    provider: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IdentityProviderDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants/{tenantId}/authentication-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuthenticationPolicyDto"];
+                    };
+                };
+            };
+        };
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AuthenticationPolicyDto"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AuthenticationPolicyDto"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants/{tenantId}/oidc/group-mapping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateGroupMappingRequest"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants/{tenantId}/oidc/group-mapping/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GroupMappingRefreshResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/tenants/{tenantId}/emergency-access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    tenantId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EmergencyAccessDto"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -5496,6 +5770,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/collaboration/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    Limit: number | string;
+                    Cursor?: string;
+                    Kind?: string;
+                    Status?: string;
+                    EmployeeId?: string;
+                    IncomingOnly?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PageOfTaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/collaboration/requests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/communication/routes": {
         parameters: {
             query?: never;
@@ -9213,6 +9566,651 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/v1/collaboration/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    Limit: number | string;
+                    Cursor?: string;
+                    Kind?: string;
+                    Status?: string;
+                    EmployeeId?: string;
+                    IncomingOnly?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PageOfTaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/requests/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/delegations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateTaskDelegationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/delegations/{id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CoordinationDecisionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/delegations/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CoordinationCancelRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/handoffs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateHandoffRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/handoffs/{id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CoordinationDecisionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/help-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateHelpRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/help-requests/{id}/responses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["HelpResponseRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/help-requests/{id}/context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["HelpContextRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/help-requests/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CoordinationResolutionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/interrupts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateInterruptRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/interrupts/{id}/checkpoint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["InterruptCheckpointRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/interrupts/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CoordinationResolutionRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/interrupts/{id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["InterruptResumeRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InterruptResumeResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/collaboration/interrupts/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CoordinationCancelRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TaskCoordinationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/v1/me": {
         parameters: {
             query?: never;
@@ -9903,6 +10901,20 @@ export interface components {
             brokenAtSeq: null | number | string;
             message: null | string;
         };
+        AuthenticationPolicyDto: {
+            mode: string;
+            requireGroupClaim: boolean;
+            allowedAcrValues: string[];
+            requiredAmrValues: string[];
+            /** Format: int32 */
+            maxAuthenticationAgeMinutes: number | string;
+            /** Format: int32 */
+            maxSessionMinutes: number | string;
+            /** Format: int32 */
+            idleTimeoutMinutes: number | string;
+            /** Format: int32 */
+            version: number | string;
+        };
         AutoAssignCandidate: {
             /** Format: uuid */
             employeeId?: string;
@@ -10157,6 +11169,7 @@ export interface components {
             taskId: null | string;
             evidenceRefs: string[];
             auditHash: null | string;
+            targetEmployeeId?: null | string;
         };
         CollaborationEdgeDto: {
             id: string;
@@ -10209,6 +11222,11 @@ export interface components {
             projectCount: number | string;
             /** Format: int32 */
             activityCount: number | string;
+            /**
+             * Format: int32
+             * @default 0
+             */
+            coordinationCount: number | string;
         };
         CollaborationTraceDto: {
             entityType: string;
@@ -10257,6 +11275,16 @@ export interface components {
             evidenceRef?: string;
             appealReason?: null | string;
             appealRequester?: null | string;
+        };
+        CoordinationCancelRequest: {
+            reason: string;
+        };
+        CoordinationDecisionRequest: {
+            accepted: boolean;
+            reason: string;
+        };
+        CoordinationResolutionRequest: {
+            resolution: string;
         };
         CorrectCostRequest: {
             /** Format: double */
@@ -10345,11 +11373,37 @@ export interface components {
             /** Format: int32 */
             minutes: number | string;
         };
+        CreateHandoffRequest: {
+            /** Format: uuid */
+            taskId: string;
+            /** Format: uuid */
+            recipientEmployeeId: string;
+            leaseToken: string;
+            package: components["schemas"]["HandoffPackageDto"];
+        };
+        CreateHelpRequest: {
+            /** Format: uuid */
+            taskId: string;
+            /** Format: uuid */
+            helperEmployeeId: string;
+            question: string;
+            attemptedSteps: string[];
+            evidenceRefs: string[];
+            expectedAnswer: string;
+            /** Format: date-time */
+            deadline: string;
+        };
         CreateImprovementRequest: {
             employeeId: string;
             category: string;
             summary: string;
             expectedBenefit: string;
+        };
+        CreateInterruptRequest: {
+            /** Format: uuid */
+            taskId: string;
+            priority: string;
+            reason: string;
         };
         CreateOwnershipDelegationRequest: {
             /** Format: uuid */
@@ -10389,6 +11443,18 @@ export interface components {
             /** Format: uuid */
             promptBundleId: string;
             configJson: string;
+        };
+        CreateTaskDelegationRequest: {
+            /** Format: uuid */
+            taskId: string;
+            /** Format: uuid */
+            delegateEmployeeId: string;
+            /** Format: int32 */
+            weight: number | string;
+            acceptanceCriteria: string;
+            evidenceRequirements: string[];
+            requiredCapabilities: string[];
+            reason: string;
         };
         CreateTenantRequest: {
             name: string;
@@ -10625,6 +11691,36 @@ export interface components {
             /** Format: date-time */
             validatedAt?: string;
         };
+        EmergencyAccessDto: {
+            /** Format: uuid */
+            tenantId: string;
+            credential: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            expiresAt: string;
+        };
+        EmergencyAccessRequest: {
+            /** Format: uuid */
+            tenantId: string;
+            credential: string;
+            purpose: string;
+        };
+        EmergencyAccessResult: {
+            /** Format: uuid */
+            userId: string;
+            /** Format: uuid */
+            tenantId: string;
+            /** Format: uuid */
+            sessionId: string;
+            /** Format: date-time */
+            expiresAt: string;
+            displayName: string;
+            role: string;
+            capabilities: string[];
+            rotatedCredential: string;
+            email?: string;
+        };
         EmployeeModelBinding: {
             /** Format: uuid */
             employeeId?: string;
@@ -10850,6 +11946,38 @@ export interface components {
             incidents?: components["schemas"]["SecurityIncident"][];
             approvalDelegations?: components["schemas"]["ApprovalDelegation"][];
         };
+        GroupMappingRefreshResult: {
+            /** Format: int32 */
+            evaluated: number | string;
+            /** Format: int32 */
+            updated: number | string;
+            /** Format: int32 */
+            denied: number | string;
+            /** Format: date-time */
+            refreshedAt: string;
+        };
+        HandoffPackageDto: {
+            goal: string;
+            acceptanceCriteria: string;
+            checkpointJson: string;
+            completedItems: string[];
+            remainingItems: string[];
+            artifactRefs: string[];
+            decisions: string[];
+            risksAndCounterEvidence: string[];
+            blockers: string[];
+            nextAction: string;
+        };
+        HelpContextRequest: {
+            context: string;
+            evidenceRefs: string[];
+        };
+        HelpResponseRequest: {
+            responseType: string;
+            answer: string;
+            /** Format: uuid */
+            redirectEmployeeId?: null | string;
+        };
         HireCandidateRequest: {
             approvalId: string;
         };
@@ -10897,6 +12025,19 @@ export interface components {
             taint?: string;
             findings?: string[];
             recommendedAction?: string;
+        };
+        InterruptCheckpointRequest: {
+            leaseToken: string;
+            checkpointJson: string;
+        };
+        InterruptResumeRequest: {
+            leaseToken: string;
+        };
+        InterruptResumeResult: {
+            coordination: components["schemas"]["TaskCoordinationDto"];
+            leaseToken: string;
+            /** Format: date-time */
+            leaseExpiresAt: string;
         };
         InterviewStageDto: {
             /** Format: uuid */
@@ -11332,6 +12473,12 @@ export interface components {
             status: string;
             reason: string;
         };
+        PageOfTaskCoordinationDto: {
+            items: components["schemas"]["TaskCoordinationDto"][];
+            nextCursor: null | string;
+            /** Format: date-time */
+            snapshotAt: string;
+        };
         PerformActionRequest: {
             employeeId: string;
             actionType: string;
@@ -11756,6 +12903,10 @@ export interface components {
             /** Format: date-time */
             expiresAt: string;
             status: string;
+            /** @default Password */
+            authMethod: string;
+            /** @default Standard */
+            sessionKind: string;
         };
         /** @enum {unknown} */
         Severity: "low" | "medium" | "high" | "critical";
@@ -11815,6 +12966,36 @@ export interface components {
             output: string;
             status: string;
             evidenceRefs: string[];
+        };
+        TaskCoordinationDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenantId: string;
+            /** Format: uuid */
+            taskId: string;
+            /** Format: uuid */
+            projectId: string;
+            kind: string;
+            status: string;
+            /** Format: uuid */
+            requesterEmployeeId: string;
+            /** Format: uuid */
+            targetEmployeeId: string;
+            priority: string;
+            summary: string;
+            detailsJson: string;
+            responseJson: null | string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            /** Format: date-time */
+            deadline: null | string;
+            /** Format: date-time */
+            completedAt: null | string;
+            /** Format: int32 */
+            version: number | string;
         };
         TaskGovernanceState: {
             taskTypes?: components["schemas"]["TaskTypeDefinition"][];
@@ -11948,6 +13129,9 @@ export interface components {
             allowed?: boolean;
             /** Format: date-time */
             createdAt?: string;
+        };
+        UpdateGroupMappingRequest: {
+            groupMappingJson: string;
         };
         WilsonInterval: {
             /** Format: double */

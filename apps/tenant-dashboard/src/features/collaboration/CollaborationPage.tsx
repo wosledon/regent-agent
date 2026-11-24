@@ -5,6 +5,7 @@ import { Card, EmptyState, ErrorState, FreshnessBadge, Grid, LoadingState, PageH
 import { api } from '../../lib/api-client/api';
 import type { CollaborationActivity, CollaborationNode } from '../../lib/domain-types';
 import { ActivityTimeline } from './ActivityTimeline';
+import { CoordinationPanel } from './CoordinationPanel';
 import { NetworkView } from './NetworkView';
 import { OfficeView } from './OfficeView';
 import { OrgChartView } from './OrgChartView';
@@ -71,7 +72,7 @@ export function CollaborationPage() {
         <Card title="Employees"><Text variant="h2">{graph.data.summary.employeeCount}</Text><Text variant="caption">Active organization members</Text></Card>
         <Card title="Groups"><Text variant="h2">{graph.data.summary.conversationCount}</Text><Text variant="caption">Company, project and topic rooms</Text></Card>
         <Card title="Collaborations"><Text variant="h2">{graph.data.summary.collaborationCount}</Text><Text variant="caption">Employee pairs with shared messages</Text></Card>
-        <Card title="Traceable events"><Text variant="h2">{graph.data.summary.activityCount}</Text><FreshnessBadge freshness="fresh" /></Card>
+        <Card title="Traceable events"><Text variant="h2">{graph.data.summary.activityCount}</Text><Text variant="caption">{graph.data.summary.coordinationCount} coordination requests</Text><FreshnessBadge freshness="fresh" /></Card>
       </Grid>
       <Card title="Workspace controls">
         <Stack direction="row" wrap spacing={2} alignItems="center">
@@ -100,6 +101,7 @@ export function CollaborationPage() {
       {view === 'org' ? <OrgChartView nodes={filteredNodes} edges={filteredEdges} selectedId={selectedNode?.id} onSelect={selectNode} /> : null}
       {view === 'network' ? <NetworkView nodes={filteredNodes} edges={filteredEdges} selectedId={selectedNode?.id} onSelect={selectNode} /> : null}
       {view === 'timeline' ? <ActivityTimeline activities={filteredActivities} onActivitySelect={selectActivity} /> : null}
+      <CoordinationPanel employees={employees.data ?? []} />
       <TracePanel node={selectedNode} employees={employees.data ?? []} onClose={() => {
         const next = new URLSearchParams(searchParams);
         next.delete('entityType');

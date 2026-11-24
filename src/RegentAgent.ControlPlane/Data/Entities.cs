@@ -23,6 +23,7 @@ public sealed class MembershipRecord
     public Guid TenantId { get; set; }
     public Guid UserId { get; set; }
     public string Role { get; set; } = "Owner";
+    public string CapabilitiesJson { get; set; } = "[]";
 }
 
 public sealed class CharterRecord
@@ -178,6 +179,33 @@ public sealed class TaskRecord
     public DateTimeOffset? LeaseExpiresAt { get; set; }
     public int Attempt { get; set; }
     public string? CheckpointJson { get; set; }
+    public Guid? AssigneeEmployeeId { get; set; }
+    public Guid? AccountableEmployeeId { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public int Version { get; set; } = 1;
+}
+
+public sealed class TaskCoordinationRecord
+{
+    public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
+    public Guid TaskId { get; set; }
+    public Guid ProjectId { get; set; }
+    public string Kind { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public Guid RequesterEmployeeId { get; set; }
+    public Guid TargetEmployeeId { get; set; }
+    public string Priority { get; set; } = "P2";
+    public string Summary { get; set; } = string.Empty;
+    public string DetailsJson { get; set; } = "{}";
+    public string? ResponseJson { get; set; }
+    public string? LeaseToken { get; set; }
+    public string SortKey { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+    public DateTimeOffset? Deadline { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public int Version { get; set; } = 1;
 }
 
 public sealed class WorkEntryRecord

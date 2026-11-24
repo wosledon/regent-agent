@@ -15,13 +15,16 @@ function readSession(): SessionSummary | null {
   }
 }
 
-function summaryFromAuth(result: Pick<AuthResponse, 'email' | 'display_name' | 'tenant_id'>): SessionSummary {
-  return { email: result.email, displayName: result.display_name, tenantId: result.tenant_id };
+function summaryFromAuth(result: Pick<AuthResponse, 'email' | 'display_name' | 'tenant_id' | 'role' | 'auth_method' | 'session_kind'>): SessionSummary {
+  return {
+    email: result.email, displayName: result.display_name, tenantId: result.tenant_id,
+    role: result.role, authMethod: result.auth_method, sessionKind: result.session_kind
+  };
 }
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [session, setSession] = useState<SessionSummary | null>(readSession);
-  const acceptAuth = useCallback((result: Pick<AuthResponse, 'email' | 'display_name' | 'tenant_id'>) => {
+  const acceptAuth = useCallback((result: Pick<AuthResponse, 'email' | 'display_name' | 'tenant_id' | 'role' | 'auth_method' | 'session_kind'>) => {
     const next = summaryFromAuth(result);
     sessionStorage.setItem(storageKey, JSON.stringify(next));
     setSession(next);
@@ -50,7 +53,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
       return next;
     });
   }, []);
-  const value = useMemo(() => ({ session, login, passwordLogin, register, logout, switchTenant }),
-    [session, login, passwordLogin, register, logout, switchTenant]);
+  const emergencyLogin = useCallback(async (tenantId: string, credential: string, purpose: string) => {
+    const result = await api.useEmergencyAccess(tenantId, credential, purpose);
+    acceptAuth({
+      email: result.email, display_name: result.displayName, tenant_id: result.tenantId,
+      role: result.role, auth_method: 'Emergency', session_kind: 'Emergency'
+    });
+    return result.rotatedCredential;
+  }, [acceptAuth]);
+  const value = useMemo(() => ({ session, login, passwordLogin, register, logout, switchTenant, emergencyLogin }),
+    [session, login, passwordLogin, register, logout, switchTenant, emergencyLogin]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

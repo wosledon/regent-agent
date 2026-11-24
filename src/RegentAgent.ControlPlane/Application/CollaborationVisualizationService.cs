@@ -16,6 +16,8 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
             .Where(x => x.TenantId == tenantId && x.EndedAt == null).ToListAsync(cancellationToken);
         var projects = await db.Projects.AsNoTracking().Where(x => x.TenantId == tenantId).OrderBy(x => x.Name).ToListAsync(cancellationToken);
         var tasks = await db.Tasks.AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken);
+        var coordinations = (await db.TaskCoordinations.AsNoTracking().Where(x => x.TenantId == tenantId)
+            .ToListAsync(cancellationToken)).OrderByDescending(x => x.CreatedAt).Take(500).ToList();
         var work = await db.WorkEntries.AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken);
         var conversations = await chat.ListAsync(tenantId.ToString(), cancellationToken);
         var messages = await chat.ListAllMessagesAsync(tenantId.ToString(), cancellationToken);
@@ -37,7 +39,8 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
             var employee = employees[index];
             var position = employeePosition.GetValueOrDefault(employee.Id);
             var depth = PositionDepth(position, positionById);
-            var employeeTasks = tasks.Where(x => string.Equals(x.Assignee, employee.DisplayName, StringComparison.OrdinalIgnoreCase)).ToArray();
+            var employeeTasks = tasks.Where(x => x.AssigneeEmployeeId == employee.Id
+                || string.Equals(x.Assignee, employee.DisplayName, StringComparison.OrdinalIgnoreCase)).ToArray();
             var currentTask = employeeTasks.FirstOrDefault(x => x.Status is "InProgress" or "InReview" or "Blocked") ?? employeeTasks.FirstOrDefault();
             var managerId = position?.ParentPositionId is { } parentPositionId
                 ? positionEmployee.GetValueOrDefault(parentPositionId)
@@ -81,8 +84,19 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
         }
         foreach (var task in tasks)
         {
-            if (!projectById.ContainsKey(task.ProjectId) || !employeeByName.TryGetValue(task.Assignee, out var employee)) continue;
-            AddEdge(edges, "works_on", $"employee:{employee.Id}", $"project:{task.ProjectId}", task.Weight, task.Title);
+            if (!projectById.ContainsKey(task.ProjectId)) continue;
+            var employee = task.AssigneeEmployeeId is { } assigneeId
+                ? employeeById.GetValueOrDefault(assigneeId)
+                : employeeByName.GetValueOrDefault(task.Assignee);
+            if (employee is not null)
+                AddEdge(edges, "works_on", $"employee:{employee.Id}", $"project:{task.ProjectId}", task.Weight, task.Title);
+        }
+        foreach (var coordination in coordinations)
+        {
+            if (!employeeById.ContainsKey(coordination.RequesterEmployeeId)
+                || !employeeById.ContainsKey(coordination.TargetEmployeeId)) continue;
+            AddEdge(edges, coordination.Kind.ToLowerInvariant(), $"employee:{coordination.RequesterEmployeeId}",
+                $"employee:{coordination.TargetEmployeeId}", 1, $"{coordination.Status} · {coordination.Summary}");
         }
         var collaborationWeights = new Dictionary<(string Source, string Target), int>();
         foreach (var message in messages)
@@ -123,12 +137,21 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
                 $"{message.MessageType}: {title}", message.Sender, message.ActorType, "Message", message.Id, sender?.Id.ToString(),
                 message.ConversationId, null, null, message.EvidenceRefs, null));
         }
+        foreach (var coordination in coordinations)
+        {
+            var actor = employeeById.GetValueOrDefault(coordination.RequesterEmployeeId);
+            activities.Add(new CollaborationActivityDto($"coordination:{coordination.Id}", coordination.UpdatedAt,
+                coordination.Kind, $"{coordination.Kind} {coordination.Status}: {coordination.Summary}",
+                actor?.DisplayName ?? "Employee", "Agent", "Coordination", coordination.Id.ToString(),
+                coordination.RequesterEmployeeId.ToString(), null, coordination.ProjectId.ToString(),
+                coordination.TaskId.ToString(), [], null, coordination.TargetEmployeeId.ToString()));
+        }
         foreach (var audit in audits)
         {
             var refs = ReadPayloadRefs(audit.PayloadJson);
             activities.Add(new CollaborationActivityDto($"audit:{audit.Seq}", audit.CreatedAt, "Audit", audit.EventType,
                 audit.Actor, ReadPayloadActorType(audit.PayloadJson), "Audit", refs.SourceId ?? audit.Seq.ToString(), refs.EmployeeId, refs.ConversationId,
-                refs.ProjectId, refs.TaskId, [], audit.Hash));
+                refs.ProjectId, refs.TaskId, [], audit.Hash, refs.TargetEmployeeId));
         }
         activities = activities.OrderByDescending(x => x.OccurredAt).Take(300).ToList();
 
@@ -136,13 +159,13 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
         {
             var node = nodes[index];
             var count = activities.Count(x =>
-                (node.EmployeeId is not null && x.EmployeeId == node.EmployeeId)
+                (node.EmployeeId is not null && (x.EmployeeId == node.EmployeeId || x.TargetEmployeeId == node.EmployeeId))
                 || (node.ConversationId is not null && x.ConversationId == node.ConversationId)
                 || (node.ProjectId is not null && x.ProjectId == node.ProjectId));
             nodes[index] = node with { ActivityCount = count };
         }
         var summary = new CollaborationSummaryDto(employees.Count, conversations.Count, messages.Count,
-            edges.Count(x => x.Value.Kind == "collaborates"), projects.Count, activities.Count);
+            edges.Count(x => x.Value.Kind == "collaborates"), projects.Count, activities.Count, coordinations.Count);
         return new CollaborationGraphDto(nodes, edges.Values.OrderBy(x => x.Kind).ThenBy(x => x.SourceId).ToArray(),
             activities, summary, clock.GetUtcNow());
     }
@@ -154,7 +177,7 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
         var normalized = entityType.Trim().ToLowerInvariant();
         var activities = graph.Activities.Where(x => normalized switch
         {
-            "employee" => x.EmployeeId == entityId || x.SourceId == entityId,
+            "employee" => x.EmployeeId == entityId || x.TargetEmployeeId == entityId || x.SourceId == entityId,
             "conversation" => x.ConversationId == entityId || x.SourceId == entityId,
             "project" => x.ProjectId == entityId || x.SourceId == entityId,
             "task" => x.TaskId == entityId || x.SourceId == entityId,
@@ -185,17 +208,18 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
         return depth;
     }
 
-    private static (string? SourceId, string? EmployeeId, string? ConversationId, string? ProjectId, string? TaskId)
-        ReadPayloadRefs(string json)
+    private static (string? SourceId, string? EmployeeId, string? ConversationId, string? ProjectId, string? TaskId,
+        string? TargetEmployeeId) ReadPayloadRefs(string json)
     {
         try
         {
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
-            return (Read(root, "message_id", "conversation_id", "employee_id", "project_id", "task_id", "action_id", "id"),
-                Read(root, "employee_id"), Read(root, "conversation_id"), Read(root, "project_id"), Read(root, "task_id"));
+            return (Read(root, "coordination_id", "message_id", "conversation_id", "employee_id", "project_id", "task_id", "action_id", "id"),
+                Read(root, "employee_id"), Read(root, "conversation_id"), Read(root, "project_id"), Read(root, "task_id"),
+                Read(root, "target_employee_id"));
         }
-        catch (JsonException) { return (null, null, null, null, null); }
+        catch (JsonException) { return (null, null, null, null, null, null); }
     }
 
     private static string ReadPayloadActorType(string json)

@@ -10,6 +10,8 @@ import type {
   KpiSnapshot,
   MemoryClaim,
   NotificationItem,
+  PageResult,
+  TaskCoordination,
   WorkflowDefinition,
   WorkflowRun
 } from '../domain-types';
@@ -53,6 +55,10 @@ export interface AuthResponse {
   tenant_id: string;
   session_id: string;
   recovery_codes: string[];
+  role?: string;
+  auth_method?: string;
+  session_kind?: string;
+  capabilities?: string[];
 }
 
 export const api = {
@@ -70,10 +76,26 @@ export const api = {
   ownershipDelegations: (tenantId: string) => request<Schema['OwnershipDelegationDto'][]>(`/v1/tenants/${tenantId}/ownership-delegations`),
   createOwnershipDelegation: (tenantId: string, delegateUserId: string) =>
     post<Schema['OwnershipDelegationDto']>(`/v1/tenants/${tenantId}/ownership-delegations`, { delegateUserId, expiresInHours: 24, reason: 'Planned absence' }),
-  configureIdentityProvider: (tenantId: string, provider: string, issuer: string, clientId: string) =>
+  configureIdentityProvider: (tenantId: string, provider: string, issuer: string, clientId: string,
+    clientSecretRef = '', redirectUri = '', groupMappingJson = '{}') =>
     put<Schema['IdentityProviderDto']>(`/v1/tenants/${tenantId}/identity-providers/${provider}`, {
-      tenantId, provider, issuer, clientId, enabled: true, groupMappingJson: '{}'
+      tenantId, provider, issuer, clientId, clientSecretRef, redirectUri, groupMappingJson,
+      enabled: false, status: 'Draft', scopes: 'openid profile', groupClaim: 'groups'
     }),
+  activateIdentityProvider: (tenantId: string, provider: string) =>
+    post<Schema['IdentityProviderDto']>(`/v1/tenants/${tenantId}/identity-providers/${provider}/activate`),
+  authenticationPolicy: (tenantId: string) =>
+    request<Schema['AuthenticationPolicyDto']>(`/v1/tenants/${tenantId}/authentication-policy`),
+  updateAuthenticationPolicy: (tenantId: string, policy: Schema['AuthenticationPolicyDto']) =>
+    put<Schema['AuthenticationPolicyDto']>(`/v1/tenants/${tenantId}/authentication-policy`, policy),
+  updateGroupMapping: (tenantId: string, groupMappingJson: string) =>
+    put<void>(`/v1/tenants/${tenantId}/oidc/group-mapping`, { groupMappingJson }),
+  refreshGroupMappings: (tenantId: string) =>
+    post<Schema['GroupMappingRefreshResult']>(`/v1/tenants/${tenantId}/oidc/group-mapping/refresh`),
+  configureEmergencyAccess: (tenantId: string) =>
+    post<Schema['EmergencyAccessDto']>(`/v1/tenants/${tenantId}/emergency-access`),
+  useEmergencyAccess: (tenantId: string, credential: string, purpose: string) =>
+    post<Schema['EmergencyAccessResult'] & { email: string }>('/auth/emergency-access', { tenantId, credential, purpose }),
   localization: () => request<Schema['LocalizationSettings']>('/v1/localization'),
   updateLocalization: (settings: Schema['LocalizationSettings']) => put<Schema['LocalizationSettings']>('/v1/localization', settings),
   displaySuffix: () => request<Schema['DisplaySuffixDto']>('/v1/profile/display-suffix'),
@@ -145,6 +167,8 @@ export const api = {
   collaborationGraph: () => request<CollaborationGraph>('/v1/collaboration/graph'),
   collaborationTrace: (entityType: string, entityId: string) =>
     request<CollaborationTrace>(`/v1/collaboration/trace?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}`),
+  collaborationRequests: (kind = 'all', status = 'all') => request<PageResult<TaskCoordination>>(
+    `/v1/collaboration/requests?limit=100${kind === 'all' ? '' : `&kind=${encodeURIComponent(kind)}`}${status === 'all' ? '' : `&status=${encodeURIComponent(status)}`}`),
   evaluationSuites: () => request<BenchmarkSuite[]>('/v1/evaluation-suites'),
   evaluations: () => request<EvaluationRun[]>('/v1/evaluations/runs'),
   runEvaluation: (suiteId: string, candidateEmployeeId: string, seed = 42) =>

@@ -157,7 +157,7 @@
 | 认证租户 | `/auth`、`/tenants`、`/memberships` | ControlPlane Identity |
 | 组织 | `/positions`、`/employees`、`/assignments` | ControlPlane Organization |
 | 项目 | `/projects`、`/requirements`、`/tasks`、`/defects` | Projects |
-| 通信聊天 | `/conversations`、`/messages`、`/routes` | Communication/Chat |
+| 通信聊天 | `/conversations`、`/messages`、`/routes`、`/agent/v1/collaboration` | Communication/Chat |
 | Tool | `/tools/discover`、`/tools/{name}/invoke` | Tool Registry/PEP |
 | 预算账本 | `/budgets`、`/usage`、`/ledger` | ControlPlane Ledger |
 | 评测 | `/benchmark-suites`、`/evaluations` | Evaluation |

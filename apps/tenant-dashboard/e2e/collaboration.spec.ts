@@ -176,6 +176,80 @@ test('additional domain tools preserve Agent and human boundaries', async ({ pag
   expect(candidate.result.displayName).toBe('Agent Candidate');
 });
 
+test('employee Agents delegate work and the control plane traces the decision', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  const employees = await (await page.request.get('/v1/employees')).json();
+  const quality = employees.find((employee: { displayName: string }) => employee.displayName === 'Quality Reviewer');
+  const engineering = employees.find((employee: { displayName: string }) => employee.displayName === 'Engineering Lead');
+  const research = employees.find((employee: { displayName: string }) => employee.displayName === 'Research Analyst');
+  const tenantId = '11111111-1111-1111-1111-111111111111';
+  const projects = await (await page.request.get('/v1/projects')).json();
+  const activeTasks = (await Promise.all(projects.map(async (project: { id: string }) =>
+    (await (await page.request.get(`/v1/projects/${project.id}`)).json()).tasks))).flat()
+    .filter((task: { status: string }) => ['Pending', 'Assigned', 'InProgress', 'Blocked'].includes(task.status));
+  const qualityTaskId = activeTasks.find((task: { assignee: string }) => task.assignee === quality.displayName)?.id;
+  const engineeringTaskId = activeTasks.find((task: { assignee: string }) => task.assignee === engineering.displayName)?.id ?? qualityTaskId;
+  expect(qualityTaskId).toBeTruthy();
+  const issueToken = async (employeeId: string, taskId: string) => {
+    const response = await page.request.post('/auth/dev-agent-token', { data: { tenantId, employeeId, taskId } });
+    expect(response.ok()).toBeTruthy();
+    return (await response.json()).token as string;
+  };
+  const qualityToken = await issueToken(quality.id, qualityTaskId);
+  const engineeringToken = await issueToken(engineering.id, engineeringTaskId);
+  const researchToken = await issueToken(research.id, engineeringTaskId);
+  const discovered = await (await page.request.get('/agent/v1/tools/discover', {
+    headers: { Authorization: `Bearer ${qualityToken}` }
+  })).json();
+  expect(discovered.some((tool: { name: string }) => tool.name === 'collaboration.delegate')).toBeTruthy();
+
+  const criteria = `Independent evidence review ${crypto.randomUUID()}`;
+  const missingKey = await page.request.post('/agent/v1/collaboration/delegations', {
+    headers: { Authorization: `Bearer ${qualityToken}` },
+    data: {
+      taskId: qualityTaskId, delegateEmployeeId: engineering.id, weight: 2,
+      acceptanceCriteria: criteria, evidenceRequirements: ['test:independent-review'],
+      requiredCapabilities: [], reason: 'Balance review workload'
+    }
+  });
+  expect(missingKey.status()).toBe(400);
+
+  const createdResponse = await page.request.post('/agent/v1/collaboration/delegations', {
+    headers: { Authorization: `Bearer ${qualityToken}`, 'Idempotency-Key': crypto.randomUUID() },
+    data: {
+      taskId: qualityTaskId, delegateEmployeeId: engineering.id, weight: 2,
+      acceptanceCriteria: criteria, evidenceRequirements: ['test:independent-review'],
+      requiredCapabilities: [], reason: 'Balance review workload'
+    }
+  });
+  expect(createdResponse.ok()).toBeTruthy();
+  const created = await createdResponse.json();
+  expect(created.status).toBe('Proposed');
+  expect(created.requesterEmployeeId).toBe(quality.id);
+  expect(created.targetEmployeeId).toBe(engineering.id);
+
+  const outsider = await page.request.post(`/agent/v1/collaboration/delegations/${created.id}/decision`, {
+    headers: { Authorization: `Bearer ${researchToken}`, 'Idempotency-Key': crypto.randomUUID() },
+    data: { accepted: true, reason: 'Not a participant' }
+  });
+  expect(outsider.status()).toBe(403);
+
+  const rejected = await page.request.post(`/agent/v1/collaboration/delegations/${created.id}/decision`, {
+    headers: { Authorization: `Bearer ${engineeringToken}`, 'Idempotency-Key': crypto.randomUUID() },
+    data: { accepted: false, reason: 'Current WIP is reserved for release verification' }
+  });
+  expect(rejected.ok()).toBeTruthy();
+  expect((await rejected.json()).status).toBe('Rejected');
+
+  await page.goto('/organization/collaboration');
+  await expect(page.getByRole('heading', { name: 'Delegation, handoff and interrupt process' })).toBeVisible();
+  await expect(page.getByText(criteria, { exact: true })).toBeVisible();
+  await expect(page.getByText('Current WIP is reserved for release verification', { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create group' })).toHaveCount(0);
+  await page.screenshot({ path: '/tmp/regent-collaboration-coordination.png', fullPage: true });
+});
+
 test('collaboration office remains usable on a mobile viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/login');

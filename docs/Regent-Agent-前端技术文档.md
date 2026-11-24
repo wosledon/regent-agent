@@ -10,7 +10,7 @@
 ### 当前本地实现
 
 - Tenant Dashboard 已提供组织管理、项目交付闭环、管家问答与报告、安全治理、数据生命周期、模型池、成本调度、评测 QA、合规、通知、消息、工作流、记忆、绩效和设置页面。
-- `/organization/collaboration` 提供办公室、组织图、协作网络和过程时间线四种可切换视图；员工、群聊和项目可下钻到工作、消息、回复、@、证据与审计哈希。
+- `/organization/collaboration` 提供办公室、组织图、协作网络和过程时间线四种可切换视图；员工、群聊和项目可下钻到工作、消息、回复、@、证据与审计哈希，并只读展示委派、交接、求助和打断状态及检查点包。
 - 消息页只读展示 Agent 群成员、创建信息、回复、@ 和证据引用；群聊创建、成员管理和消息发送由员工 Agent 通过 `/agent/v1` 完成，控制面不代行。
 - Ops Console 已提供公开状态页、运营状态刷新、租户启停、支持访问审批/撤销、备份、审计和可观测性页面。
 - Tenant Dashboard 已提供招聘面试/申诉/公平审计、绩效动作/员工改进、Agent 运行时、任务治理、Prompt/Skill 和 Tool 披露页面。
@@ -279,6 +279,7 @@ AppShell
 - 租户和运营会话使用 HttpOnly、Secure、SameSite Cookie。
 - 前端不把长期 Token 写入 localStorage。
 - OIDC 使用重定向流程，前端不接触 client secret。
+- 设置页提供 required SSO、Provider 激活、组能力映射/刷新和紧急凭据生命周期；登录页的紧急入口只展示轮换凭据并进入 15 分钟受限恢复会话。
 - CSRF Token 仅用于写请求，不进入日志。
 - SignalR 连接复用同一 Cookie 认证，并使用独立 Hub 权限校验。
 

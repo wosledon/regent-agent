@@ -118,6 +118,7 @@ export interface CollaborationActivity {
   taskId?: string | null;
   evidenceRefs: string[];
   auditHash?: string | null;
+  targetEmployeeId?: string | null;
 }
 
 export interface CollaborationGraph {
@@ -131,6 +132,7 @@ export interface CollaborationGraph {
     collaborationCount: number;
     projectCount: number;
     activityCount: number;
+    coordinationCount: number;
   };
   generatedAt: string;
 }
@@ -140,6 +142,32 @@ export interface CollaborationTrace {
   entityId: string;
   activities: CollaborationActivity[];
   generatedAt: string;
+}
+
+export interface TaskCoordination {
+  id: string;
+  tenantId: string;
+  taskId: string;
+  projectId: string;
+  kind: 'Delegation' | 'Handoff' | 'Help' | 'Interrupt';
+  status: string;
+  requesterEmployeeId: string;
+  targetEmployeeId: string;
+  priority: string;
+  summary: string;
+  detailsJson: string;
+  responseJson?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deadline?: string | null;
+  completedAt?: string | null;
+  version: number;
+}
+
+export interface PageResult<T> {
+  items: T[];
+  nextCursor?: string | null;
+  snapshotAt: string;
 }
 
 export interface BenchmarkSuite {

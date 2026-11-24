@@ -39,6 +39,7 @@ using RegentAgent.Contracts.Memory;
 using RegentAgent.Contracts.Models;
 using RegentAgent.Contracts.Operations;
 using RegentAgent.Contracts.Organization;
+using RegentAgent.Contracts.Pagination;
 using RegentAgent.Contracts.Primitives;
 using RegentAgent.Contracts.Projects;
 using RegentAgent.Contracts.Runtime;
@@ -62,10 +63,18 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, TenantContext>();
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<CollaborationVisualizationService>();
+var collaborationOptions = new CollaborationOptions();
+builder.Configuration.GetSection("Collaboration").Bind(collaborationOptions);
+if (collaborationOptions.DefaultWipLimit <= 0 || collaborationOptions.MaxInterruptsPerHour <= 0
+    || collaborationOptions.MaxCoordinationPayloadChars <= 0)
+    throw new InvalidOperationException("Collaboration limits must be positive.");
+builder.Services.AddSingleton(collaborationOptions);
+builder.Services.AddScoped<CollaborationCoordinationService>();
 builder.Services.AddScoped<AgentToolCatalog>();
 builder.Services.AddScoped<AgentToolInvocationService>();
 builder.Services.AddScoped<IAgentToolHandler, ChatToolHandler>();
 builder.Services.AddScoped<IAgentToolHandler, TaskToolHandler>();
+builder.Services.AddScoped<IAgentToolHandler, CollaborationToolHandler>();
 builder.Services.AddScoped<IAgentToolHandler, MemoryToolHandler>();
 builder.Services.AddScoped<IAgentToolHandler, WorkflowToolHandler>();
 builder.Services.AddScoped<IAgentToolHandler, ProjectToolHandler>();
@@ -76,6 +85,7 @@ builder.Services.AddScoped<IAgentToolHandler, PerformanceToolHandler>();
 builder.Services.AddScoped<IAgentToolHandler, EvaluationToolHandler>();
 builder.Services.AddScoped<IAgentToolHandler, AgentEvolutionToolHandler>();
 builder.Services.AddScoped<IAgentToolHandler, TaskGovernanceToolHandler>();
+builder.Services.AddSingleton<IAuthorizationHandler, CapabilityAuthorizationHandler>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<ApprovalService>();
@@ -203,6 +213,8 @@ builder.Services.AddSingleton(new JsonDocumentStore<InvitationRecord>("data/modu
 builder.Services.AddSingleton(new JsonDocumentStore<OwnershipDelegationRecord>("data/modules/ownership-delegations.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<ExternalIdentityBindingRecord>("data/modules/external-identity-bindings.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<ExternalLoginTransactionRecord>("data/modules/external-login-transactions.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<AuthenticationPolicyRecord>("data/modules/authentication-policies.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<EmergencyAccessCredentialRecord>("data/modules/emergency-access-credentials.json"));
 var externalIdentityOptions = new ExternalIdentityOptions
 {
     Mode = builder.Configuration["Identity:Mode"] ?? "local",
@@ -337,6 +349,10 @@ builder.Services.AddAuthorization(options =>
         .RequireAuthenticatedUser().Build();
     options.AddPolicy("MemoryGovernor", policy => policy.RequireRole("Owner", "CoOwner"));
     options.AddPolicy("Agent", policy => policy.RequireAuthenticatedUser().RequireClaim("employee_id"));
+    options.AddPolicy("DashboardRead", policy => policy.AddRequirements(new CapabilityRequirement("dashboard.read")));
+    options.AddPolicy("ReportsRead", policy => policy.AddRequirements(new CapabilityRequirement("reports.read")));
+    options.AddPolicy("EmployeesRead", policy => policy.AddRequirements(new CapabilityRequirement("employees.read")));
+    options.AddPolicy("CollaborationRead", policy => policy.AddRequirements(new CapabilityRequirement("collaboration.read")));
 });
 
 builder.Services.AddCors(options =>
@@ -442,12 +458,25 @@ app.Use(async (context, next) =>
     {
         var store = context.RequestServices.GetRequiredService<JsonDocumentStore<AuthSessionRecord>>();
         var session = await store.GetAsync(id.ToString(), context.RequestAborted);
-        if (session is null || session.Status != "Active" || session.ExpiresAt <= context.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow())
+        var clock = context.RequestServices.GetRequiredService<TimeProvider>();
+        var now = clock.GetUtcNow();
+        var lastActivity = session?.LastActivityAt ?? session?.CreatedAt ?? now;
+        if (session is null || session.Status != "Active" || session.ExpiresAt <= now
+            || session.UserId != CurrentUserId(context) || session.TenantId != Guid.Parse(CurrentTenant(context))
+            || now - lastActivity > TimeSpan.FromMinutes(session.IdleTimeoutMinutes))
         {
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
+        if (session.SessionKind == "Emergency" && !EmergencyRequestAllowed(context.Request.Path,
+            context.Request.Method, session.TenantId, session.AllowedActionsJson))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return;
+        }
+        session.LastActivityAt = now;
+        await store.PutAsync(session.Id.ToString(), session, context.RequestAborted);
     }
     await next();
 });
@@ -481,9 +510,10 @@ app.MapPost("/auth/dev-login", async (DevLoginRequest request, RegentDbContext d
         return ApiResults.Problem(RegentAgent.Contracts.Results.Error.Unauthorized("Unknown development user."), context.TraceIdentifier);
     }
 
+    var session = await identity.StartTenantSessionAsync(membership.Id, membership.TenantId, cancellationToken, "Development");
     var displayName = await identity.DisplayNameAsync(membership.Id, membership.TenantId, membership.DisplayName, cancellationToken);
-    await SignInTenantAsync(context, membership.Id, membership.TenantId, displayName, membership.Role);
-    return Results.Ok(new { email = membership.Email, display_name = displayName, tenant_id = membership.TenantId });
+    await SignInTenantAsync(context, membership.Id, membership.TenantId, displayName, membership.Role, session.Id);
+    return Results.Ok(new { email = membership.Email, display_name = displayName, tenant_id = membership.TenantId, role = membership.Role });
 }).AllowAnonymous();
 
 app.MapPost("/auth/register", async (RegisterRequest request, IdentityService identity,
@@ -498,6 +528,14 @@ app.MapPost("/auth/recover", async (RecoveryRequest request, IdentityService ide
     await identity.RecoverAsync(request, cancellationToken);
     return Results.NoContent();
 }).AllowAnonymous();
+app.MapPost("/auth/emergency-access", async (EmergencyAccessRequest request, IdentityService identity,
+    HttpContext context, CancellationToken cancellationToken) =>
+{
+    var result = await identity.UseEmergencyAccessAsync(request, cancellationToken);
+    await SignInTenantAsync(context, result.UserId, result.TenantId, result.DisplayName, result.Role,
+        result.SessionId, cancellationToken);
+    return Results.Ok(result);
+}).Produces<EmergencyAccessResult>().AllowAnonymous();
 app.MapPost("/auth/github/login", async (ExternalLoginRequest request, IdentityService identity,
     HttpContext context, CancellationToken cancellationToken) =>
     await CompleteAuthAsync(context, await identity.ExternalLoginAsync(request, "GitHub", cancellationToken))).AllowAnonymous();
@@ -577,7 +615,8 @@ app.MapPost("/auth/switch-tenant", async (SwitchTenantRequest request, RegentDbC
     if (membership is null) return Results.NotFound();
     if (Guid.TryParse(context.User.FindFirstValue("session_id"), out var previousSessionId))
         await identity.RevokeSessionAsync(userId, previousSessionId, cancellationToken);
-    var session = await identity.StartTenantSessionAsync(userId, membership.TenantId, cancellationToken);
+    var authMethod = context.User.FindFirstValue("auth_method") ?? "Password";
+    var session = await identity.StartTenantSessionAsync(userId, membership.TenantId, cancellationToken, authMethod);
     var displayName = await identity.DisplayNameAsync(userId, membership.TenantId, membership.DisplayName, cancellationToken);
     await SignInTenantAsync(context, userId, membership.TenantId, displayName, membership.Role, session.Id);
     return Results.Ok(new { tenant_id = membership.TenantId, display_name = displayName });
@@ -591,7 +630,7 @@ api.MapPost("/butler/ask", async (ButlerQuestionRequest request, HttpContext con
     .Produces<ButlerAnswer>().WithTags("Butler");
 api.MapGet("/butler/reports", async (HttpContext context, ButlerService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListReportsAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
-    .Produces<IReadOnlyList<ButlerReport>>().WithTags("Butler");
+    .Produces<IReadOnlyList<ButlerReport>>().RequireAuthorization("ReportsRead").WithTags("Butler");
 api.MapPost("/butler/reports", async (GenerateReportRequest request, HttpContext context,
     ButlerService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GenerateReportAsync(Guid.Parse(CurrentTenant(context)), request.Kind, cancellationToken)))
@@ -644,6 +683,36 @@ api.MapPut("/tenants/{tenantId:guid}/identity-providers/{provider}", async (Guid
     IdentityProviderDto request, HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
     Results.Ok(await identity.ConfigureProviderAsync(CurrentUserId(context), tenantId, request with { Provider = provider }, cancellationToken)))
     .Produces<IdentityProviderDto>().WithTags("Identity");
+api.MapGet("/tenants/{tenantId:guid}/identity-providers/{provider}", async (Guid tenantId, string provider,
+    HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
+    Results.Ok(await identity.GetIdentityProviderAsync(CurrentUserId(context), tenantId, provider, cancellationToken)))
+    .Produces<IdentityProviderDto>().WithTags("Identity");
+api.MapPost("/tenants/{tenantId:guid}/identity-providers/{provider}/activate", async (Guid tenantId, string provider,
+    HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
+    Results.Ok(await identity.ActivateProviderAsync(CurrentUserId(context), tenantId, provider, cancellationToken)))
+    .Produces<IdentityProviderDto>().WithTags("Identity");
+api.MapGet("/tenants/{tenantId:guid}/authentication-policy", async (Guid tenantId,
+    HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
+    Results.Ok(await identity.GetAuthenticationPolicyAsync(CurrentUserId(context), tenantId, cancellationToken)))
+    .Produces<AuthenticationPolicyDto>().WithTags("Identity");
+api.MapPut("/tenants/{tenantId:guid}/authentication-policy", async (Guid tenantId, AuthenticationPolicyDto request,
+    HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
+    Results.Ok(await identity.UpdateAuthenticationPolicyAsync(CurrentUserId(context), tenantId, request, cancellationToken)))
+    .Produces<AuthenticationPolicyDto>().WithTags("Identity");
+api.MapPut("/tenants/{tenantId:guid}/oidc/group-mapping", async (Guid tenantId, UpdateGroupMappingRequest request,
+    HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
+{
+    await identity.UpdateGroupMappingAsync(CurrentUserId(context), tenantId, request.GroupMappingJson, cancellationToken);
+    return Results.NoContent();
+}).Produces(StatusCodes.Status204NoContent).WithTags("Identity");
+api.MapPost("/tenants/{tenantId:guid}/oidc/group-mapping/refresh", async (Guid tenantId,
+    HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
+    Results.Ok(await identity.RefreshGroupMappingsAsync(CurrentUserId(context), tenantId, cancellationToken)))
+    .Produces<GroupMappingRefreshResult>().WithTags("Identity");
+api.MapPost("/tenants/{tenantId:guid}/emergency-access", async (Guid tenantId,
+    HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
+    Results.Ok(await identity.ConfigureEmergencyAccessAsync(CurrentUserId(context), tenantId, cancellationToken)))
+    .Produces<EmergencyAccessDto>().WithTags("Identity");
 
 api.MapGet("/tenants", async (TenantService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListForUserAsync(cancellationToken))).Produces<IReadOnlyList<TenantDto>>().WithTags("Tenancy");
@@ -743,7 +812,7 @@ api.MapGet("/recruitment/fairness-audits", async (OrganizationService service,
 
 api.MapGet("/dashboard/summary", async (DashboardService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetAsync(cancellationToken)))
-    .Produces<DashboardSummary>(StatusCodes.Status200OK).WithTags("Dashboard");
+    .Produces<DashboardSummary>(StatusCodes.Status200OK).RequireAuthorization("DashboardRead").WithTags("Dashboard");
 
 api.MapPost("/projects", async (CreateProjectDto input, ProjectService service,
     CancellationToken cancellationToken) => Results.Ok(await service.CreateAsync(input, cancellationToken)))
@@ -1096,7 +1165,7 @@ api.MapPost("/projects/{id:guid}/transitions", async (Guid id, ProjectTransition
 
 api.MapGet("/employees", async (EmployeeService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(cancellationToken)))
-    .Produces<IReadOnlyList<EmployeeSummary>>(StatusCodes.Status200OK).WithTags("Organization");
+    .Produces<IReadOnlyList<EmployeeSummary>>(StatusCodes.Status200OK).RequireAuthorization("EmployeesRead").WithTags("Organization");
 
 api.MapGet("/employees/{id:guid}/timeline", async (Guid id, EmployeeService service, CancellationToken cancellationToken) =>
 {
@@ -1623,11 +1692,21 @@ api.MapPost("/performance-actions/{id}/appeal/resolve", async (string id, Resolv
 
 api.MapGet("/collaboration/graph", async (HttpContext context, CollaborationVisualizationService service,
     CancellationToken cancellationToken) => Results.Ok(await service.GetGraphAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
-    .Produces<CollaborationGraphDto>().WithTags("Collaboration");
+    .Produces<CollaborationGraphDto>().RequireAuthorization("CollaborationRead").WithTags("Collaboration");
 api.MapGet("/collaboration/trace", async (HttpContext context, CollaborationVisualizationService service,
     string entityType, string entityId, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetTraceAsync(Guid.Parse(CurrentTenant(context)), entityType, entityId, cancellationToken)))
     .Produces<CollaborationTraceDto>().WithTags("Collaboration");
+
+api.MapGet("/collaboration/requests", async ([AsParameters] CoordinationPageQuery query,
+    HttpContext context, CollaborationCoordinationService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ListAsync(Guid.Parse(CurrentTenant(context)), query, cancellationToken)))
+    .Produces<Page<TaskCoordinationDto>>().RequireAuthorization("CollaborationRead").WithTags("Collaboration");
+api.MapGet("/collaboration/requests/{id:guid}", async (Guid id, HttpContext context,
+    CollaborationCoordinationService service, CancellationToken cancellationToken) =>
+    await service.GetAsync(Guid.Parse(CurrentTenant(context)), id, cancellationToken) is { } request
+        ? Results.Ok(request) : Results.NotFound())
+    .Produces<TaskCoordinationDto>().WithTags("Collaboration");
 
 api.MapGet("/communication/routes", (CommunicationRouter router) =>
 {
@@ -1695,6 +1774,163 @@ evaluationQa.MapPost("/gate", async (EvaluationGateRequest request, HttpContext 
     .Produces<EvaluationQaGate>().WithTags("Evaluation QA");
 
 var agentApi = app.MapGroup("/agent/v1").RequireAuthorization("Agent");
+var coordinationApi = agentApi.MapGroup("/collaboration").WithTags("Agent Collaboration");
+coordinationApi.MapGet("/requests", async ([AsParameters] CoordinationPageQuery query, HttpContext context,
+    CollaborationCoordinationService service, CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    return Results.Ok(await service.ListAsync(identity.TenantId,
+        query with { EmployeeId = identity.EmployeeId }, cancellationToken));
+}).Produces<Page<TaskCoordinationDto>>();
+coordinationApi.MapGet("/requests/{id:guid}", async (Guid id, HttpContext context,
+    CollaborationCoordinationService service, CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var request = await service.GetAsync(identity.TenantId, id, cancellationToken);
+    if (request is null) return Results.NotFound();
+    if (request.RequesterEmployeeId != identity.EmployeeId && request.TargetEmployeeId != identity.EmployeeId)
+        throw new UnauthorizedAccessException("Agent is not a participant in this coordination request.");
+    return Results.Ok(request);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/delegations", async (CreateTaskDelegationRequest request, HttpContext context,
+    CollaborationCoordinationService service, IHubContext<TenantHub> hub, CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.CreateDelegationAsync(identity, request, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/delegations/{id:guid}/decision", async (Guid id, CoordinationDecisionRequest decision,
+    HttpContext context, CollaborationCoordinationService service, IHubContext<TenantHub> hub,
+    CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.DecideDelegationAsync(identity, id, decision, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/delegations/{id:guid}/cancel", async (Guid id, CoordinationCancelRequest request,
+    HttpContext context, CollaborationCoordinationService service, IHubContext<TenantHub> hub,
+    CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.CancelDelegationAsync(identity, id, request.Reason, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/handoffs", async (CreateHandoffRequest request, HttpContext context,
+    CollaborationCoordinationService service, IHubContext<TenantHub> hub, CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.CreateHandoffAsync(identity, request, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/handoffs/{id:guid}/decision", async (Guid id, CoordinationDecisionRequest decision,
+    HttpContext context, CollaborationCoordinationService service, IHubContext<TenantHub> hub,
+    CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.DecideHandoffAsync(identity, id, decision, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/help-requests", async (CreateHelpRequest request, HttpContext context,
+    CollaborationCoordinationService service, IHubContext<TenantHub> hub, CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.CreateHelpAsync(identity, request, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/help-requests/{id:guid}/responses", async (Guid id, HelpResponseRequest request,
+    HttpContext context, CollaborationCoordinationService service, IHubContext<TenantHub> hub,
+    CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.RespondHelpAsync(identity, id, request, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/help-requests/{id:guid}/context", async (Guid id, HelpContextRequest request,
+    HttpContext context, CollaborationCoordinationService service, IHubContext<TenantHub> hub,
+    CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.AddHelpContextAsync(identity, id, request, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/help-requests/{id:guid}/resolve", async (Guid id, CoordinationResolutionRequest request,
+    HttpContext context, CollaborationCoordinationService service, IHubContext<TenantHub> hub,
+    CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.ResolveHelpAsync(identity, id, request.Resolution, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/interrupts", async (CreateInterruptRequest request, HttpContext context,
+    CollaborationCoordinationService service, IHubContext<TenantHub> hub, CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.CreateInterruptAsync(identity, request, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/interrupts/{id:guid}/checkpoint", async (Guid id, InterruptCheckpointRequest request,
+    HttpContext context, CollaborationCoordinationService service, IHubContext<TenantHub> hub,
+    CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.AcknowledgeInterruptAsync(identity, id, request, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/interrupts/{id:guid}/resolve", async (Guid id, CoordinationResolutionRequest request,
+    HttpContext context, CollaborationCoordinationService service, IHubContext<TenantHub> hub,
+    CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.ResolveInterruptAsync(identity, id, request, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+coordinationApi.MapPost("/interrupts/{id:guid}/resume", async (Guid id, InterruptResumeRequest request,
+    HttpContext context, CollaborationCoordinationService service, IHubContext<TenantHub> hub,
+    CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.ResumeInterruptAsync(identity, id, request, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result.Coordination, cancellationToken);
+    return Results.Ok(result);
+}).Produces<InterruptResumeResult>();
+coordinationApi.MapPost("/interrupts/{id:guid}/cancel", async (Guid id, CoordinationCancelRequest request,
+    HttpContext context, CollaborationCoordinationService service, IHubContext<TenantHub> hub,
+    CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    var result = await service.CancelInterruptAsync(identity, id, request, RequiredIdempotencyKey(context), cancellationToken);
+    await NotifyCoordinationAsync(context, hub, result, cancellationToken);
+    return Results.Ok(result);
+}).Produces<TaskCoordinationDto>();
+
 agentApi.MapGet("/me", (HttpContext context) => Results.Ok(CurrentAgent(context))).WithTags("Agent");
 agentApi.MapGet("/tools/discover", async (HttpContext context, AgentToolInvocationService tools,
     CancellationToken cancellationToken) => Results.Ok(await tools.DiscoverAsync(CurrentAgent(context), cancellationToken)))
@@ -1858,6 +2094,18 @@ app.Run();
 
 static AgentIdentity CurrentAgent(HttpContext context) => AgentIdentityContext.Required(context.Items);
 
+static string RequiredIdempotencyKey(HttpContext context)
+{
+    var key = context.Request.Headers["Idempotency-Key"].ToString();
+    if (string.IsNullOrWhiteSpace(key)) throw new BadHttpRequestException("Idempotency-Key is required.");
+    if (key.Length > 200) throw new BadHttpRequestException("Idempotency-Key is too long.");
+    return key;
+}
+
+static async Task NotifyCoordinationAsync(HttpContext context, IHubContext<TenantHub> hub,
+    TaskCoordinationDto coordination, CancellationToken cancellationToken) =>
+    await hub.Clients.Group(CurrentTenant(context)).SendAsync("coordination.changed", coordination, cancellationToken);
+
 static void RequireAgentScope(AgentIdentity identity, string scope)
 {
     if (!identity.Scopes.Contains(scope, StringComparer.OrdinalIgnoreCase))
@@ -1886,12 +2134,13 @@ static async Task<IResult> CompleteAuthAsync(HttpContext context, AuthResult res
     return Results.Ok(new
     {
         email = result.Email, display_name = result.DisplayName, user_id = result.UserId,
-        tenant_id = result.TenantId, session_id = result.SessionId, recovery_codes = result.RecoveryCodes
+        tenant_id = result.TenantId, session_id = result.SessionId, recovery_codes = result.RecoveryCodes,
+        role = result.Role, auth_method = result.AuthMethod, session_kind = result.SessionKind, capabilities = result.Capabilities
     });
 }
 
 static async Task SignInTenantAsync(HttpContext context, Guid userId, Guid tenantId, string displayName, string role,
-    Guid? sessionId = null)
+    Guid? sessionId = null, CancellationToken cancellationToken = default)
 {
     var claims = new List<Claim>
     {
@@ -1900,9 +2149,46 @@ static async Task SignInTenantAsync(HttpContext context, Guid userId, Guid tenan
         new(ClaimTypes.Name, displayName),
         new(ClaimTypes.Role, role)
     };
-    if (sessionId is { } id) claims.Add(new Claim("session_id", id.ToString()));
+    if (sessionId is { } id)
+    {
+        claims.Add(new Claim("session_id", id.ToString()));
+        var session = await context.RequestServices.GetRequiredService<JsonDocumentStore<AuthSessionRecord>>()
+            .GetAsync(id.ToString(), cancellationToken);
+        if (session is not null)
+        {
+            claims.Add(new Claim("auth_method", session.AuthMethod));
+            claims.Add(new Claim("session_kind", session.SessionKind));
+        }
+    }
+    var capabilities = await context.RequestServices.GetRequiredService<RegentDbContext>().Memberships.AsNoTracking()
+        .Where(x => x.TenantId == tenantId && x.UserId == userId).Select(x => x.CapabilitiesJson)
+        .SingleOrDefaultAsync(cancellationToken);
+    if (!string.IsNullOrWhiteSpace(capabilities))
+        foreach (var capability in JsonSerializer.Deserialize<string[]>(capabilities) ?? [])
+            claims.Add(new Claim("capability", capability));
     await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme,
         new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)));
+}
+
+static bool EmergencyRequestAllowed(PathString path, string method, Guid tenantId, string allowedActionsJson)
+{
+    string[] allowedActions;
+    try { allowedActions = JsonSerializer.Deserialize<string[]>(allowedActionsJson) ?? []; }
+    catch (JsonException) { return false; }
+    var segments = path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries) ?? [];
+    string? action = null;
+    if (segments.Length == 2 && segments[0] == "auth" && segments[1] == "logout") action = "account.access";
+    else if (segments.Length == 2 && segments[0] == "auth" && segments[1] == "sessions") action = "account.access";
+    else if (segments.Length == 4 && segments[0] == "auth" && segments[1] == "sessions"
+        && Guid.TryParse(segments[2], out _) && segments[3] == "revoke") action = "account.access";
+    else if (segments.Length >= 4 && segments[0] == "v1" && segments[1] == "tenants"
+        && Guid.TryParse(segments[2], out var requestedTenant) && requestedTenant == tenantId)
+    {
+        if (segments[3] == "authentication-policy") action = "sso.restore";
+        else if (segments[3] == "identity-providers" || segments[3] == "oidc") action = "sso.restore";
+    }
+    return action is not null && allowedActions.Contains(action, StringComparer.Ordinal)
+        && !HttpMethods.IsOptions(method) && !HttpMethods.IsHead(method);
 }
 
 public sealed record DevLoginRequest(string Email, Guid? TenantId = null);

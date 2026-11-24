@@ -4,26 +4,26 @@ import { useTranslation } from 'react-i18next';
 import { Button, Card, DataTable, ErrorState, FormField, Grid, LoadingState, PageHeader, Select, Stack, StatusChip, Text, TextInput } from '@regent/ui-shared';
 import { api } from '../lib/api-client/api';
 import { useAuth } from '../app/useAuth';
+import { AuthenticationPolicyPanel } from '../features/identity/AuthenticationPolicyPanel';
 import i18n from '../lib/i18n';
 
 export function SettingsPage() {
   const { t, i18n: translator } = useTranslation();
-  const { session, switchTenant } = useAuth();
+  const { session, switchTenant, logout } = useAuth();
   const queryClient = useQueryClient();
   const tenantId = session?.tenantId ?? '';
-  const tenants = useQuery({ queryKey: ['tenants'], queryFn: api.tenants });
+  const restricted = session?.sessionKind === 'Emergency';
+  const canManage = session?.role === 'Owner' || session?.role === 'CoOwner';
+  const tenants = useQuery({ queryKey: ['tenants'], queryFn: api.tenants, enabled: !restricted });
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: api.sessions, enabled: Boolean(session) });
-  const invitations = useQuery({ queryKey: ['invitations', tenantId], queryFn: () => api.invitations(tenantId), enabled: Boolean(tenantId) });
-  const delegations = useQuery({ queryKey: ['ownership-delegations', tenantId], queryFn: () => api.ownershipDelegations(tenantId), enabled: Boolean(tenantId) });
-  const suffix = useQuery({ queryKey: ['display-suffix'], queryFn: api.displaySuffix, enabled: Boolean(session) });
-  const localization = useQuery({ queryKey: ['localization'], queryFn: api.localization, enabled: Boolean(session) });
+  const invitations = useQuery({ queryKey: ['invitations', tenantId], queryFn: () => api.invitations(tenantId), enabled: Boolean(tenantId) && !restricted });
+  const delegations = useQuery({ queryKey: ['ownership-delegations', tenantId], queryFn: () => api.ownershipDelegations(tenantId), enabled: Boolean(tenantId) && !restricted });
+  const suffix = useQuery({ queryKey: ['display-suffix'], queryFn: api.displaySuffix, enabled: Boolean(session) && !restricted });
+  const localization = useQuery({ queryKey: ['localization'], queryFn: api.localization, enabled: Boolean(session) && !restricted });
   const [localizationDraft, setLocalizationDraft] = useState<Awaited<ReturnType<typeof api.localization>> | null>(null);
   const [invitationEmail, setInvitationEmail] = useState('');
   const [invitationRole, setInvitationRole] = useState('Member');
   const [delegateUserId, setDelegateUserId] = useState('');
-  const [provider, setProvider] = useState('Oidc');
-  const [issuer, setIssuer] = useState('');
-  const [clientId, setClientId] = useState('');
   const [suffixDraft, setSuffixDraft] = useState('');
   const invalidateIdentity = () => Promise.all([
     queryClient.invalidateQueries({ queryKey: ['sessions'] }),
@@ -44,9 +44,6 @@ export function SettingsPage() {
     mutationFn: () => api.createOwnershipDelegation(tenantId, delegateUserId),
     onSuccess: async () => { setDelegateUserId(''); await invalidateIdentity(); }
   });
-  const configureProvider = useMutation({
-    mutationFn: () => api.configureIdentityProvider(tenantId, provider, issuer, clientId), onSuccess: invalidateIdentity
-  });
   const saveSuffix = useMutation({
     mutationFn: () => api.updateDisplaySuffix(suffixDraft), onSuccess: invalidateIdentity
   });
@@ -59,13 +56,24 @@ export function SettingsPage() {
     }
   });
 
-  if (tenants.isLoading || sessions.isLoading || invitations.isLoading || delegations.isLoading || suffix.isLoading || localization.isLoading) return <LoadingState />;
-  const identityError = tenants.error ?? sessions.error ?? invitations.error ?? delegations.error ?? suffix.error ?? localization.error;
+  if (!restricted && (tenants.isLoading || sessions.isLoading || invitations.isLoading || delegations.isLoading || suffix.isLoading || localization.isLoading)) return <LoadingState />;
+  const identityError = restricted ? sessions.error : tenants.error ?? sessions.error ?? invitations.error ?? delegations.error ?? suffix.error ?? localization.error;
   if (identityError) return <ErrorState message={identityError.message} />;
+  if (restricted) return (
+    <Stack spacing={3}>
+      <PageHeader title={t('settings')} description="Emergency recovery session — SSO configuration and account access only." />
+      <Card title="Restricted emergency session">
+        <Text>This session expires automatically after 15 minutes. Ordinary tenant, project and Agent operations are blocked.</Text>
+        <Button tone="danger" onClick={() => logout()}>End emergency session</Button>
+      </Card>
+      <AuthenticationPolicyPanel tenantId={tenantId} canManage={canManage} />
+    </Stack>
+  );
 
   return (
     <Stack spacing={3}>
       <PageHeader title={t('settings')} description="Language, tenant context, identity providers, sessions and ownership." />
+      <AuthenticationPolicyPanel tenantId={tenantId} canManage={canManage} />
       <Grid columns={2}>
         <Card title="Preferences">
           <Select label="Language" value={localizationDraft?.locale ?? localization.data?.locale ?? translator.language}
@@ -121,13 +129,7 @@ export function SettingsPage() {
             { id: 'status', header: 'Status', render: row => row.status }
           ]} />
         </Card>
-        <Card title="Enterprise identity">
-          <Select label="Provider" value={provider} onChange={setProvider} options={[{ value: 'Oidc', label: 'OIDC' }, { value: 'GitHub', label: 'GitHub local adapter' }]} />
-          <FormField label="Issuer"><TextInput value={issuer} onChange={setIssuer} placeholder="https://idp.local/tenant" /></FormField>
-          <FormField label="Client ID"><TextInput value={clientId} onChange={setClientId} /></FormField>
-          <Button onClick={() => configureProvider.mutate()} disabled={!tenantId || !issuer || !clientId} loading={configureProvider.isPending}>Enable local identity adapter</Button>
-          <Text variant="caption">Remote OIDC/GitHub traffic is not connected in local mode.</Text>
-        </Card>
+
       </Grid>
     </Stack>
   );

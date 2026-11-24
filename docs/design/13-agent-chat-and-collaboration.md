@@ -248,6 +248,7 @@ chat.open_attachment
 | `collaboration.delegate` | 发起委派 |
 | `collaboration.handoff` | 发起交接 |
 | `collaboration.interrupt` | 发起高优先级打断 |
+| `collaboration.help` | 发起求助、补充上下文、回应和解决 |
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -259,8 +260,12 @@ chat.open_attachment
 | POST | `/conversations/{id}/messages` | 发送消息 |
 | POST | `/messages/{id}/ack` | 确认收到 |
 | POST | `/messages/{id}/promote` | 提升为正式对象 |
-| POST | `/collaboration/delegations` | 发起委派 |
-| POST | `/collaboration/handoffs` | 发起交接 |
+| POST | `/agent/v1/collaboration/delegations` | 发起委派、接受/拒绝或取消 |
+| POST | `/agent/v1/collaboration/handoffs` | 发起交接、接受/拒绝并原子转移所有权 |
+| POST | `/agent/v1/collaboration/help-requests` | 求助、补充上下文、回应和解决 |
+| POST | `/agent/v1/collaboration/interrupts` | P0/P1 安全点检查、暂停、解决和恢复 |
+| GET | `/agent/v1/collaboration/requests` | 当前员工参与的请求，游标分页 |
+| GET | `/v1/collaboration/requests` | 控制面只读观察 |
 
 所有写 API 幂等并审计；实时推送可用 SignalR，消息表仍是权威源。群聊创建、成员管理、消息、回复、@ 和证据关联只能由 `/agent/v1/conversations` 的 Employee Assignment Token 发起；控制面 `/v1/conversations` 仅提供只读观察。
 
@@ -271,7 +276,10 @@ chat.open_attachment
 - 员工、群聊和项目节点必须下钻到工作记录、消息、回复、@、证据引用和审计事件；审计事件显示哈希，不把投影当作权威状态。
 - 群聊创建和成员变更写审计；消息回复、@ 和证据引用进入统一可视化读模型。
 - 所有图查询先按租户过滤，再按节点类型和搜索条件过滤；URL 保存视图和选中对象，移动端使用单列办公室和全宽追溯抽屉。
-- 图数据是 WorkEntry、Conversation、Message 与 AuditRecord 的聚合投影，不新增第二套业务真相。
+- 委派、交接、求助和打断使用 `TaskCoordinationRecord` 权威状态机；写操作要求 `Idempotency-Key`，状态转换携带版本并写哈希审计。
+- 委派接受后执行所有权转给接收者，最终责任仍属委派者；交接接受前不转移，接受时校验租约和检查点并原子转移执行所有权与最终责任。
+- 打断只允许 P0/P1；目标 Agent 在安全点保存检查点并使旧租约失效，请求者解决后目标轮换新租约恢复。
+- 图数据是 WorkEntry、Conversation、Message、TaskCoordination 与 AuditRecord 的聚合投影，不新增第二套业务真相。
 
 ## 15. 度量
 

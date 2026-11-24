@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RegentAgent.Contracts.Identity;
 using RegentAgent.ControlPlane.Data;
@@ -21,6 +22,9 @@ public sealed partial class IdentityService(
     JsonDocumentStore<OwnershipDelegationRecord> ownershipDelegations,
     JsonDocumentStore<ExternalIdentityBindingRecord> externalBindings,
     JsonDocumentStore<ExternalLoginTransactionRecord> externalTransactions,
+    JsonDocumentStore<AuthenticationPolicyRecord> authenticationPolicies,
+    JsonDocumentStore<EmergencyAccessCredentialRecord> emergencyCredentials,
+    AuditIntegrityService audit,
     IExternalIdentityProviderResolver? externalProviders = null)
 {
     public async Task<AuthResult> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
@@ -70,6 +74,7 @@ public sealed partial class IdentityService(
         var memberships = await db.Memberships.AsNoTracking().Where(x => x.UserId == user.Id).ToListAsync(cancellationToken);
         var membership = memberships.FirstOrDefault(x => request.TenantId is null || x.TenantId == request.TenantId)
             ?? memberships.FirstOrDefault() ?? throw new UnauthorizedAccessException("No tenant membership.");
+        await EnsureLocalLoginAllowedAsync(membership.TenantId, cancellationToken);
         var session = await CreateSessionAsync(user.Id, membership.TenantId, cancellationToken);
         var displayName = await DisplayNameAsync(user.Id, membership.TenantId, user.DisplayName, cancellationToken);
         return new AuthResult(user.Email, displayName, user.Id, membership.TenantId, session.Id, membership.Role, []);
@@ -82,6 +87,9 @@ public sealed partial class IdentityService(
         var identity = await providers.GetAsync($"{tenantId}:{provider}", cancellationToken)
             ?? throw new UnauthorizedAccessException("Identity provider is not enabled for this tenant.");
         if (!identity.Enabled) throw new UnauthorizedAccessException("Identity provider is not enabled for this tenant.");
+        var policy = await LoadPolicyAsync(tenantId, cancellationToken);
+        if (policy.Mode == "required" && provider != "Oidc")
+            throw new UnauthorizedAccessException("This tenant requires OIDC SSO login.");
         redirectUri = string.IsNullOrWhiteSpace(redirectUri) ? identity.RedirectUri : redirectUri.Trim();
         if (!string.Equals(redirectUri, identity.RedirectUri, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("Redirect URI does not match the tenant identity provider.");
@@ -92,7 +100,10 @@ public sealed partial class IdentityService(
         var verifier = UrlToken();
         var challenge = Base64Url(SHA256.HashData(Encoding.UTF8.GetBytes(verifier)));
         var authorizationUrl = await resolver.Resolve(provider).BuildAuthorizationUrlAsync(
-            new ExternalAuthorizationParameters(state, nonce, challenge, redirectUri), configuration, cancellationToken);
+            new ExternalAuthorizationParameters(state, nonce, challenge, redirectUri,
+                policy.AllowedAcrValues.Length > 0 ? string.Join(' ', policy.AllowedAcrValues) : null,
+                policy.MaxAuthenticationAgeMinutes * 60,
+                policy.Mode == "required" ? "login" : null), configuration, cancellationToken);
         var transaction = new ExternalLoginTransactionRecord
         {
             TenantId = tenantId, Provider = provider, State = state, Nonce = nonce,
@@ -122,11 +133,16 @@ public sealed partial class IdentityService(
             transaction.TenantId, provider, identity.Issuer, null, null, null, callback.Code,
             CodeVerifier: transaction.CodeVerifier, Nonce: transaction.Nonce), ProviderConfiguration(identity), cancellationToken);
         var user = await ResolveExternalUserAsync(transaction.TenantId, provider, external, false, cancellationToken);
-        var session = await CreateSessionAsync(user.Id, transaction.TenantId, cancellationToken, TimeSpan.FromHours(8));
+        var capabilities = await ApplyExternalPolicyAsync(transaction.TenantId, provider, external, user.Id, cancellationToken);
+        var session = await CreateSessionAsync(user.Id, transaction.TenantId, cancellationToken,
+            TimeSpan.FromHours(8), provider);
         var displayName = await DisplayNameAsync(user.Id, transaction.TenantId, user.DisplayName, cancellationToken);
         var role = await db.Memberships.AsNoTracking().Where(x => x.TenantId == transaction.TenantId && x.UserId == user.Id)
             .Select(x => x.Role).SingleAsync(cancellationToken);
-        return new AuthResult(user.Email, displayName, user.Id, transaction.TenantId, session.Id, role, []);
+        return new AuthResult(user.Email, displayName, user.Id, transaction.TenantId, session.Id, role, [])
+        {
+            AuthMethod = provider, Capabilities = capabilities
+        };
     }
 
     public async Task<AuthResult> ExternalLoginAsync(ExternalLoginRequest request, string provider,
@@ -140,15 +156,24 @@ public sealed partial class IdentityService(
         var adapter = IdentityResolver().Resolve(provider);
         if (!adapter.Provider.Equals("local", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Remote identity login requires the authorization transaction endpoints.");
+        var policy = await LoadPolicyAsync(request.TenantId, cancellationToken);
+        if (policy.Mode == "required" && provider != "Oidc")
+            throw new UnauthorizedAccessException("This tenant requires OIDC SSO login.");
         var external = await adapter.AuthenticateAsync(new ExternalIdentityRequest(
             request.TenantId, provider, request.Issuer, request.Subject, request.Email, request.DisplayName,
             request.Code, request.IdToken, request.CodeVerifier, request.Nonce), ProviderConfiguration(identity), cancellationToken);
-        var user = await ResolveExternalUserAsync(request.TenantId, provider, external, true, cancellationToken);
-        var session = await CreateSessionAsync(user.Id, request.TenantId, cancellationToken, TimeSpan.FromHours(8));
+        var user = await ResolveExternalUserAsync(request.TenantId, provider, external,
+            policy.Mode != "required", cancellationToken);
+        var capabilities = await ApplyExternalPolicyAsync(request.TenantId, provider, external, user.Id, cancellationToken);
+        var session = await CreateSessionAsync(user.Id, request.TenantId, cancellationToken,
+            TimeSpan.FromHours(8), provider);
         var displayName = await DisplayNameAsync(user.Id, request.TenantId, user.DisplayName, cancellationToken);
         var role = await db.Memberships.AsNoTracking().Where(x => x.TenantId == request.TenantId && x.UserId == user.Id)
             .Select(x => x.Role).SingleAsync(cancellationToken);
-        return new AuthResult(user.Email, displayName, user.Id, request.TenantId, session.Id, role, []);
+        return new AuthResult(user.Email, displayName, user.Id, request.TenantId, session.Id, role, [])
+        {
+            AuthMethod = provider, Capabilities = capabilities
+        };
     }
 
     private async Task<UserRecord> ResolveExternalUserAsync(Guid tenantId, string provider,
@@ -158,13 +183,15 @@ public sealed partial class IdentityService(
             || string.IsNullOrWhiteSpace(external.Email))
             throw new UnauthorizedAccessException("Verified issuer, subject and email are required.");
         var bindings = await externalBindings.GetAllAsync(cancellationToken);
-        var binding = bindings.SingleOrDefault(x => x.Provider == provider && x.Issuer == external.Issuer && x.Subject == external.Subject);
+        var binding = bindings.SingleOrDefault(x => x.TenantId == tenantId && x.Provider == provider
+            && x.Issuer == external.Issuer && x.Subject == external.Subject);
         if (binding is not null)
         {
             var boundUser = await db.Users.SingleOrDefaultAsync(x => x.Id == binding.UserId, cancellationToken)
                 ?? throw new UnauthorizedAccessException("External identity binding is invalid.");
             if (!await db.Memberships.AnyAsync(x => x.TenantId == tenantId && x.UserId == boundUser.Id, cancellationToken))
                 throw new UnauthorizedAccessException("External identity is not a member of this tenant.");
+            await UpdateExternalBindingMetadataAsync(binding, external, cancellationToken);
             return boundUser;
         }
         var email = external.Email.Trim().ToLowerInvariant();
@@ -195,13 +222,26 @@ public sealed partial class IdentityService(
                 throw new UnauthorizedAccessException("A valid tenant invitation is required for external login.");
             db.Memberships.Add(new MembershipRecord { Id = Guid.NewGuid(), TenantId = tenantId, UserId = user.Id, Role = "Member" });
         }
-        await externalBindings.PutAsync(Guid.NewGuid().ToString(), new ExternalIdentityBindingRecord
+        var newBinding = new ExternalIdentityBindingRecord
         {
             TenantId = tenantId, Provider = provider, Issuer = external.Issuer, Subject = external.Subject,
             UserId = user.Id, LinkedAt = clock.GetUtcNow()
-        }, cancellationToken);
+        };
+        await UpdateExternalBindingMetadataAsync(newBinding, external, cancellationToken);
+        await externalBindings.PutAsync(newBinding.Id.ToString(), newBinding, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         return user;
+    }
+
+    private async Task UpdateExternalBindingMetadataAsync(ExternalIdentityBindingRecord binding,
+        ExternalIdentityResult external, CancellationToken cancellationToken)
+    {
+        binding.ClaimsJson = JsonSerializer.Serialize(external.Claims);
+        binding.GroupsJson = JsonSerializer.Serialize(external.Groups);
+        binding.Acr = external.Acr;
+        binding.AmrJson = JsonSerializer.Serialize(external.Amr);
+        binding.AuthTime = external.AuthTime;
+        await externalBindings.PutAsync(binding.Id.ToString(), binding, cancellationToken);
     }
 
     private IExternalIdentityProviderResolver IdentityResolver() => externalProviders
@@ -249,7 +289,8 @@ public sealed partial class IdentityService(
 
     public async Task<IReadOnlyList<SessionDto>> ListSessionsAsync(Guid userId, CancellationToken cancellationToken) =>
         (await sessions.GetAllAsync(cancellationToken)).Where(x => x.UserId == userId)
-            .Select(x => new SessionDto(x.Id, x.TenantId, x.CreatedAt, x.ExpiresAt, x.Status)).ToArray();
+            .Select(x => new SessionDto(x.Id, x.TenantId, x.CreatedAt, x.ExpiresAt, x.Status,
+                x.AuthMethod, x.SessionKind)).ToArray();
 
     public async Task RevokeSessionAsync(Guid userId, Guid sessionId, CancellationToken cancellationToken)
     {
@@ -275,17 +316,28 @@ public sealed partial class IdentityService(
     public Task<string> DisplayNameAsync(Guid userId, Guid tenantId, string fallback,
         CancellationToken cancellationToken) => GetDisplayNameInternalAsync(userId, tenantId, fallback, cancellationToken);
 
-    public Task<AuthSessionRecord> StartTenantSessionAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken) =>
-        CreateSessionAsync(userId, tenantId, cancellationToken);
+    public async Task<AuthSessionRecord> StartTenantSessionAsync(Guid userId, Guid tenantId,
+        CancellationToken cancellationToken, string authMethod = "Password")
+    {
+        var policy = await LoadPolicyAsync(tenantId, cancellationToken);
+        if (policy.Mode == "required" && authMethod != "Oidc")
+            throw new UnauthorizedAccessException("This tenant requires OIDC SSO login.");
+        return await CreateSessionAsync(userId, tenantId, cancellationToken, authMethod: authMethod);
+    }
 
     private async Task<AuthSessionRecord> CreateSessionAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken,
-        TimeSpan? lifetime = null)
+        TimeSpan? lifetime = null, string authMethod = "Password")
     {
         var now = clock.GetUtcNow();
+        var policy = await LoadPolicyAsync(tenantId, cancellationToken);
+        var effectiveLifetime = lifetime ?? TimeSpan.FromHours(12);
+        if (effectiveLifetime > TimeSpan.FromMinutes(policy.MaxSessionMinutes))
+            effectiveLifetime = TimeSpan.FromMinutes(policy.MaxSessionMinutes);
         var session = new AuthSessionRecord
         {
-            UserId = userId, TenantId = tenantId, CreatedAt = now,
-            ExpiresAt = now.Add(lifetime ?? TimeSpan.FromHours(12))
+            UserId = userId, TenantId = tenantId, CreatedAt = now, LastActivityAt = now,
+            ExpiresAt = now.Add(effectiveLifetime), AuthMethod = authMethod,
+            IdleTimeoutMinutes = policy.IdleTimeoutMinutes
         };
         await sessions.PutAsync(session.Id.ToString(), session, cancellationToken);
         return session;

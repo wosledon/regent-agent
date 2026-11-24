@@ -24,6 +24,10 @@ export function useTenantHub(enabled: boolean) {
     connection.on('message.created', () => {
       void queryClient.invalidateQueries({ queryKey: ['messages'] });
       void queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      void queryClient.invalidateQueries({ queryKey: ['collaboration'] });
+    });
+    connection.on('coordination.changed', () => {
+      void queryClient.invalidateQueries({ queryKey: ['collaboration'] });
     });
     connection.onreconnecting(() => setState('reconnecting'));
     connection.onreconnected(() => {

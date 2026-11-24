@@ -19,6 +19,8 @@
 | KeyVault 只有本地文件 | 增加 Postgres `keyvault` 信封加密适配、RLS SQL 和 TLS 校验 | `PostgresKeyVaultOptionsTests` |
 | 可观测性只有 Exporter 开关 | 增加严格脱敏处理器、ASP.NET Core/HTTP 仪表和导出超时 | `ObservabilityRedactionTests` |
 | Compose 硬编码 Postgres，备份只能本地 | 默认 SQLite/本地，组件 Profile 显式启用；备份支持可选 S3 上传/恢复 | YAML 解析、本地备份恢复 round trip |
+| 委派/交接/打断只有聊天消息，没有权威状态机和所有权门禁 | 增加 TaskCoordination 状态机、幂等 API/Tool、WIP/能力校验、检查点、租约 fencing 和原子转移 | `CollaborationCoordinationServiceTests`、协作 Playwright |
+| required SSO、组能力、IdP MFA 策略和紧急恢复未形成运行时闭环 | 增加策略/Provider API、acr/amr/auth_time/组校验、能力 claims、空闲超时、单次轮换紧急凭据和 15 分钟受限会话 | `IdentityServiceTests`、本地 HTTP 紧急会话冒烟 |
 
 ## 2. 逐模块矩阵
 
@@ -36,7 +38,7 @@
 | 10 绩效与自我改进 | 改进审查、KPI、绩效动作、申诉反转 | 符合（本地） | 无 |
 | 11 项目管理 | 需求/任务/缺陷状态机、自动认领、评审、裁决 | 符合（本地） | 无 |
 | 12 通信与路由 | `CommunicationRouter`、管理链/专业链、项目覆盖 | 符合（本地） | 无 |
-| 13 Agent 聊天协作 | Agent Token、群成员、回复/@、证据、只读可视化追溯 | 符合（本地） | 通用 Tool 调用与完整委派/交接 UI 仍未实现 |
+| 13 Agent 聊天协作 | Agent Token、群成员、回复/@、证据、委派/交接/求助/打断状态机、安全点租约、只读过程面板 | 符合（本地） | 无 |
 | 14 模型评测回归 | 版本化评测、密封/污染检测、回归计划 | 符合（本地） | 真实模型回归未执行 |
 | 15 数据 Schema 与事务 | SQLite/JSON/对象存储、Outbox、启动 SchemaVersion | 部分（生产） | 尚缺完整 Postgres 基线迁移和全部租户表 RLS SQL |
 | 16 部署升级迁移 | Compose Profile、生产启动校验、版本脚本 | 部分（生产） | Expand/Contract 与混版本回滚未在容器环境演练 |
@@ -50,7 +52,7 @@
 | 24 内容安全 | 版本化策略、分级处置、复核、申诉 | 符合（本地） | 无 |
 | 25 安全事件响应 | SEV 分级、遏制、证据、通知、恢复、复盘 | 符合（本地） | 无 |
 | 26 账户身份与找回 | Argon2id、恢复码、会话撤销、GitHub 已验证邮箱 | 符合（本地） | 邮件/短信与人工找回明确后置 |
-| 27 企业 OIDC | discovery/JWKS、code+PKCE、nonce、邀请、subject 绑定 | 部分（生产） | required SSO、组策略、IdP MFA 与紧急恢复未实现 |
+| 27 企业 OIDC | discovery/JWKS、code+PKCE、nonce、邀请、subject 绑定、required SSO、组能力、acr/amr/auth_time、空闲超时和紧急恢复 | 符合（适配） | 真实 IdP/JWKS 轮换与容灾未连接验证；SAML/BFF/设备管理后置 |
 | 28 账户租户所有权 | 多租户成员、Co-Owner、Primary Owner、限时委托 | 符合（本地） | 无 |
 | 29 软删除 | 软删除/恢复、 tombstone、物理清除证明 | 符合（本地） | 无 |
 | 30 保留归档 | 保留策略、法律保留、归档校验、授权恢复 | 符合（本地） | 真实冷存储未连接 |

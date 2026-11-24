@@ -24,7 +24,10 @@ public sealed record ExternalAuthorizationParameters(
     string State,
     string Nonce,
     string CodeChallenge,
-    string RedirectUri);
+    string RedirectUri,
+    string? AcrValues = null,
+    int? MaxAgeSeconds = null,
+    string? Prompt = null);
 
 public sealed record ExternalIdentityResult(
     string Issuer,
@@ -32,7 +35,13 @@ public sealed record ExternalIdentityResult(
     string Email,
     bool EmailVerified,
     string DisplayName,
-    IReadOnlyDictionary<string, string> Claims);
+    IReadOnlyDictionary<string, string> Claims)
+{
+    public IReadOnlyList<string> Groups { get; init; } = [];
+    public string? Acr { get; init; }
+    public IReadOnlyList<string> Amr { get; init; } = [];
+    public DateTimeOffset? AuthTime { get; init; }
+}
 
 public interface IExternalIdentityProvider
 {

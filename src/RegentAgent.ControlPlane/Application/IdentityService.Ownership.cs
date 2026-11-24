@@ -90,10 +90,12 @@ public sealed partial class IdentityService
     {
         await RequireOwnerAsync(userId, tenantId, cancellationToken);
         if (provider.Provider is not ("Oidc" or "GitHub")) throw new InvalidOperationException("Unsupported identity provider.");
-        if (provider.Provider == "Oidc" && !string.IsNullOrWhiteSpace(provider.Issuer)
-            && !provider.Issuer.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
-            && provider.Status == "Active")
-            throw new InvalidOperationException("Active OIDC issuers must use HTTPS.");
+        ValidateGroupMapping(provider.GroupMappingJson);
+        var policy = await LoadPolicyAsync(tenantId, cancellationToken);
+        if (policy.Mode == "required" && provider.Provider == "Oidc" && (!provider.Enabled || provider.Status != "Active"))
+            throw new InvalidOperationException("Required SSO tenants cannot disable the active OIDC provider.");
+        if (policy.Mode == "required" && provider.Provider == "GitHub" && provider.Enabled)
+            throw new InvalidOperationException("Required SSO tenants cannot enable GitHub login.");
         var existing = await providers.GetAsync($"{tenantId}:{provider.Provider}", cancellationToken);
         var record = new IdentityProviderRecord
         {
@@ -103,10 +105,15 @@ public sealed partial class IdentityService
             Status = provider.Status, Version = (existing?.Version ?? 0) + 1,
             Enabled = provider.Enabled, GroupMappingJson = provider.GroupMappingJson
         };
+        if (record.Enabled && record.Status == "Active")
+            await ValidateProviderActivationAsync(tenantId, record, cancellationToken);
         await providers.PutAsync($"{tenantId}:{provider.Provider}", record, cancellationToken);
-        return new IdentityProviderDto(tenantId, record.Provider, record.Issuer, record.ClientId, record.Enabled,
-            record.GroupMappingJson, record.ClientSecretRef, record.RedirectUri, record.Scopes,
-            record.GroupClaim, record.Status, record.Version);
+        await audit.AppendAsync(tenantId, "auth.provider.configured", "Owner", new
+        {
+            actor_type = "Human", user_id = userId, provider = record.Provider,
+            enabled = record.Enabled, status = record.Status, version = record.Version
+        }, cancellationToken);
+        return ToProviderDto(tenantId, record);
     }
 
     private async Task RequireOwnerAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken)

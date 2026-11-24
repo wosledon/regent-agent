@@ -86,6 +86,22 @@ public static class LocalSchemaUpgrade
                 Profile TEXT NOT NULL, CreatedAt TEXT NOT NULL
             );
             CREATE UNIQUE INDEX IF NOT EXISTS IX_AuditCheckpoints_TenantId_ThroughSeq ON AuditCheckpoints (TenantId, ThroughSeq);
+            CREATE TABLE IF NOT EXISTS TaskCoordinations (
+                Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL,
+                TaskId TEXT NOT NULL, ProjectId TEXT NOT NULL, Kind TEXT NOT NULL,
+                Status TEXT NOT NULL, RequesterEmployeeId TEXT NOT NULL,
+                TargetEmployeeId TEXT NOT NULL, Priority TEXT NOT NULL,
+                Summary TEXT NOT NULL, DetailsJson TEXT NOT NULL, ResponseJson TEXT NULL,
+                LeaseToken TEXT NULL, SortKey TEXT NOT NULL, CreatedAt TEXT NOT NULL,
+                UpdatedAt TEXT NOT NULL, Deadline TEXT NULL, CompletedAt TEXT NULL,
+                Version INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE INDEX IF NOT EXISTS IX_TaskCoordinations_TenantId_Kind_Status_SortKey
+                ON TaskCoordinations (TenantId, Kind, Status, SortKey);
+            CREATE INDEX IF NOT EXISTS IX_TaskCoordinations_TenantId_TargetEmployeeId_Status_SortKey
+                ON TaskCoordinations (TenantId, TargetEmployeeId, Status, SortKey);
+            CREATE INDEX IF NOT EXISTS IX_TaskCoordinations_TenantId_TaskId_Kind_Status
+                ON TaskCoordinations (TenantId, TaskId, Kind, Status);
             """;
         await db.Database.ExecuteSqlRawAsync(schema, cancellationToken);
         var columns = await db.Database.SqlQueryRaw<string>(
@@ -102,5 +118,23 @@ public static class LocalSchemaUpgrade
             "SELECT name FROM pragma_table_info('Candidates')").ToListAsync(cancellationToken);
         if (!candidateColumns.Contains("JobDescription"))
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE Candidates ADD COLUMN JobDescription TEXT NOT NULL DEFAULT '';", cancellationToken);
+        var taskColumns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('Tasks')").ToListAsync(cancellationToken);
+        if (!taskColumns.Contains("AssigneeEmployeeId"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Tasks ADD COLUMN AssigneeEmployeeId TEXT NULL;", cancellationToken);
+        if (!taskColumns.Contains("AccountableEmployeeId"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Tasks ADD COLUMN AccountableEmployeeId TEXT NULL;", cancellationToken);
+        if (!taskColumns.Contains("UpdatedAt"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Tasks ADD COLUMN UpdatedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00.0000000+00:00';", cancellationToken);
+        if (!taskColumns.Contains("Version"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Tasks ADD COLUMN Version INTEGER NOT NULL DEFAULT 1;", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE INDEX IF NOT EXISTS IX_Tasks_TenantId_AssigneeEmployeeId_Status
+            ON Tasks (TenantId, AssigneeEmployeeId, Status);
+            """, cancellationToken);
+        var membershipColumns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('Memberships')").ToListAsync(cancellationToken);
+        if (!membershipColumns.Contains("CapabilitiesJson"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Memberships ADD COLUMN CapabilitiesJson TEXT NOT NULL DEFAULT '[]';", cancellationToken);
     }
 }

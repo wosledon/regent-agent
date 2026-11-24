@@ -39,7 +39,8 @@ public sealed record CollaborationActivityDto(
     string? ProjectId,
     string? TaskId,
     IReadOnlyList<string> EvidenceRefs,
-    string? AuditHash);
+    string? AuditHash,
+    string? TargetEmployeeId = null);
 
 public sealed record CollaborationSummaryDto(
     int EmployeeCount,
@@ -47,7 +48,8 @@ public sealed record CollaborationSummaryDto(
     int MessageCount,
     int CollaborationCount,
     int ProjectCount,
-    int ActivityCount);
+    int ActivityCount,
+    int CoordinationCount = 0);
 
 public sealed record CollaborationGraphDto(
     IReadOnlyList<CollaborationNodeDto> Nodes,

@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.WebUtilities;
@@ -36,9 +37,14 @@ public sealed class OidcExternalIdentityProvider(
             ["state"] = parameters.State,
             ["nonce"] = parameters.Nonce,
             ["code_challenge"] = parameters.CodeChallenge,
-            ["code_challenge_method"] = "S256"
+            ["code_challenge_method"] = "S256",
+            ["acr_values"] = parameters.AcrValues,
+            ["max_age"] = parameters.MaxAgeSeconds?.ToString(CultureInfo.InvariantCulture),
+            ["prompt"] = parameters.Prompt
         });
     }
+
+    private readonly TimeProvider clock = TimeProvider.System;
 
     public async Task<ExternalIdentityResult> AuthenticateAsync(ExternalIdentityRequest request,
         ExternalIdentityProviderConfiguration configuration, CancellationToken cancellationToken)
@@ -81,6 +87,12 @@ public sealed class OidcExternalIdentityProvider(
                 throw new ExternalIdentityException("OIDC signing algorithm is not allowed.");
             var claims = token.Claims.GroupBy(claim => claim.Type, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.Last().Value, StringComparer.Ordinal);
+            if (token.Audiences.Count() > 1 && (!claims.TryGetValue("azp", out var azp) || azp != configuration.ClientId))
+                throw new ExternalIdentityException("OIDC authorized party is invalid for a multi-audience token.");
+            if (claims.TryGetValue("iat", out var issuedAtRaw)
+                && long.TryParse(issuedAtRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var issuedAt)
+                && DateTimeOffset.FromUnixTimeSeconds(issuedAt) > clock.GetUtcNow().Add(TimeSpan.FromSeconds(options.Oidc.ClockSkewSeconds)))
+                throw new ExternalIdentityException("OIDC token was issued in the future.");
             if (options.Oidc.RequireNonce && (!claims.TryGetValue("nonce", out var nonce) || nonce != request.Nonce))
                 throw new ExternalIdentityException("OIDC nonce does not match.");
             if (!claims.TryGetValue("sub", out var subject) || string.IsNullOrWhiteSpace(subject))
@@ -89,13 +101,46 @@ public sealed class OidcExternalIdentityProvider(
                 || !claims.TryGetValue("email_verified", out var verified) || !bool.TryParse(verified, out var emailVerified) || !emailVerified)
                 throw new ExternalIdentityException("OIDC did not return a verified email.");
             var displayName = claims.GetValueOrDefault("name") ?? claims.GetValueOrDefault("preferred_username") ?? email;
-            return new ExternalIdentityResult(token.Issuer, subject, email, true, displayName, claims);
+            var groups = ReadClaimValues(token, configuration.GroupClaim);
+            var amr = ReadClaimValues(token, "amr");
+            var authTime = claims.TryGetValue("auth_time", out var authTimeRaw)
+                && long.TryParse(authTimeRaw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var authTimeSeconds)
+                ? DateTimeOffset.FromUnixTimeSeconds(authTimeSeconds) : (DateTimeOffset?)null;
+            return new ExternalIdentityResult(token.Issuer, subject, email, true, displayName, claims)
+            {
+                Groups = groups, Acr = claims.GetValueOrDefault("acr"), Amr = amr, AuthTime = authTime
+            };
         }
         catch (ExternalIdentityException) { throw; }
         catch (Exception exception) when (exception is SecurityTokenException or HttpRequestException or InvalidOperationException or ArgumentException)
         {
             throw new ExternalIdentityException("OIDC identity validation failed.", exception);
         }
+    }
+
+    private static IReadOnlyList<string> ReadClaimValues(JwtSecurityToken token, string claimPath)
+    {
+        if (string.IsNullOrWhiteSpace(claimPath)) return [];
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(token.RawPayload);
+            var current = document.RootElement;
+            foreach (var segment in claimPath.Split('.', StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (current.ValueKind != System.Text.Json.JsonValueKind.Object
+                    || !current.TryGetProperty(segment, out var child)) return [];
+                current = child;
+            }
+            return current.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.Array => current.EnumerateArray()
+                    .Where(value => value.ValueKind == System.Text.Json.JsonValueKind.String)
+                    .Select(value => value.GetString()!).Where(value => !string.IsNullOrWhiteSpace(value)).ToArray(),
+                System.Text.Json.JsonValueKind.String when !string.IsNullOrWhiteSpace(current.GetString()) => [current.GetString()!],
+                _ => []
+            };
+        }
+        catch (System.Text.Json.JsonException) { return []; }
     }
 
     private async Task<OpenIdConnectConfiguration> GetDiscoveryAsync(

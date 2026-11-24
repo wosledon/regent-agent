@@ -27,6 +27,7 @@ public sealed class TenantPurgeService(RegentDbContext db, IObjectStore objects,
         db.CandidateAppeals.RemoveRange(await db.CandidateAppeals.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
         db.FairnessAudits.RemoveRange(await db.FairnessAudits.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
         db.Candidates.RemoveRange(await db.Candidates.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
+        db.TaskCoordinations.RemoveRange(await db.TaskCoordinations.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
         db.Tasks.RemoveRange(await db.Tasks.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken));
         var projectIds = await db.Projects.Where(x => x.TenantId == tenantId).Select(x => x.Id).ToListAsync(cancellationToken);
         db.Milestones.RemoveRange(await db.Milestones.Where(x => projectIds.Contains(x.ProjectId)).ToListAsync(cancellationToken));

@@ -18,8 +18,12 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
             : null;
         var now = clock.GetUtcNow();
         var candidates = await db.Tasks.Where(x => x.TenantId == tenantId &&
-            (x.Status == "Pending" || x.Status == "Assigned")).ToListAsync(cancellationToken);
-        var task = candidates.FirstOrDefault(x => x.Status == "Pending" || x.LeaseExpiresAt < now);
+            (x.Status == "Pending" || x.Status == "Assigned" || x.Status == "InProgress")).ToListAsync(cancellationToken);
+        var task = candidates.Where(x => x.Status == "Pending").OrderBy(x => x.UpdatedAt).FirstOrDefault()
+            ?? candidates.Where(x => x.Status == "Assigned" && (x.LeaseExpiresAt is null || x.LeaseExpiresAt <= now))
+                .OrderBy(x => x.UpdatedAt).FirstOrDefault()
+            ?? candidates.Where(x => x.Status == "InProgress" && x.LeaseExpiresAt is not null && x.LeaseExpiresAt <= now)
+                .OrderBy(x => x.LeaseExpiresAt).FirstOrDefault();
         if (task is null)
         {
             if (transaction is not null) await transaction.CommitAsync(cancellationToken);
@@ -38,11 +42,24 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
             db.Employees.Add(employee);
         }
         task.Assignee = employee.DisplayName;
-        task.Status = "Assigned";
+        task.AssigneeEmployeeId = employee.Id;
+        task.AccountableEmployeeId ??= employee.Id;
+        task.Status = "InProgress";
         task.LeaseOwner = runnerId;
         task.LeaseToken = Guid.NewGuid().ToString("N");
         task.LeaseExpiresAt = now.AddMinutes(2);
         task.Attempt += 1;
+        task.Version++;
+        task.UpdatedAt = now;
+        var delegation = await db.TaskCoordinations.SingleOrDefaultAsync(x => x.TenantId == tenantId
+            && x.TaskId == task.Id && x.Kind == "Delegation" && x.Status == "Accepted"
+            && x.TargetEmployeeId == employee.Id, cancellationToken);
+        if (delegation is not null)
+        {
+            delegation.Status = "InProgress";
+            delegation.UpdatedAt = now;
+            delegation.Version++;
+        }
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         var scopes = new HashSet<string>(AgentScopes.Baseline, StringComparer.OrdinalIgnoreCase);
@@ -66,9 +83,12 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
         CancellationToken cancellationToken)
     {
         var task = await db.Tasks.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == taskId, cancellationToken);
-        if (task is null || task.LeaseToken != checkpoint.LeaseToken) return false;
+        if (task is null || task.LeaseToken != checkpoint.LeaseToken || task.Status == "Interrupted"
+            || task.LeaseExpiresAt <= clock.GetUtcNow()) return false;
         task.CheckpointJson = checkpoint.CheckpointJson;
         task.LeaseExpiresAt = clock.GetUtcNow().AddMinutes(2);
+        task.Version++;
+        task.UpdatedAt = clock.GetUtcNow();
         await db.SaveChangesAsync(cancellationToken);
         return true;
     }
@@ -80,7 +100,8 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
             ? await db.Database.BeginTransactionAsync(cancellationToken)
             : null;
         var task = await db.Tasks.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == taskId, cancellationToken);
-        if (task is null || task.LeaseToken != completion.LeaseToken || task.LeaseExpiresAt < clock.GetUtcNow())
+        if (task is null || task.LeaseToken != completion.LeaseToken || task.Status == "Interrupted"
+            || task.LeaseExpiresAt <= clock.GetUtcNow())
         {
             return false;
         }
@@ -90,6 +111,17 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
         task.LeaseToken = null;
         task.LeaseExpiresAt = null;
         task.CheckpointJson = null;
+        task.Version++;
+        task.UpdatedAt = clock.GetUtcNow();
+        var delegation = await db.TaskCoordinations.SingleOrDefaultAsync(x => x.TenantId == tenantId
+            && x.TaskId == task.Id && x.Kind == "Delegation" && x.Status == "InProgress"
+            && x.TargetEmployeeId == task.AssigneeEmployeeId, cancellationToken);
+        if (delegation is not null)
+        {
+            delegation.Status = "Completed";
+            delegation.CompletedAt = delegation.UpdatedAt = clock.GetUtcNow();
+            delegation.Version++;
+        }
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.TenantId == tenantId && x.Id == task.ProjectId, cancellationToken);
         var employeeName = string.IsNullOrWhiteSpace(task.Assignee) ? "Local Runner" : task.Assignee;
         var employee = await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.DisplayName == employeeName, cancellationToken);

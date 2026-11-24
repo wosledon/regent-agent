@@ -179,7 +179,8 @@ public static class DbInitializer
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        var positions = await db.Positions.AsNoTracking().Where(x => x.TenantId == TenantId).ToDictionaryAsync(x => x.Name, cancellationToken);
+        var positions = (await db.Positions.AsNoTracking().Where(x => x.TenantId == TenantId).ToListAsync(cancellationToken))
+            .GroupBy(x => x.Name, StringComparer.OrdinalIgnoreCase).ToDictionary(x => x.Key, x => x.First(), StringComparer.OrdinalIgnoreCase);
         var employees = await db.Employees.Where(x => x.TenantId == TenantId).ToListAsync(cancellationToken);
         foreach (var employee in employees.Where(x => positions.ContainsKey(x.Position)))
         {

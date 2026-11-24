@@ -21,12 +21,13 @@
 - 两个独立前端：Tenant Dashboard、Ops Console。
 - 模型只支持 OpenAI 与 Anthropic 云端原生端点；Gateway 模型调用必须使用员工 Assignment Token。
 - 控制面 `/v1` 用于人类治理与只读观察；`/agent/v1` 使用短期员工 Token，绑定租户、员工、任务、Runner、scope 和有效期。
-- `/agent/v1/tools` 提供受控 Tool 发现与调用，覆盖聊天、任务、记忆、工作流、项目、组织、改进、招聘、绩效、评测、Agent 演进和任务治理；执行层重新鉴权并记录幂等审计。
+- `/agent/v1/tools` 提供受控 Tool 发现与调用，覆盖聊天、任务、协作委派/交接/求助/打断、记忆、工作流、项目、组织、改进、招聘、绩效、评测、Agent 演进和任务治理；执行层重新鉴权并记录幂等审计。
+- 协作请求使用显式状态机、任务级租约 fencing、安全点检查点和原子所有权转移；控制面仅提供只读请求列表和过程可视化。
 - API、Tool、MCP 和通知均只用于系统内部。
 - GitHub 只保存源码和版本 Tag；本地用 Docker Compose 构建。
 - Q-033 数据导出、Q-046 支付/套餐/定价保持延后。
 - 本地身份使用 Argon2id 密码哈希、一次性恢复码、持久会话和登录限流；旧 PBKDF2 凭据在成功登录后升级，会话撤销会在后续请求生效。
-- OIDC/GitHub 默认使用本地适配；远程模式支持 state/PKCE/nonce 授权事务、code 交换、JWKS 校验和 subject 绑定，新用户必须有效邀请。
+- OIDC/GitHub 默认使用本地适配；远程模式支持 state/PKCE/nonce 授权事务、code 交换、JWKS 校验和 subject 绑定，新用户必须有效邀请。租户可启用 required SSO，执行组能力、acr/amr/auth_time 和会话空闲策略；紧急凭据单次使用后轮换，只创建 15 分钟的 SSO 恢复/账户访问会话。
 - 租户邀请、Co-Owner、限时所有权委托和 Boss 展示后缀已提供 API 与设置页面。
 - 管家支持确定性问答、定时/事件报告和失败重试；Operations 提供本地健康检查、公开状态页、租户启停和支持访问审批。
 - 记忆模块提供确定性 256 维向量、关键词/向量/图混合召回、冲突提示、低风险降权、投毒隔离、独立纠错、影响记录和索引删除传播；生产 pgvector/全文检索仍未接入。

@@ -14,7 +14,12 @@ public sealed class AuthSessionRecord
     public Guid TenantId { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? LastActivityAt { get; set; }
     public string Status { get; set; } = "Active";
+    public string AuthMethod { get; set; } = "Password";
+    public string SessionKind { get; set; } = "Standard";
+    public string AllowedActionsJson { get; set; } = "[]";
+    public int IdleTimeoutMinutes { get; set; } = 30;
 }
 
 public sealed class RecoveryCodeRecord
@@ -61,6 +66,11 @@ public sealed class ExternalIdentityBindingRecord
     public string Subject { get; set; } = string.Empty;
     public Guid UserId { get; set; }
     public DateTimeOffset LinkedAt { get; set; }
+    public string ClaimsJson { get; set; } = "{}";
+    public string GroupsJson { get; set; } = "[]";
+    public string? Acr { get; set; }
+    public string AmrJson { get; set; } = "[]";
+    public DateTimeOffset? AuthTime { get; set; }
 }
 
 public sealed class ExternalLoginTransactionRecord
@@ -76,6 +86,33 @@ public sealed class ExternalLoginTransactionRecord
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public string Status { get; set; } = "Pending";
+}
+
+public sealed class AuthenticationPolicyRecord
+{
+    public Guid TenantId { get; set; }
+    public string Mode { get; set; } = "optional";
+    public bool RequireGroupClaim { get; set; }
+    public string[] AllowedAcrValues { get; set; } = [];
+    public string[] RequiredAmrValues { get; set; } = [];
+    public int MaxAuthenticationAgeMinutes { get; set; } = 60;
+    public int MaxSessionMinutes { get; set; } = 480;
+    public int IdleTimeoutMinutes { get; set; } = 30;
+    public int Version { get; set; } = 1;
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public sealed class EmergencyAccessCredentialRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public string CodeHash { get; set; } = string.Empty;
+    public string Status { get; set; } = "Active";
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public DateTimeOffset? UsedAt { get; set; }
+    public Guid CreatedBy { get; set; }
+    public Guid UserId { get; set; }
 }
 
 public sealed class UserTenantProfileRecord
