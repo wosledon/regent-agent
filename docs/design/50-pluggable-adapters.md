@@ -21,7 +21,7 @@
 | 模型目录 | `IModelCatalogSource` + 本地/models.dev 源 | `ModelOperationsService` 通过端口选择，快照保存 raw JSON/checksum | 自动分档与真实远程同步仍按约束不调试 |
 | 关系存储 | EF Core SQLite/Postgres 分支 | 可选择 Provider，但无 RLS/生产迁移作业 | 启动校验、迁移边界、RLS 集成测试与角色配置 |
 | 对象存储 | `IObjectStore` + 本地/S3 适配 | `Storage:ObjectProvider` 在组合根选择 Local 或 S3，S3 保存 checksum 元数据 | 真实 RustFS 连通性按约束不调试 |
-| Gateway 密钥 | `IKeyVault` + 本地文件密钥库 | 已有信封加密端口 | Postgres `keyvault` 适配、配置选择与迁移脚本 |
+| Gateway 密钥 | `IKeyVault` + 本地文件/Postgres 密钥库 | `Gateway:KeyVault:Provider` 选择 local 或 postgres；Postgres 使用信封加密、强制 RLS 和租户事务作用域 | 真实 Postgres/外部 KMS 按约束不调试 |
 | 外部身份 | `IExternalIdentityProvider` + 本地/GitHub/OIDC 适配 | `Identity:Mode` 选择 local 或 remote；OIDC 校验 discovery/JWKS、issuer/audience/nonce，GitHub 交换 code 并读取已验证邮箱 | 真实 IdP 连通性按约束不调试 |
 | 可观测性 | `RegentAgent.Observability` + OpenTelemetry SDK | 四个服务通过 `Observability:Profile` 选择 off/local/otlp/elastic，支持独立信号开关、采样和 endpoint 校验 | 真实 OTLP/Elastic 连通性按约束不调试 |
 | 审计锚定 | `IAuditAnchorStore` + 本地/对象存储适配 | `Audit:AnchorProvider` 选择 Local 或 ObjectStore，检查点写入后可按租户和序号验证 | 真实外部锚定服务按约束不调试 |

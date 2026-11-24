@@ -18,7 +18,7 @@ public sealed class LocalFileKeyVaultTests
             Assert.Null(await vault.UnlockAsync("tenant-b", created.KeyRef, CancellationToken.None));
             Assert.DoesNotContain("super-secret-value", await File.ReadAllTextAsync(Path.Combine(root, "vault.json")));
 
-            var rotated = await vault.RotateAsync(created.KeyRef, "new-secret-value", CancellationToken.None);
+            var rotated = await vault.RotateAsync("tenant-a", created.KeyRef, "new-secret-value", CancellationToken.None);
             Assert.Equal(created.KeyRef, rotated.KeyRef);
             Assert.Equal(2, rotated.Version);
             Assert.Equal("new-secret-value", await vault.UnlockAsync("tenant-a", created.KeyRef, CancellationToken.None));

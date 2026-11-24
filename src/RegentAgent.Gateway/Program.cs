@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Npgsql;
 using RegentAgent.Gateway.KeyVault;
 using RegentAgent.Gateway.Metering;
 using RegentAgent.Observability;
@@ -60,13 +61,38 @@ builder.Services.AddSingleton<IProviderClient>(provider => provider.GetRequiredS
 builder.Services.AddSingleton<IProviderRouter, ProviderRouter>();
 builder.Services.AddSingleton<IUsageJournal>(sp =>
     new JsonlUsageJournal(builder.Configuration["Gateway:UsagePath"] ?? "data/gateway-usage.jsonl"));
-builder.Services.AddSingleton<IKeyVault>(sp =>
+var keyVaultProvider = builder.Configuration["Gateway:KeyVault:Provider"] ?? "local";
+if (keyVaultProvider.Trim().ToLowerInvariant() is not ("local" or "postgres"))
+    throw new InvalidOperationException("Gateway keyvault provider must be local or postgres.");
+if (keyVaultProvider.Equals("local", StringComparison.OrdinalIgnoreCase))
 {
-    var config = sp.GetRequiredService<IConfiguration>();
-    var master = new LocalMasterKeyProvider(config["Gateway:MasterKeyPath"] ?? "data/secrets/master.key",
-        config["Gateway:MasterKey"]);
-    return new LocalFileKeyVault(config["Gateway:KeyVaultPath"] ?? "data/keyvault.json", master);
-});
+    builder.Services.AddSingleton<IKeyVault>(sp =>
+    {
+        var config = sp.GetRequiredService<IConfiguration>();
+        var master = new LocalMasterKeyProvider(config["Gateway:MasterKeyPath"] ?? "data/secrets/master.key",
+            config["Gateway:MasterKey"]);
+        return new LocalFileKeyVault(config["Gateway:KeyVaultPath"] ?? "data/keyvault.json", master);
+    });
+}
+else
+{
+    var keyVaultOptions = new PostgresKeyVaultOptions
+    {
+        ConnectionString = builder.Configuration["Gateway:KeyVault:ConnectionString"] ?? string.Empty,
+        Schema = builder.Configuration["Gateway:KeyVault:Schema"] ?? "keyvault",
+        Table = builder.Configuration["Gateway:KeyVault:Table"] ?? "model_keys",
+        CommandTimeoutSeconds = builder.Configuration.GetValue("Gateway:KeyVault:CommandTimeoutSeconds", 15),
+        RequireTls = builder.Configuration.GetValue("Gateway:KeyVault:RequireTls", true)
+    };
+    keyVaultOptions.Validate();
+    if (string.IsNullOrWhiteSpace(builder.Configuration["Gateway:MasterKey"]))
+        throw new InvalidOperationException("Postgres keyvault requires Gateway:MasterKey from the secret provider.");
+    builder.Services.AddSingleton(_ => NpgsqlDataSource.Create(keyVaultOptions.ConnectionString));
+    builder.Services.AddSingleton(keyVaultOptions);
+    builder.Services.AddSingleton<IKeyVault>(sp => new PostgresKeyVault(sp.GetRequiredService<NpgsqlDataSource>(),
+        new LocalMasterKeyProvider(builder.Configuration["Gateway:MasterKeyPath"] ?? "data/secrets/master.key",
+            builder.Configuration["Gateway:MasterKey"]), sp.GetRequiredService<PostgresKeyVaultOptions>()));
+}
 builder.Services.AddSingleton(sp => new LocalBudgetService(
     sp.GetRequiredService<IConfiguration>().GetValue<long>("Gateway:MonthlyLimit", 8_000_000)));
 var app = builder.Build();
@@ -173,7 +199,7 @@ admin.MapGet("", async (IKeyVault keyVault, CancellationToken cancellationToken)
     Results.Ok(await keyVault.ListAsync("demo", cancellationToken)));
 admin.MapPost("/{keyRef}/rotate", async (string keyRef, SetKeyRequest request,
     IKeyVault keyVault, CancellationToken cancellationToken) =>
-    Results.Ok(await keyVault.RotateAsync(keyRef, request.ApiKey, cancellationToken)));
+    Results.Ok(await keyVault.RotateAsync("demo", keyRef, request.ApiKey, cancellationToken)));
 admin.MapDelete("/{keyRef}", async (string keyRef, IKeyVault keyVault, CancellationToken cancellationToken) =>
 {
     await keyVault.DeleteAsync("demo", keyRef, cancellationToken);
