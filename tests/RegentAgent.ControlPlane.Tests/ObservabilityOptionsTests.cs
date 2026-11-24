@@ -12,6 +12,9 @@ public sealed class ObservabilityOptionsTests
         options.Validate();
         options.Profile = "off";
         options.Validate();
+        options.Profile = "LOCAL";
+        options.Validate();
+        Assert.Equal("local", options.Profile);
     }
 
     [Fact]

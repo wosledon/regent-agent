@@ -14,7 +14,9 @@ public sealed class ObservabilityOptions
 
     public void Validate()
     {
-        if (Profile.Trim().ToLowerInvariant() is not ("off" or "local" or "otlp" or "elastic"))
+        Profile = Profile.Trim().ToLowerInvariant();
+        Redaction = Redaction.Trim().ToLowerInvariant();
+        if (Profile is not ("off" or "local" or "otlp" or "elastic"))
             throw new InvalidOperationException("Observability profile must be off, local, otlp or elastic.");
         if (Sampling is < 0 or > 1) throw new InvalidOperationException("Observability sampling must be between 0 and 1.");
         if (Redaction.Trim().ToLowerInvariant() != "strict")

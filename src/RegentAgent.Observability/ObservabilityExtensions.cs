@@ -30,6 +30,11 @@ public static class ObservabilityExtensions
         };
         options.Validate();
         services.AddSingleton(options);
+        services.Configure<OpenTelemetryLoggerOptions>(loggerOptions =>
+        {
+            loggerOptions.ParseStateValues = true;
+            loggerOptions.IncludeFormattedMessage = false;
+        });
         if (options.Profile.Equals("off", StringComparison.OrdinalIgnoreCase)) return services;
 
         var builder = services.AddOpenTelemetry()
@@ -38,21 +43,37 @@ public static class ObservabilityExtensions
         if (options.Logs)
             builder.WithLogging(logging =>
             {
+                logging.AddProcessor(new StrictLogRedactionProcessor());
                 if (options.Profile.Equals("local", StringComparison.OrdinalIgnoreCase)) logging.AddConsoleExporter();
-                else logging.AddOtlpExporter(exporter => exporter.Endpoint = new Uri(options.OtlpEndpoint!));
+                else logging.AddOtlpExporter(exporter =>
+                {
+                    exporter.Endpoint = new Uri(options.OtlpEndpoint!);
+                    exporter.TimeoutMilliseconds = 5000;
+                });
             });
         if (options.Traces)
             builder.WithTracing(tracing =>
             {
                 tracing.SetSampler(new TraceIdRatioBasedSampler(options.Sampling));
+                tracing.AddAspNetCoreInstrumentation(instrumentation => instrumentation.RecordException = false);
+                tracing.AddHttpClientInstrumentation(instrumentation => instrumentation.RecordException = false);
+                tracing.AddProcessor(new StrictActivityRedactionProcessor());
                 if (options.Profile.Equals("local", StringComparison.OrdinalIgnoreCase)) tracing.AddConsoleExporter();
-                else tracing.AddOtlpExporter(exporter => exporter.Endpoint = new Uri(options.OtlpEndpoint!));
+                else tracing.AddOtlpExporter(exporter =>
+                {
+                    exporter.Endpoint = new Uri(options.OtlpEndpoint!);
+                    exporter.TimeoutMilliseconds = 5000;
+                });
             });
         if (options.Metrics)
             builder.WithMetrics(metrics =>
             {
                 if (options.Profile.Equals("local", StringComparison.OrdinalIgnoreCase)) metrics.AddConsoleExporter();
-                else metrics.AddOtlpExporter(exporter => exporter.Endpoint = new Uri(options.OtlpEndpoint!));
+                else metrics.AddOtlpExporter(exporter =>
+                {
+                    exporter.Endpoint = new Uri(options.OtlpEndpoint!);
+                    exporter.TimeoutMilliseconds = 5000;
+                });
             });
         return services;
     }
