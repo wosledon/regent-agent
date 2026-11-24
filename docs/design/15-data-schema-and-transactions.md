@@ -1,6 +1,6 @@
 # 15 数据 Schema 与事务边界
 
-- 版本：v0.1（待评审）
+- 版本：v0.2（Postgres 基线、强制 RLS 与迁移边界已生成；真实数据库未连接）
 - 范围：Postgres Schema、RLS、RustFS、本地工作区、事务、Outbox/Saga、分区和状态类型
 - 对应需求：FR-057、BR-050、BR-051、BR-052、BR-166
 - 对应缺口：G-05、G-06、G-07、G-09、G-16
@@ -59,6 +59,15 @@ Schema 是模块代码边界，不是租户隔离边界。运营数据使用独�
 - 物理清除分批执行，完成后在短事务内写入 purged_at 和 DeletionProof。
 
 RLS 与复合约束必须由 Postgres 集成测试验证，SQLite 测试不能替代。
+
+### 3.1 当前迁移基线
+
+- `deploy/sql/controlplane-003.sql` 从 EF Core Npgsql 模型生成完整业务表，并对 22 张含 `TenantId` 的表启用且强制 RLS。
+- 所有租户表策略同时约束 `USING` 与 `WITH CHECK`，只允许 `current_setting('app.tenant_id')` 匹配当前租户。
+- `TenantRlsConnectionInterceptor` 在已认证请求打开 Postgres 连接时设置租户上下文，连接关闭前重置；无身份连接不设置租户，RLS 默认拒绝。
+- `scripts/migrate-postgres.py` 校验迁移版本、SHA-256、事务和 RLS 声明；真实执行使用 advisory lock、`ON_ERROR_STOP` 和 SchemaVersion 检查。
+- 应用启动只校验 SchemaVersion 与 RLS，不执行 DDL；迁移角色与运行角色必须分离，运行角色不得拥有表或 `BYPASSRLS`。
+- 当前未连接真实 Postgres，生产 RLS、事务和并发集成测试仍为明确边界。
 
 ## 4. 核心表族
 

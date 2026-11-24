@@ -59,7 +59,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 
 builder.Services.AddOpenApi("v1");
 builder.Services.AddSignalR();
-builder.Services.AddHttpContextAccessor();
+var httpContextAccessor = new HttpContextAccessor();
+builder.Services.AddSingleton(httpContextAccessor);
 builder.Services.AddScoped<ITenantContext, TenantContext>();
 var operationsDataPath = builder.Configuration["Data:OperationsPath"]
     ?? (builder.Environment.IsDevelopment()
@@ -282,7 +283,7 @@ builder.Services.AddDbContext<RegentDbContext>(options =>
     {
         var connection = builder.Configuration.GetConnectionString("Postgres");
         if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("Postgres connection string is required.");
-        options.UseNpgsql(connection);
+        options.UseNpgsql(connection).AddInterceptors(new TenantRlsConnectionInterceptor(httpContextAccessor));
     }
 });
 

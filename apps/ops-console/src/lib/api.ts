@@ -23,6 +23,51 @@ export interface BackupProfile {
   enabled: boolean;
   components: string;
   retentionDays: number;
+  postgresFull?: boolean;
+  postgresPitr?: boolean;
+  rustFs?: boolean;
+  keyVault?: boolean;
+  offsite?: boolean;
+  restoreDrills?: boolean;
+  schedule?: string;
+  targetRef?: string;
+  version?: number;
+}
+
+export interface BackupCoverage {
+  profileId: string;
+  enabled: boolean;
+  status: string;
+  enabledComponents: string[];
+  lastSuccessfulAt?: string;
+  effectiveRpoMinutes?: number;
+  effectiveRtoMinutes?: number;
+  rpoStatus: string;
+  rtoStatus: string;
+}
+
+export interface BackupJob {
+  id: string;
+  component: string;
+  status: string;
+  startedAt: string;
+  completedAt?: string;
+  sha256: string;
+  error?: string;
+}
+
+export interface RestoreJob {
+  id: string;
+  backupIds: string[];
+  scope: string;
+  approvalRef: string;
+  requester: string;
+  approver?: string;
+  status: string;
+  requestedAt: string;
+  verifiedAt?: string;
+  rpoActualMinutes?: number;
+  rtoActualMinutes?: number;
 }
 
 export interface OpsAudit {
@@ -135,5 +180,16 @@ export const api = {
   }),
   backups: () => request<BackupProfile[]>('/ops/backups'),
   setBackup: (enabled: boolean) => request<BackupProfile[]>('/ops/backups', { method: 'PUT', body: JSON.stringify({ enabled, components: enabled ? 'postgres,rustfs,keyvault' : 'none' }) }),
+  saveBackupProfile: (profile: BackupProfile) => request<BackupProfile>('/ops/backup-profile', { method: 'PUT', body: JSON.stringify(profile) }),
+  backupCoverage: () => request<BackupCoverage>('/ops/backup-coverage/default'),
+  runBackup: () => request<BackupJob[]>('/ops/backups/run', { method: 'POST', body: JSON.stringify({ profileId: 'default' }) }),
+  backupJobs: () => request<BackupJob[]>('/ops/backup-jobs'),
+  requestRestore: (backupIds: string[]) => request<RestoreJob>('/ops/restores', {
+    method: 'POST', body: JSON.stringify({ backupIds, scope: 'Full', approvalRef: `drill-${crypto.randomUUID()}`, requester: 'Demo Operator' })
+  }),
+  approveRestore: (id: string) => request<RestoreJob>(`/ops/restores/${id}/approve`, {
+    method: 'POST', body: JSON.stringify({ approver: 'Second SRE', resolution: 'Isolated local manifest verification passed' })
+  }),
+  restoreJobs: () => request<RestoreJob[]>('/ops/restores'),
   audit: () => request<OpsAudit[]>('/ops/audit')
 };

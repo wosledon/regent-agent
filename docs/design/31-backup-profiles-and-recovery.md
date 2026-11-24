@@ -1,6 +1,6 @@
 # 31 可选备份与恢复
 
-- 版本：v0.1（待评审）
+- 版本：v0.2（本地组件作业、有效 RPO/RTO 与双人恢复演练已验收）
 - 范围：BackupProfile、组件开关、有效 RPO/RTO、异地副本、恢复审批和可选演练
 - 对应需求：FR-073、BR-100、BR-101、BR-102、BR-166
 - 对应缺口：G-44
@@ -237,3 +237,11 @@ RestoreJob
 8. 恢复后验证一致性和 tombstone。
 9. 关闭组件不产生虚假指标。
 10. 备份实施不阻塞核心 MVP。
+
+### 17.1 当前本地实现
+
+- BackupProfile 支持 Postgres 全量/PITR、RustFS、KeyVault、Offsite 和演练开关，并校验 master、PITR、Offsite 与演练依赖。
+- 每个启用组件生成独立 BackupJob、manifest、SHA-256、快照引用和保留期限；本地无对应组件时返回 Blocked，不伪造成功。
+- 有效 RPO 只在所有启用组件都有成功作业时计算；有效 RTO 只来自已验证恢复演练，否则显示 `unverified`。
+- 恢复请求必须带审批引用，批准人不得与请求人相同；批准时重新读取 manifest 并校验哈希，输出隔离本地验证报告。
+- Ops Console 展示组件作业、有效 RPO/RTO、恢复审批和双人演练；未连接真实 Postgres/RustFS/KeyVault，也不执行生产覆盖恢复。
