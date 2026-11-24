@@ -1,4 +1,5 @@
 using RegentAgent.Contracts.Operations;
+using RegentAgent.Observability;
 using RegentAgent.Operations;
 using RegentAgent.Storage;
 using Xunit;
@@ -50,6 +51,30 @@ public sealed class ObservabilityAlertTests
             var alerts = await service.ListAlertsAsync(CancellationToken.None);
             Assert.Equal(2, alerts.Count);
             Assert.Equal("Silenced", alerts[0].Status);
+        }
+        finally { Delete(root); }
+    }
+
+    [Fact]
+    public async Task Profile_reflects_runtime_observability_configuration()
+    {
+        var root = NewRoot();
+        try
+        {
+            var service = new ObservabilityService(
+                new JsonDocumentStore<ObservabilityProfile>(Path.Combine(root, "profile.json")),
+                new JsonDocumentStore<SloDefinition>(Path.Combine(root, "slos.json")),
+                new JsonDocumentStore<TelemetrySample>(Path.Combine(root, "samples.json")),
+                new JsonDocumentStore<AlertRecord>(Path.Combine(root, "alerts.json")),
+                new JsonDocumentStore<AlertSilenceRecord>(Path.Combine(root, "silences.json")),
+                TimeProvider.System,
+                new ObservabilityOptions { Profile = "elastic", ServiceName = "regent-operations" });
+
+            var profile = await service.GetProfileAsync(CancellationToken.None);
+
+            Assert.Equal("elastic", profile.Mode);
+            Assert.Equal("regent-operations", profile.ServiceName);
+            Assert.True(profile.ElasticEnabled);
         }
         finally { Delete(root); }
     }

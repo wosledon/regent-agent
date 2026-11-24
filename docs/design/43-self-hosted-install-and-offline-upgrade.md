@@ -207,4 +207,5 @@ cp .env.example .env
 - `scripts/plan-upgrade.py` 只接受不可变 `vMAJOR.MINOR.PATCH` Tag，校验 N/N-1 兼容、备份或风险接受，并生成 Drain/Backup/Expand/Deploy/Smoke/Resume/Contract 顺序。
 - `deploy/sql/controlplane-003-contract.sql` 是显式 Contract 门禁：必须已完成 Expand、Smoke 并设置 `regent.allow_contract=on`，否则拒绝执行。
 - `scripts/upgrade-drill.py` 覆盖成功、Deploy 失败、Smoke 失败和 Contract 失败；Contract 前允许恢复旧镜像/Tag，Contract 后只能前滚纠正迁移。
-- 所有升级与迁移脚本均提供 dry-run；当前未启动容器、未连接数据库、未执行真实生产回滚。
+- 所有升级与迁移脚本均提供 dry-run；本地已构建并运行六个应用容器，复用既有 Postgres/RustFS 完成注册、租户隔离、RLS 和导出冒烟，但未执行真实生产升级或回滚。
+- `scripts/configure-elasticsearch.py` 校验并配置本地 ES 原生 OTLP 端点、单节点 0 副本和索引模板；凭据只从环境变量读取，不写入仓库。

@@ -8,6 +8,20 @@ public sealed class ObservabilityProfile
     public int MetricIntervalSeconds { get; set; } = 15;
 }
 
+public sealed record ElasticsearchIndexDto(string Name, long? Documents, string? StoreSize);
+
+public sealed record ElasticsearchStatusDto(
+    bool Configured,
+    bool Reachable,
+    string? ClusterName,
+    string? Status,
+    string? Version,
+    int? Nodes,
+    int? ActivePrimaryShards,
+    IReadOnlyList<ElasticsearchIndexDto> Indices,
+    DateTimeOffset CheckedAt,
+    string? Error = null);
+
 public sealed class SloDefinition
 {
     public string Name { get; set; } = string.Empty;

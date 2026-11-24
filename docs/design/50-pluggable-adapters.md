@@ -9,7 +9,7 @@
 
 1. 所有依赖远程服务或额外组件的能力必须在组合根通过配置选择，业务模块只依赖稳定端口。
 2. 本地默认实现必须可独立运行和测试；选择远程适配但配置不完整时快速失败，不静默回退。
-3. 远程适配只实现协议、配置、超时、取消、重试和错误映射；本次不连接或调试真实组件。
+3. 远程适配只实现协议、配置、超时、取消、重试和错误映射；本地已连接真实 Postgres/RustFS 完成部署冒烟，真实 Provider、生产升级和其他外部组件仍未调试。
 4. 适配器不得扩大租户、权限、预算、审计或保留边界，也不得把外部内容写入敏感日志。
 5. 生产目标仍是 Postgres + 强制 RLS、RustFS/S3、OpenAI/Anthropic 原生端点；本地实现不表述为生产替代。
 
@@ -19,14 +19,14 @@
 |---|---|---|---|
 | 模型调用 | `IProviderClient` + `LocalProviderClient` + `IProviderRouter` | 默认本地，可配置 remote；OpenAI/Anthropic HTTP 适配支持原生 JSON、SSE 流式透传、有界读取和用量提取 | 真实契约冒烟仍按约束不调试 |
 | 模型目录 | `IModelCatalogSource` + 本地/models.dev 源 | `ModelOperationsService` 通过端口选择，快照保存 raw JSON/checksum | 自动分档与真实远程同步仍按约束不调试 |
-| 关系存储 | EF Core SQLite/Postgres 分支 | Provider 显式校验；生产禁止启动建表/种子，要求 SchemaVersion 和租户表强制 RLS | 真实 Postgres 迁移与 RLS 集成测试按约束不调试 |
-| 对象存储 | `IObjectStore` + 本地/S3 适配 | `Storage:ObjectProvider` 在组合根选择 Local 或 S3，S3 保存 checksum 元数据 | 真实 RustFS 连通性按约束不调试 |
+| 关系存储 | EF Core SQLite/Postgres 分支 | Provider 显式校验；生产禁止启动建表/种子，要求 SchemaVersion 和租户表强制 RLS；本地真实 Postgres schema 4 与 RLS 冒烟已验证 | 生产事务、并发和升级集成测试未执行 |
+| 对象存储 | `IObjectStore` + 本地/S3 适配 | `Storage:ObjectProvider` 在组合根选择 Local 或 S3，S3 保存 checksum 元数据；自定义 endpoint 使用 `AuthenticationRegion`，PUT 禁用 aws-chunked 以兼容 RustFS | 本地真实 RustFS 上传、读取和导出校验已验证；生产备份/恢复未执行 |
 | Gateway 密钥 | `IKeyVault` + 本地文件/Postgres 密钥库 | `Gateway:KeyVault:Provider` 选择 local 或 postgres；Postgres 使用信封加密、强制 RLS 和租户事务作用域 | 真实 Postgres/外部 KMS 按约束不调试 |
 | 外部身份 | `IExternalIdentityProvider` + 本地/GitHub/OIDC 适配 | `Identity:Mode` 选择 local 或 remote；授权事务绑定 state/PKCE/nonce，OIDC 支持 code 交换与 JWKS 校验，GitHub 读取已验证邮箱；远程登录要求邀请并持久化 subject 绑定 | 真实 IdP、required SSO/紧急恢复和组策略按约束不调试 |
-| 可观测性 | `RegentAgent.Observability` + OpenTelemetry SDK | 四个服务通过 Profile 选择 off/local/otlp/elastic；启用 ASP.NET Core/HTTP 仪表、严格日志/Trace 脱敏和 5 秒导出超时 | 前端遥测与真实 OTLP/Elastic 连通性按约束不调试 |
+| 可观测性 | `RegentAgent.Observability` + OpenTelemetry SDK | 四个服务通过 Profile 选择 off/local/otlp/elastic；启用 ASP.NET Core/HTTP 仪表、严格日志/Trace 脱敏和 5 秒导出超时；elastic 支持 ES 9.2+ 原生 OTLP 直连 | 本地真实 ES logs/metrics/traces 已验证；生产 TLS、权限、ILM 与 24 小时 soak 未执行 |
 | 审计锚定 | `IAuditAnchorStore` + 本地/对象存储适配 | `Audit:AnchorProvider` 选择 Local 或 ObjectStore，检查点写入后可按租户和序号验证 | 真实外部锚定服务按约束不调试 |
 | 备份 | Python manifest + 可选 S3 上传/恢复 | 默认本地，`--target s3 --target-uri` 或 `s3://` 恢复；未安装 boto3 时 fail fast | 真实 S3/NAS 连通性按约束不调试 |
-| 部署 | Compose 可选 Profile | 默认 SQLite/本地；`postgres`、`rustfs`、`observability` 显式启用；远程 Gateway 和生产 Runner 缺少共享凭据时 fail closed | 不启动或调试容器，仅校验 YAML 与配置契约 |
+| 部署 | Compose 可选 Profile | 默认 SQLite/本地；`postgres`、`rustfs`、`observability` 显式启用；远程 Gateway 和生产 Runner 缺少共享凭据时 fail closed；本地六个应用容器已复用既有 Postgres/RustFS/Elasticsearch 运行 | 不可变 Tag、systemd、生产升级和回滚未演练 |
 
 ## 3. 统一选择规则
 

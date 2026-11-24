@@ -21,7 +21,7 @@
 | `off` | 不启用 Exporter | 极简或资源受限 |
 | `local` | stdout/journald、Docker 或轮转文件日志 | 自托管默认 |
 | `otlp` | 用户已有 OTLP 后端 | 已有监控平台 |
-| `elastic` | Elasticsearch、Kibana、APM Server、Collector | 完整可观测性 |
+| `elastic` | Elasticsearch 9.2+ 原生 OTLP、Kibana；Collector/APM Server 可选 | 完整可观测性 |
 
 ```yaml
 observability:
@@ -43,9 +43,16 @@ docker compose up -d
 docker compose --profile observability-elastic up -d
 ```
 
-Elastic Profile 拓扑：
+Elastic Profile 支持两种拓扑：
 
 ```text
+直连模式（Elasticsearch 9.2+）：
+Regent-Agent services
+  → OpenTelemetry SDK（HTTP/protobuf）
+  → Elasticsearch /_otlp/v1/{logs,metrics,traces}
+  → Kibana
+
+ Collector 模式（需要额外转换或缓冲时）：
 Regent-Agent services
   → OpenTelemetry SDK
   → OTel Collector / Elastic Agent
@@ -133,6 +140,9 @@ Provider 可用性单独统计，不混入 Regent-Agent 自身 API 可用性。S
 - 两个前端通过共享浏览器遥测 SDK 发送页面路径、Core Web Vitals、API 结果和匿名错误信号；路径去除查询串并将 UUID/数字 ID 替换为 `:id`，不发送 Prompt、响应体、Token 或错误消息。
 - 浏览器遥测端点有界批量接收，生产模式必须配置 `Telemetry:IngestToken`，应由反向代理注入，不能打包进前端。
 - 租户行动中心只读投影平台或本租户的未恢复告警；Ops Console 提供确认、恢复和 Silence 操作。
+- 四个 .NET 服务已通过 `elastic` Profile 直连本地 Elasticsearch 9.5 原生 OTLP 端点；logs、metrics、traces 数据流均为 GREEN，严格脱敏处理器保持启用。
+- `scripts/configure-elasticsearch.py` 为单节点本地部署设置 0 副本、更新 OTLP 索引模板并校验三类原生端点；生产多节点部署应使用独立副本和保留策略。
+- Operations 提供只读 Elasticsearch 集群、版本、健康和索引状态，Ops Console 可查看数据流文档数与存储大小；状态失败不会阻塞核心业务。
 
 ## 8. 告警路由
 

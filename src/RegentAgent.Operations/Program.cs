@@ -36,6 +36,7 @@ builder.Services.AddSingleton(new JsonDocumentStore<BackupJobRecord>(Path.Combin
 builder.Services.AddSingleton(new JsonDocumentStore<RestoreJobRecord>(Path.Combine(operationsDataPath, "restore-jobs.json")));
 builder.Services.AddSingleton<IObjectStore>(new LocalFileObjectStore(Path.Combine(operationsDataPath, "objects")));
 builder.Services.AddSingleton<ObservabilityService>();
+builder.Services.AddSingleton<ElasticsearchStatusService>();
 var telemetryIngestToken = builder.Configuration["Telemetry:IngestToken"];
 if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(telemetryIngestToken))
     throw new InvalidOperationException("Production Operations requires Telemetry:IngestToken.");
@@ -157,6 +158,8 @@ ops.MapGet("/audit", async (OperationsService service, CancellationToken cancell
     Results.Ok(await service.AuditsAsync(cancellationToken)));
 ops.MapGet("/observability/profile", async (ObservabilityService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetProfileAsync(cancellationToken)));
+ops.MapGet("/observability/elasticsearch", async (ElasticsearchStatusService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetAsync(cancellationToken)));
 ops.MapPut("/observability/profile", async (ObservabilityProfile profile, ObservabilityService service,
     CancellationToken cancellationToken) => Results.Ok(await service.UpdateProfileAsync(profile, cancellationToken)));
 ops.MapPost("/observability/slos", async (SloDefinition slo, ObservabilityService service,

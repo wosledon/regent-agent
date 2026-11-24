@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using RegentAgent.Contracts.Operations;
+using RegentAgent.Observability;
 using RegentAgent.Storage;
 
 namespace RegentAgent.Operations;
@@ -12,10 +13,21 @@ public sealed class ObservabilityService(
     JsonDocumentStore<TelemetrySample> samples,
     JsonDocumentStore<AlertRecord> alerts,
     JsonDocumentStore<AlertSilenceRecord> silences,
-    TimeProvider clock)
+    TimeProvider clock,
+    ObservabilityOptions? observabilityOptions = null)
 {
-    public async Task<ObservabilityProfile> GetProfileAsync(CancellationToken cancellationToken) =>
-        await profiles.GetAsync("default", cancellationToken) ?? new ObservabilityProfile();
+    public async Task<ObservabilityProfile> GetProfileAsync(CancellationToken cancellationToken)
+    {
+        var profile = await profiles.GetAsync("default", cancellationToken) ?? new ObservabilityProfile();
+        if (observabilityOptions is null) return profile;
+        return new ObservabilityProfile
+        {
+            Mode = observabilityOptions.Profile,
+            ServiceName = observabilityOptions.ServiceName,
+            ElasticEnabled = observabilityOptions.Profile.Equals("elastic", StringComparison.OrdinalIgnoreCase),
+            MetricIntervalSeconds = profile.MetricIntervalSeconds
+        };
+    }
 
     public async Task<ObservabilityProfile> UpdateProfileAsync(ObservabilityProfile profile, CancellationToken cancellationToken)
     {

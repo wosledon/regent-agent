@@ -110,6 +110,25 @@ export interface ObservabilityProfile {
   metricIntervalSeconds: number;
 }
 
+export interface ElasticsearchIndex {
+  name: string;
+  documents?: number;
+  storeSize?: string;
+}
+
+export interface ElasticsearchStatus {
+  configured: boolean;
+  reachable: boolean;
+  clusterName?: string;
+  status?: string;
+  version?: string;
+  nodes?: number;
+  activePrimaryShards?: number;
+  indices: ElasticsearchIndex[];
+  checkedAt: string;
+  error?: string;
+}
+
 export interface SloDefinition {
   name: string;
   metric: string;
@@ -169,6 +188,7 @@ export const api = {
   }),
   resolveIncident: (id: string) => request<PlatformIncident>(`/ops/status/incidents/${id}/resolve`, { method: 'POST' }),
   observability: () => request<ObservabilityProfile>('/ops/observability/profile'),
+  elasticsearch: () => request<ElasticsearchStatus>('/ops/observability/elasticsearch'),
   saveObservability: (profile: ObservabilityProfile) => request<ObservabilityProfile>('/ops/observability/profile', { method: 'PUT', body: JSON.stringify(profile) }),
   saveSlo: (slo: SloDefinition) => request<SloDefinition>('/ops/observability/slos', { method: 'POST', body: JSON.stringify(slo) }),
   evaluateSlos: () => request<SloEvaluation[]>('/ops/observability/evaluation'),

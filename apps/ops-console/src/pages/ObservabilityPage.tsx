@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Card, DataTable, ErrorState, FormField, LoadingState, PageHeader, Select, Stack, StatusChip, TextInput } from '@regent/ui-shared';
+import { Button, Card, DataTable, ErrorState, FormField, LoadingState, PageHeader, Select, Stack, StatusChip, Text, TextInput } from '@regent/ui-shared';
 import { api } from '../lib/api';
 
 export function ObservabilityPage() {
   const queryClient = useQueryClient();
   const profile = useQuery({ queryKey: ['observability'], queryFn: api.observability });
+  const elasticsearch = useQuery({ queryKey: ['elasticsearch-status'], queryFn: api.elasticsearch });
   const evaluations = useQuery({ queryKey: ['slo-evaluations'], queryFn: api.evaluateSlos });
   const alerts = useQuery({ queryKey: ['observability-alerts'], queryFn: api.alerts });
   const [draft, setDraft] = useState<ReturnType<typeof observabilityDefaults> | null>(null);
@@ -27,8 +28,8 @@ export function ObservabilityPage() {
   const save = useMutation({ mutationFn: () => api.saveObservability(draft ?? profile.data!), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['observability'] }) });
   const saveSlo = useMutation({ mutationFn: () => api.saveSlo({ name: sloName, metric, target: Number(target), windowDays: 30 }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['slo-evaluations'] }) });
-  if (profile.isLoading || evaluations.isLoading || alerts.isLoading) return <LoadingState />;
-  const error = profile.error ?? evaluations.error ?? alerts.error;
+  if (profile.isLoading || evaluations.isLoading || alerts.isLoading || elasticsearch.isLoading) return <LoadingState />;
+  const error = profile.error ?? evaluations.error ?? alerts.error ?? elasticsearch.error;
   if (error) return <ErrorState message={error.message} />;
   const value = draft ?? profile.data ?? observabilityDefaults();
   return <Stack spacing={3}>
@@ -38,6 +39,18 @@ export function ObservabilityPage() {
       <FormField label="Service name"><TextInput value={value.serviceName} onChange={serviceName => setDraft({ ...value, serviceName })} /></FormField>
       <FormField label="Metric interval seconds"><TextInput value={String(value.metricIntervalSeconds)} onChange={metricIntervalSeconds => setDraft({ ...value, metricIntervalSeconds: Number(metricIntervalSeconds) })} /></FormField>
       <Button onClick={() => save.mutate()} loading={save.isPending}>Save profile</Button>
+    </Card>
+    <Card title="Elasticsearch">
+      <Stack direction="row" spacing={1} wrap>
+        <StatusChip label={elasticsearch.data?.reachable ? 'Reachable' : 'Unavailable'} tone={elasticsearch.data?.reachable ? 'success' : 'error'} />
+        {elasticsearch.data?.status ? <StatusChip label={elasticsearch.data.status} tone={elasticsearch.data.status === 'green' ? 'success' : elasticsearch.data.status === 'yellow' ? 'warning' : 'error'} /> : null}
+      </Stack>
+      <DataTable rows={elasticsearch.data?.indices ?? []} getRowId={row => row.name} columns={[
+        { id: 'name', header: 'Index', render: row => row.name },
+        { id: 'documents', header: 'Documents', render: row => row.documents?.toLocaleString() ?? '—' },
+        { id: 'size', header: 'Size', render: row => row.storeSize ?? '—' }
+      ]} />
+      {elasticsearch.data?.error ? <Text color="error">{elasticsearch.data.error}</Text> : null}
     </Card>
     <Card title="SLO definition">
       <FormField label="Name"><TextInput value={sloName} onChange={setSloName} /></FormField>

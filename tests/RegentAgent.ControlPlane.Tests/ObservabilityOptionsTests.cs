@@ -27,8 +27,14 @@ public sealed class ObservabilityOptionsTests
         options.OtlpEndpoint = "http://collector:4317";
         options.Validate();
         options.Profile = "elastic";
-        options.OtlpEndpoint = "https://telemetry.example.test:4317";
+        options.OtlpEndpoint = "http://elasticsearch:9200/_otlp";
+        Assert.Throws<InvalidOperationException>(options.Validate);
+        options.ElasticsearchEndpoint = "http://elasticsearch:9200";
+        options.ElasticsearchUsername = "elastic";
+        options.ElasticsearchPassword = "test-password";
         options.Validate();
+        options.ElasticsearchPassword = string.Empty;
+        Assert.Throws<InvalidOperationException>(options.Validate);
     }
 
     [Fact]
