@@ -26,7 +26,7 @@
 | 可观测性 | `RegentAgent.Observability` + OpenTelemetry SDK | 四个服务通过 Profile 选择 off/local/otlp/elastic；启用 ASP.NET Core/HTTP 仪表、严格日志/Trace 脱敏和 5 秒导出超时 | 前端遥测与真实 OTLP/Elastic 连通性按约束不调试 |
 | 审计锚定 | `IAuditAnchorStore` + 本地/对象存储适配 | `Audit:AnchorProvider` 选择 Local 或 ObjectStore，检查点写入后可按租户和序号验证 | 真实外部锚定服务按约束不调试 |
 | 备份 | Python manifest + 可选 S3 上传/恢复 | 默认本地，`--target s3 --target-uri` 或 `s3://` 恢复；未安装 boto3 时 fail fast | 真实 S3/NAS 连通性按约束不调试 |
-| 部署 | Compose 可选 Profile | 默认 SQLite/本地；`postgres`、`rustfs`、`observability` 显式启用 | 不启动或调试容器，仅校验 YAML 与配置契约 |
+| 部署 | Compose 可选 Profile | 默认 SQLite/本地；`postgres`、`rustfs`、`observability` 显式启用；远程 Gateway 和生产 Runner 缺少共享凭据时 fail closed | 不启动或调试容器，仅校验 YAML 与配置契约 |
 
 ## 3. 统一选择规则
 

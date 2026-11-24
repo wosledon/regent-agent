@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Npgsql;
@@ -13,6 +15,12 @@ builder.Services.AddProblemDetails();
 var providerMode = builder.Configuration["Gateway:ProviderMode"] ?? "local";
 if (providerMode.Trim().ToLowerInvariant() is not ("local" or "remote"))
     throw new InvalidOperationException("Gateway provider mode must be local or remote.");
+var gatewayServiceToken = builder.Configuration["Gateway:ServiceToken"];
+var gatewayAdminToken = builder.Configuration["Gateway:AdminToken"];
+if (providerMode.Equals("remote", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(gatewayServiceToken))
+    throw new InvalidOperationException("Remote Gateway mode requires Gateway:ServiceToken.");
+if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(gatewayAdminToken))
+    throw new InvalidOperationException("Production Gateway requires Gateway:AdminToken.");
 var providerHttpOptions = new ProviderHttpOptions
 {
     OpenAI = new ProviderEndpointOptions
@@ -125,6 +133,28 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
         trace_id = context.TraceIdentifier
     });
 }));
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value ?? string.Empty;
+    if (providerMode.Equals("remote", StringComparison.OrdinalIgnoreCase) && path.StartsWith("/v1/", StringComparison.Ordinal))
+    {
+        var expected = $"Bearer {gatewayServiceToken}";
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(context.Request.Headers.Authorization.ToString()),
+                Encoding.UTF8.GetBytes(expected)))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+    }
+    if (path.StartsWith("/admin/keys", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(gatewayAdminToken)
+        && !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(context.Request.Headers["X-Regent-Admin-Key"].ToString()),
+            Encoding.UTF8.GetBytes(gatewayAdminToken)))
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return;
+    }
+    await next();
+});
 app.MapOpenApi("/openapi/{documentName}.json").AllowAnonymous();
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" })).AllowAnonymous();
 app.MapGet("/health/ready", () => Results.Ok(new { status = "ready", mode = providerMode })).AllowAnonymous();

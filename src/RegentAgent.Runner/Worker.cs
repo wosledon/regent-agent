@@ -32,6 +32,8 @@ public sealed class Worker(
                 using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/tasks/claim");
                 request.Headers.Add("X-Runner-Id", runnerId);
                 request.Headers.Add("X-Regent-Tenant", tenantId);
+                if (!string.IsNullOrWhiteSpace(configuration["Runner:Token"]))
+                    request.Headers.Add("X-Regent-Runner-Token", configuration["Runner:Token"]);
                 using var response = await control.SendAsync(request, stoppingToken);
                 if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
                 {

@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authentication;
@@ -40,6 +42,9 @@ using RegentAgent.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRegentObservability(builder.Configuration);
+var runnerToken = builder.Configuration["Runner:Token"];
+if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(runnerToken))
+    throw new InvalidOperationException("Production ControlPlane requires Runner:Token.");
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -369,6 +374,15 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.Use(async (context, next) =>
 {
+    if (app.Environment.IsProduction() && context.Request.Path.StartsWithSegments("/internal"))
+    {
+        var provided = context.Request.Headers["X-Regent-Runner-Token"].ToString();
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(provided), Encoding.UTF8.GetBytes(runnerToken ?? string.Empty)))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+    }
     var sessionId = context.User.FindFirstValue("session_id");
     if (context.User.Identity?.IsAuthenticated == true && Guid.TryParse(sessionId, out var id))
     {

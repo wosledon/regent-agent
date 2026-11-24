@@ -55,6 +55,7 @@ services:
       Storage__S3__AccessKey: "${Storage__S3__AccessKey:-}"
       Storage__S3__SecretKey: "${Storage__S3__SecretKey:-}"
       Audit__AnchorProvider: "${Audit__AnchorProvider:-Local}"
+      Runner__Token: "${Runner__Token:-}"
       Observability__Profile: "${Observability__Profile:-local}"
       Observability__OtlpEndpoint: "${Observability__OtlpEndpoint:-http://otel-collector:4317}"
       Frontend__Origins__0: "http://localhost:5173"
@@ -92,6 +93,7 @@ services:
     environment:
       ControlPlane__BaseUrl: "http://controlplane:8080"
       Gateway__BaseUrl: "http://gateway:8080"
+      Runner__Token: "${Runner__Token:-}"
       Observability__Profile: "${Observability__Profile:-local}"
       Observability__OtlpEndpoint: "${Observability__OtlpEndpoint:-http://otel-collector:4317}"
     depends_on:

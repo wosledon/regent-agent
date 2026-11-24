@@ -49,6 +49,7 @@
 - 审计检查点通过 `IAuditAnchorStore` 选择本地 JSONL 或对象存储锚定，验证时按租户和检查点序号读取并比对 Merkle 根。
 - Gateway KeyVault 通过 `IKeyVault` 选择本地文件或 Postgres `keyvault`；Postgres 适配使用 AES-GCM 信封加密、事务级 `app.tenant_id` 作用域和强制 RLS，迁移由独立角色执行。
 - ControlPlane 生产启动只校验 SchemaVersion 和租户表强制 RLS，不执行 `EnsureCreated`、SQLite 增量升级或演示数据种子；开发模式保留本地初始化。
+- Gateway remote 模式必须配置服务凭据，生产管理端点必须配置独立管理员凭据；ControlPlane 生产 Runner 内部端点必须配置 Runner 凭据，缺失时启动失败而不是匿名开放。
 
 ## 2. 技术栈总览
 

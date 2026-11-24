@@ -88,7 +88,7 @@ python3 scripts/restore-local.py data/local-backup.zip --target data/restored
 
 ## 后续能力
 
-- 真实 OpenAI/Anthropic Provider 调用。
+- 真实 OpenAI/Anthropic Provider 调用（remote 模式需服务凭据，生产管理端点需管理员凭据）。
 - required SSO、紧急恢复、Operator MFA 和完整人工找回流程。
 - 生产 Postgres/RustFS 适配和迁移 Job。
 - 生产备份、恢复和合规证据导出。
