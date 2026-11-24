@@ -280,6 +280,7 @@ AppShell
 - 前端不把长期 Token 写入 localStorage。
 - OIDC 使用重定向流程，前端不接触 client secret。
 - 设置页提供 required SSO、Provider 激活、组能力映射/刷新和紧急凭据生命周期；登录页的紧急入口只展示轮换凭据并进入 15 分钟受限恢复会话。
+- 两个前端共享浏览器遥测 SDK，发送脱敏页面路径、Core Web Vitals、API 状态和匿名错误信号；生产摄入密钥只能由反向代理注入。
 - CSRF Token 仅用于写请求，不进入日志。
 - SignalR 连接复用同一 Cookie 认证，并使用独立 Hub 权限校验。
 

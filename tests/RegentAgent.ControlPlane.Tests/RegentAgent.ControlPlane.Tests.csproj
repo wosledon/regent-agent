@@ -25,6 +25,7 @@
     <ProjectReference Include="..\..\src\RegentAgent.ControlPlane\RegentAgent.ControlPlane.csproj" />
     <ProjectReference Include="..\..\src\RegentAgent.Agents\RegentAgent.Agents.csproj" />
     <ProjectReference Include="..\..\src\RegentAgent.Observability\RegentAgent.Observability.csproj" />
+    <ProjectReference Include="..\..\src\RegentAgent.Operations\RegentAgent.Operations.csproj" />
   </ItemGroup>
 
 </Project>

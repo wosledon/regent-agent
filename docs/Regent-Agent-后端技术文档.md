@@ -50,6 +50,7 @@
 - 外部身份通过 `Identity:Mode` 选择本地测试适配、GitHub Code Exchange 或 OIDC discovery/JWKS 校验；client secret 只从 secret_ref 解析，OIDC 强制校验 issuer、audience、nonce 和已验证邮箱。授权事务短期绑定浏览器 Cookie、state、PKCE 和 nonce，远程新用户必须有效邀请，登录持久化 provider+issuer+subject 绑定。
 - Gateway 使用不可变价格快照在调用前预留最小货币单位金额，调用后按实际 token 结算并释放预留；Provider 每次尝试独立记用量，失败/流式中断保留已发生费用，账单差异只追加更正账目。预留过期由后台作业处理，生产多 Worker 原子实现仍依赖后续 Postgres 迁移。
 - ControlPlane 对 `/v1` 与 `/agent/v1` 写请求统一执行幂等键、请求哈希、If-Match/row_version、request_id 和稳定错误码；列表游标使用绑定租户/筛选/快照的 HMAC 签名格式。
+- Operations 执行 SLO/错误预算评估与 L1～L3 告警状态机，支持去重、确认、限期抑制和自动恢复；告警只读投影到租户行动中心。
 - 四个服务统一接入 `RegentAgent.Observability`，按 `off/local/otlp/elastic` Profile 选择 Console 或 OTLP Exporter；指标、日志、追踪可独立开关，启动时校验采样和 endpoint。启用 ASP.NET Core/HTTP 仪表，严格脱敏处理器移除敏感属性、消息体、格式化消息和异常详情，OTLP 导出超时为 5 秒。
 - 审计检查点通过 `IAuditAnchorStore` 选择本地 JSONL 或对象存储锚定，验证时按租户和检查点序号读取并比对 Merkle 根。
 - Gateway KeyVault 通过 `IKeyVault` 选择本地文件或 Postgres `keyvault`；Postgres 适配使用 AES-GCM 信封加密、事务级 `app.tenant_id` 作用域和强制 RLS，迁移由独立角色执行。

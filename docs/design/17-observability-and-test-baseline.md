@@ -1,6 +1,6 @@
 # 17 可观测性与测试基线
 
-- 版本：v0.1（待评审）
+- 版本：v0.2（浏览器遥测、SLO 告警生命周期与行动中心投影已验收）
 - 范围：OpenTelemetry、可插拔 Profile、Elastic Stack、Kibana APM、SLO、错误预算、告警、测试与容量/混沌门禁
 - 对应需求：FR-059、BR-056、BR-057、BR-058
 - 对应缺口：G-21、G-22
@@ -124,6 +124,15 @@ Provider 可用性单独统计，不混入 Regent-Agent 自身 API 可用性。S
 - 连续 30 分钟错误率超过 5% 或任务领取完全不可用触发 L3。
 - 预算恢复后仍保留事故和变更记录。
 - off/local Profile 不计算运行时错误预算，不影响 Postgres 审计和业务预算控制。
+
+### 7.1 当前本地实现
+
+- Operations 持久化 SLO 定义与遥测样本，计算实际值、目标值和剩余错误预算；无样本不伪装为健康。
+- SLO 失败按错误预算和错误率生成 L1/L2/L3 告警，按租户、服务和 SLO 指纹去重；恢复时自动 Resolve。
+- 告警支持 Firing、Acknowledged、Silenced、Resolved；Silence 必须有原因、批准人和 1～1440 分钟过期时间。
+- 两个前端通过共享浏览器遥测 SDK 发送页面路径、Core Web Vitals、API 结果和匿名错误信号；路径去除查询串并将 UUID/数字 ID 替换为 `:id`，不发送 Prompt、响应体、Token 或错误消息。
+- 浏览器遥测端点有界批量接收，生产模式必须配置 `Telemetry:IngestToken`，应由反向代理注入，不能打包进前端。
+- 租户行动中心只读投影平台或本租户的未恢复告警；Ops Console 提供确认、恢复和 Silence 操作。
 
 ## 8. 告警路由
 

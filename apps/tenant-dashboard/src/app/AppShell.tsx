@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { AppBar, Box, Drawer, List, ListItemButton, ListItemText, Toolbar } from '@mui/material';
 import { useTranslation } from 'react-i18next';
-import { Button, Icon, SemanticIconButton, StatusChip, Text } from '@regent/ui-shared';
+import { Button, Icon, SemanticIconButton, StatusChip, Text, trackBrowserPageView } from '@regent/ui-shared';
 import { useAuth } from './useAuth';
 import { useTenantHub } from '../hooks/useTenantHub';
 
@@ -41,6 +41,7 @@ export function AppShell() {
   const hubState = useTenantHub(Boolean(session));
   const [open, setOpen] = useState(false);
   const location = useLocation();
+  useEffect(() => { trackBrowserPageView(location.pathname); }, [location.pathname]);
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>

@@ -1,3 +1,5 @@
+import { trackBrowserApiOutcome } from '@regent/ui-shared';
+
 export interface TenantAccount {
   id: string;
   name: string;
@@ -76,11 +78,33 @@ export interface SloEvaluation {
   target: number;
   passed: boolean;
   errorBudgetRemaining: number;
+  level: string;
+  alertId?: string;
+}
+
+export interface AlertRecord {
+  id: string;
+  tenantId: string;
+  serviceName: string;
+  sloName: string;
+  fingerprint: string;
+  level: string;
+  status: string;
+  message: string;
+  runbook: string;
+  owner: string;
+  createdAt: string;
+  updatedAt: string;
+  acknowledgedAt?: string;
+  resolvedAt?: string;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { credentials: 'include', ...init, headers: { 'Content-Type': 'application/json', ...init?.headers } });
-  if (!response.ok) throw new Error(`Request failed: ${response.status}`);
+  trackBrowserApiOutcome(response.status, response.headers.get('X-Request-Id') ?? undefined);
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
   return response.status === 204 ? undefined as T : await response.json() as T;
 }
 
@@ -103,6 +127,12 @@ export const api = {
   saveObservability: (profile: ObservabilityProfile) => request<ObservabilityProfile>('/ops/observability/profile', { method: 'PUT', body: JSON.stringify(profile) }),
   saveSlo: (slo: SloDefinition) => request<SloDefinition>('/ops/observability/slos', { method: 'POST', body: JSON.stringify(slo) }),
   evaluateSlos: () => request<SloEvaluation[]>('/ops/observability/evaluation'),
+  alerts: () => request<AlertRecord[]>('/ops/observability/alerts'),
+  acknowledgeAlert: (id: string) => request<void>(`/ops/observability/alerts/${id}/acknowledge`, { method: 'POST', body: JSON.stringify({ operator: 'Demo Operator' }) }),
+  resolveAlert: (id: string, resolution: string) => request<void>(`/ops/observability/alerts/${id}/resolve`, { method: 'POST', headers: { 'X-Resolution': resolution } }),
+  silenceAlert: (fingerprint: string, reason: string, minutes: number) => request<{ id: string }>('/ops/observability/alerts/silence', {
+    method: 'POST', body: JSON.stringify({ fingerprint, reason, approvedBy: 'Demo Operator', minutes })
+  }),
   backups: () => request<BackupProfile[]>('/ops/backups'),
   setBackup: (enabled: boolean) => request<BackupProfile[]>('/ops/backups', { method: 'PUT', body: JSON.stringify({ enabled, components: enabled ? 'postgres,rustfs,keyvault' : 'none' }) }),
   audit: () => request<OpsAudit[]>('/ops/audit')

@@ -61,6 +61,11 @@ builder.Services.AddOpenApi("v1");
 builder.Services.AddSignalR();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, TenantContext>();
+var operationsDataPath = builder.Configuration["Data:OperationsPath"]
+    ?? (builder.Environment.IsDevelopment()
+        ? Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "ops"))
+        : "data/ops");
+builder.Services.AddSingleton(new JsonDocumentStore<AlertRecord>(Path.Combine(operationsDataPath, "alerts.json")));
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<CollaborationVisualizationService>();
 var collaborationOptions = new CollaborationOptions();

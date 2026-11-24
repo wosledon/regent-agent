@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -11,6 +13,10 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRegentObservability(builder.Configuration);
 builder.Services.AddOpenApi("v1");
 builder.Services.AddProblemDetails();
+var operationsDataPath = builder.Configuration["Data:OperationsPath"]
+    ?? (builder.Environment.IsDevelopment()
+        ? Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "ops"))
+        : "data/ops");
 builder.Services.AddSingleton(sp => new OperationsService(
     new JsonDocumentStore<TenantAccount>("data/ops/tenants.json"),
     new JsonDocumentStore<SupportGrantRecord>("data/ops/grants.json"),
@@ -24,7 +30,12 @@ builder.Services.AddSingleton<PlatformStatusService>();
 builder.Services.AddSingleton(new JsonDocumentStore<ObservabilityProfile>("data/ops/observability-profile.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<SloDefinition>("data/ops/slos.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<TelemetrySample>("data/ops/telemetry-samples.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<AlertRecord>(Path.Combine(operationsDataPath, "alerts.json")));
+builder.Services.AddSingleton(new JsonDocumentStore<AlertSilenceRecord>(Path.Combine(operationsDataPath, "alert-silences.json")));
 builder.Services.AddSingleton<ObservabilityService>();
+var telemetryIngestToken = builder.Configuration["Telemetry:IngestToken"];
+if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(telemetryIngestToken))
+    throw new InvalidOperationException("Production Operations requires Telemetry:IngestToken.");
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
     .AddCookie(options =>
     {
@@ -35,11 +46,18 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
     });
 builder.Services.AddAuthorization();
 builder.Services.AddCors(options => options.AddPolicy("ops", policy => policy
-    .WithOrigins("http://localhost:4173").AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
+    .WithOrigins("http://localhost:4173", "http://localhost:5173").AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
+{
     await app.Services.GetRequiredService<OperationsService>().SeedAsync(CancellationToken.None);
+    var observability = app.Services.GetRequiredService<ObservabilityService>();
+    await observability.SaveSloAsync(new SloDefinition { Name = "browser_api_availability", Metric = "api.request", Target = 0.995m }, CancellationToken.None);
+    await observability.SaveSloAsync(new SloDefinition { Name = "browser_lcp", Metric = "web.vital.lcp", Target = 0.95m }, CancellationToken.None);
+    await observability.SaveSloAsync(new SloDefinition { Name = "browser_cls", Metric = "web.vital.cls", Target = 0.95m }, CancellationToken.None);
+    await observability.SaveSloAsync(new SloDefinition { Name = "browser_inp", Metric = "web.vital.inp", Target = 0.95m }, CancellationToken.None);
+}
 
 app.UseCors("ops");
 app.UseAuthentication();
@@ -118,6 +136,34 @@ ops.MapPost("/observability/samples", async (TelemetrySample sample, Observabili
 });
 ops.MapGet("/observability/evaluation", async (ObservabilityService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.EvaluateAsync(cancellationToken)));
+ops.MapGet("/observability/alerts", async (ObservabilityService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.ListAlertsAsync(cancellationToken)));
+ops.MapPost("/observability/alerts/{id:guid}/acknowledge", async (Guid id, AlertAcknowledgementRequest request,
+    ObservabilityService service, CancellationToken cancellationToken) =>
+{
+    await service.AcknowledgeAlertAsync(id, request, cancellationToken);
+    return Results.NoContent();
+});
+ops.MapPost("/observability/alerts/{id:guid}/resolve", async (Guid id, HttpContext context,
+    ObservabilityService service, CancellationToken cancellationToken) =>
+{
+    var resolution = context.Request.Headers["X-Resolution"].ToString();
+    await service.ResolveAlertAsync(id, resolution, cancellationToken);
+    return Results.NoContent();
+});
+ops.MapPost("/observability/alerts/silence", async (AlertSilenceRequest request,
+    ObservabilityService service, CancellationToken cancellationToken) =>
+    Results.Ok(await service.SilenceAlertAsync(request, cancellationToken)));
+app.MapPost("/telemetry/browser", async (BrowserTelemetryBatch batch, HttpContext context,
+    ObservabilityService service, CancellationToken cancellationToken) =>
+{
+    if (!string.IsNullOrWhiteSpace(telemetryIngestToken)
+        && !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(context.Request.Headers["X-Regent-Telemetry-Key"].ToString()),
+            Encoding.UTF8.GetBytes(telemetryIngestToken)))
+        return Results.Unauthorized();
+    await service.RecordBrowserBatchAsync(batch, cancellationToken);
+    return Results.Accepted();
+}).AllowAnonymous();
 app.Run();
 
 public sealed record SupportGrantRequest(string TenantId, string Scope, int Minutes);

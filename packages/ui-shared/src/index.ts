@@ -1,5 +1,6 @@
 export * from './theme/AppThemeProvider';
 export * from './theme/theme';
+export * from './telemetry/browserTelemetry';
 export * from './components/Avatar';
 export * from './components/Button';
 export * from './components/Card';

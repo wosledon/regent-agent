@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Navigate, NavLink, Outlet, Route, Routes, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { AppBar, Box, Drawer, List, ListItemButton, ListItemText, Toolbar } from '@mui/material';
-import { Button, Card, Icon, SemanticIconButton, Text } from '@regent/ui-shared';
+import { Button, Card, Icon, SemanticIconButton, Text, trackBrowserPageView } from '@regent/ui-shared';
 import { AuthProvider } from './app/AuthProvider';
 import { useAuth } from './app/useAuth';
 import { AuditPage } from './pages/AuditPage';
@@ -45,7 +45,9 @@ function Login() {
 
 function Shell() {
   const [open, setOpen] = useState(false);
+  const location = useLocation();
   const { user, logout } = useAuth();
+  useEffect(() => { trackBrowserPageView(location.pathname); }, [location.pathname]);
   const links = [
     ['/', 'Overview'], ['/tenants', 'Tenants'], ['/support', 'Support grants'],
     ['/backups', 'Backups'], ['/audit', 'Audit'], ['/platform', 'Platform status'], ['/observability', 'Observability'], ['/status', 'Public status']

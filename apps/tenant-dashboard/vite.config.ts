@@ -21,6 +21,7 @@ export default defineConfig({
       '/v1': 'http://localhost:5080',
       '/agent/v1': 'http://localhost:5080',
       '/auth': 'http://localhost:5080',
+      '/telemetry': 'http://localhost:5082',
       '/hubs': { target: 'http://localhost:5080', ws: true },
       '/openapi': 'http://localhost:5080'
     }

@@ -2,12 +2,15 @@ using Microsoft.EntityFrameworkCore;
 using RegentAgent.Contracts.Dashboard;
 using RegentAgent.Contracts.Enums;
 using RegentAgent.Contracts.Primitives;
+using RegentAgent.Contracts.Operations;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.ControlPlane.Identity;
+using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class DashboardService(RegentDbContext db, ITenantContext tenant, TimeProvider clock)
+public sealed class DashboardService(RegentDbContext db, ITenantContext tenant, TimeProvider clock,
+    JsonDocumentStore<AlertRecord>? alertStore = null)
 {
     public async Task<DashboardSummary> GetAsync(CancellationToken cancellationToken)
     {
@@ -67,6 +70,19 @@ public sealed class DashboardService(RegentDbContext db, ITenantContext tenant, 
         actions.AddRange(projects.Where(x => x.Health == ProjectHealth.Blocked).Select(x => new ActionCenterItem(
             x.Id, "Project", x.Name, Severity.High, x.Owner, x.UpdatedAt, null,
             false, "Resolve blocking dependency", $"/projects/{x.Id}")));
+        if (alertStore is not null)
+        {
+            var alerts = (await alertStore.GetAllAsync(cancellationToken)).Where(alert => alert.Status != "Resolved"
+                && (string.IsNullOrEmpty(alert.TenantId) || alert.TenantId == tenantId.ToString())).ToArray();
+            actions.AddRange(alerts.Select(alert => new ActionCenterItem(alert.Id, "Observability",
+                $"{alert.Level} {alert.SloName}", alert.Level == "L3" ? Severity.Critical
+                    : alert.Level == "L2" ? Severity.High : Severity.Medium,
+                alert.Owner, alert.CreatedAt, alert.UpdatedAt.Add(alert.Level == "L3" ? TimeSpan.FromMinutes(15)
+                    : alert.Level == "L2" ? TimeSpan.FromHours(1) : TimeSpan.FromDays(1)),
+                alert.Level == "L3", alert.Status == "Acknowledged" ? "Track recovery and record resolution"
+                    : alert.Status == "Silenced" ? "Review approved silence and expiry" : "Acknowledge and follow the runbook",
+                "/governance/action-center")));
+        }
 
         return new DashboardSummary(company.CompanyName, company.Status, cards, actions, now);
     }

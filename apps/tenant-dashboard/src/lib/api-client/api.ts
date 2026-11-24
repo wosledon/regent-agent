@@ -1,3 +1,4 @@
+import { trackBrowserApiOutcome } from '@regent/ui-shared';
 import type { components } from './schema';
 import type {
   BenchmarkSuite,
@@ -38,8 +39,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
   }
   const response = await fetch(path, { credentials: 'include', ...init, headers });
+  trackBrowserApiOutcome(response.status, response.headers.get('X-Request-Id') ?? undefined);
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string } } | null;
+    const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string }; request_id?: string } | null;
     throw new ApiError(response.status, body?.error?.code ?? 'UNKNOWN', body?.error?.message ?? response.statusText);
   }
   return response.status === 204 ? undefined as T : await response.json() as T;
