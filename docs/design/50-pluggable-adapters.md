@@ -20,9 +20,9 @@
 | 模型调用 | `IProviderClient` + `LocalProviderClient` + `IProviderRouter` | 默认本地，可配置 remote；OpenAI/Anthropic HTTP 适配已实现 | 流式与真实契约冒烟仍按约束不调试 |
 | 模型目录 | `IModelCatalogSource` + 本地/models.dev 源 | `ModelOperationsService` 通过端口选择，快照保存 raw JSON/checksum | 自动分档与真实远程同步仍按约束不调试 |
 | 关系存储 | EF Core SQLite/Postgres 分支 | 可选择 Provider，但无 RLS/生产迁移作业 | 启动校验、迁移边界、RLS 集成测试与角色配置 |
-| 对象存储 | `IObjectStore` + 本地/S3 适配 | `Storage:ObjectProvider=Local|S3` 在组合根选择，S3 保存 checksum 元数据 | 真实 RustFS 连通性按约束不调试 |
+| 对象存储 | `IObjectStore` + 本地/S3 适配 | `Storage:ObjectProvider` 在组合根选择 Local 或 S3，S3 保存 checksum 元数据 | 真实 RustFS 连通性按约束不调试 |
 | Gateway 密钥 | `IKeyVault` + 本地文件密钥库 | 已有信封加密端口 | Postgres `keyvault` 适配、配置选择与迁移脚本 |
-| 外部身份 | `IdentityService.ExternalLoginAsync` 本地 issuer/subject 校验 | 信任请求体中的外部身份声明 | `IExternalIdentityProvider`、GitHub OAuth/OIDC 远程适配 |
+| 外部身份 | `IExternalIdentityProvider` + 本地/GitHub/OIDC 适配 | `Identity:Mode` 选择 local 或 remote；OIDC 校验 discovery/JWKS、issuer/audience/nonce，GitHub 交换 code 并读取已验证邮箱 | 真实 IdP 连通性按约束不调试 |
 | 可观测性 | Operations 中的 Profile/SLO 记录 | 没有 OpenTelemetry SDK/Exporter | `off/local/otlp/elastic` 启动 Profile 与 OTLP Exporter |
 | 审计锚定 | `AuditIntegrityService` 本地 JSONL | WORM/anchored 都写本地文件 | `IAuditAnchorStore`、HTTP/对象存储锚定适配 |
 | 备份 | Python 本地脚本与 manifest | 仅本地目录/文件 | `IBackupTarget`、S3/NAS/外置盘目标与配置校验 |

@@ -10782,6 +10782,30 @@
           },
           "displayName": {
             "type": "string"
+          },
+          "code": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "idToken": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "codeVerifier": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "nonce": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -11034,6 +11058,35 @@
           },
           "groupMappingJson": {
             "type": "string"
+          },
+          "clientSecretRef": {
+            "type": "string",
+            "default": ""
+          },
+          "redirectUri": {
+            "type": "string",
+            "default": ""
+          },
+          "scopes": {
+            "type": "string",
+            "default": "openid profile"
+          },
+          "groupClaim": {
+            "type": "string",
+            "default": "groups"
+          },
+          "status": {
+            "type": "string",
+            "default": "Active"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32",
+            "default": 1
           }
         }
       },

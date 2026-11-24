@@ -167,6 +167,42 @@ builder.Services.AddSingleton(new JsonDocumentStore<UserTenantProfileRecord>("da
 builder.Services.AddSingleton(new JsonDocumentStore<IdentityProviderRecord>("data/modules/identity-providers.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<InvitationRecord>("data/modules/invitations.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<OwnershipDelegationRecord>("data/modules/ownership-delegations.json"));
+var externalIdentityOptions = new ExternalIdentityOptions
+{
+    Mode = builder.Configuration["Identity:Mode"] ?? "local",
+    TimeoutSeconds = builder.Configuration.GetValue("Identity:TimeoutSeconds", 30),
+    MaxResponseBytes = builder.Configuration.GetValue("Identity:MaxResponseBytes", 1024 * 1024),
+    GitHub = new GitHubIdentityOptions
+    {
+        TokenUrl = builder.Configuration["Identity:GitHub:TokenUrl"] ?? "https://github.com/login/oauth/access_token",
+        UserUrl = builder.Configuration["Identity:GitHub:UserUrl"] ?? "https://api.github.com/user",
+        EmailsUrl = builder.Configuration["Identity:GitHub:EmailsUrl"] ?? "https://api.github.com/user/emails"
+    },
+    Oidc = new OidcIdentityOptions
+    {
+        AllowedAlgorithms = builder.Configuration.GetSection("Identity:Oidc:AllowedAlgorithms").Get<string[]>() ?? ["RS256"],
+        ClockSkewSeconds = builder.Configuration.GetValue("Identity:Oidc:ClockSkewSeconds", 60),
+        RequireNonce = builder.Configuration.GetValue("Identity:Oidc:RequireNonce", true)
+    }
+};
+if (externalIdentityOptions.Mode.Trim().ToLowerInvariant() is not ("local" or "remote")
+    || externalIdentityOptions.TimeoutSeconds is < 1 or > 300
+    || externalIdentityOptions.MaxResponseBytes is < 1024 or > 16 * 1024 * 1024)
+    throw new InvalidOperationException("External identity mode or HTTP limits are invalid.");
+builder.Services.AddSingleton(externalIdentityOptions);
+builder.Services.AddSingleton<IExternalIdentitySecretProvider, ConfigurationIdentitySecretProvider>();
+builder.Services.AddHttpClient("github-identity", (_, client) =>
+    client.Timeout = TimeSpan.FromSeconds(externalIdentityOptions.TimeoutSeconds));
+builder.Services.AddHttpClient("oidc-discovery", (_, client) =>
+    client.Timeout = TimeSpan.FromSeconds(externalIdentityOptions.TimeoutSeconds));
+builder.Services.AddSingleton<IExternalIdentityProvider, LocalExternalIdentityProvider>();
+builder.Services.AddSingleton<IExternalIdentityProvider>(provider => new GitHubExternalIdentityProvider(
+    provider.GetRequiredService<IHttpClientFactory>().CreateClient("github-identity"),
+    provider.GetRequiredService<ExternalIdentityOptions>(), provider.GetRequiredService<IExternalIdentitySecretProvider>()));
+builder.Services.AddSingleton<IExternalIdentityProvider>(provider => new OidcExternalIdentityProvider(
+    provider.GetRequiredService<IHttpClientFactory>().CreateClient("oidc-discovery"),
+    provider.GetRequiredService<ExternalIdentityOptions>()));
+builder.Services.AddSingleton<IExternalIdentityProviderResolver, ExternalIdentityProviderResolver>();
 builder.Services.AddScoped<IdentityService>();
 builder.Services.AddSingleton(new JsonDocumentStore<ButlerReport>("data/modules/butler-reports.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<ReportSchedule>("data/modules/report-schedules.json"));

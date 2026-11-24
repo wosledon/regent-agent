@@ -90,13 +90,23 @@ public sealed partial class IdentityService
     {
         await RequireOwnerAsync(userId, tenantId, cancellationToken);
         if (provider.Provider is not ("Oidc" or "GitHub")) throw new InvalidOperationException("Unsupported identity provider.");
+        if (provider.Provider == "Oidc" && !string.IsNullOrWhiteSpace(provider.Issuer)
+            && !provider.Issuer.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            && provider.Status == "Active")
+            throw new InvalidOperationException("Active OIDC issuers must use HTTPS.");
+        var existing = await providers.GetAsync($"{tenantId}:{provider.Provider}", cancellationToken);
         var record = new IdentityProviderRecord
         {
             TenantId = tenantId, Provider = provider.Provider, Issuer = provider.Issuer,
-            ClientId = provider.ClientId, Enabled = provider.Enabled, GroupMappingJson = provider.GroupMappingJson
+            ClientId = provider.ClientId, ClientSecretRef = provider.ClientSecretRef,
+            RedirectUri = provider.RedirectUri, Scopes = provider.Scopes, GroupClaim = provider.GroupClaim,
+            Status = provider.Status, Version = (existing?.Version ?? 0) + 1,
+            Enabled = provider.Enabled, GroupMappingJson = provider.GroupMappingJson
         };
         await providers.PutAsync($"{tenantId}:{provider.Provider}", record, cancellationToken);
-        return new IdentityProviderDto(tenantId, record.Provider, record.Issuer, record.ClientId, record.Enabled, record.GroupMappingJson);
+        return new IdentityProviderDto(tenantId, record.Provider, record.Issuer, record.ClientId, record.Enabled,
+            record.GroupMappingJson, record.ClientSecretRef, record.RedirectUri, record.Scopes,
+            record.GroupClaim, record.Status, record.Version);
     }
 
     private async Task RequireOwnerAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken)

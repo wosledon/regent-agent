@@ -31,6 +31,12 @@ public sealed class IdentityProviderRecord
     public string Provider { get; set; } = string.Empty;
     public string Issuer { get; set; } = string.Empty;
     public string ClientId { get; set; } = string.Empty;
+    public string ClientSecretRef { get; set; } = string.Empty;
+    public string RedirectUri { get; set; } = string.Empty;
+    public string Scopes { get; set; } = "openid profile";
+    public string GroupClaim { get; set; } = "groups";
+    public string Status { get; set; } = "Active";
+    public int Version { get; set; } = 1;
     public bool Enabled { get; set; }
     public string GroupMappingJson { get; set; } = "{}";
 }

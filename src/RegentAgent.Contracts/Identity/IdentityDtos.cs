@@ -5,11 +5,14 @@ public sealed record LoginRequest(string Email, string Password, Guid? TenantId 
 public sealed record AuthResult(string Email, string DisplayName, Guid UserId, Guid TenantId, Guid SessionId, string Role, IReadOnlyList<string> RecoveryCodes);
 public sealed record RecoveryRequest(string Email, string Code, string NewPassword);
 public sealed record SessionDto(Guid Id, Guid TenantId, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, string Status);
-public sealed record ExternalLoginRequest(Guid TenantId, string Issuer, string Subject, string Email, string DisplayName);
+public sealed record ExternalLoginRequest(Guid TenantId, string Issuer, string Subject, string Email, string DisplayName,
+    string? Code = null, string? IdToken = null, string? CodeVerifier = null, string? Nonce = null);
 public sealed record InvitationRequest(string Email, string Role, int ExpiresInHours);
 public sealed record InvitationDto(Guid Id, string Email, string Role, DateTimeOffset ExpiresAt, string Status, string? Token);
 public sealed record AcceptInvitationRequest(string Token);
 public sealed record OwnershipDelegationDto(Guid Id, Guid DelegateUserId, DateTimeOffset ExpiresAt, string Status, string Reason);
 public sealed record CreateOwnershipDelegationRequest(Guid DelegateUserId, int ExpiresInHours, string Reason);
 public sealed record DisplaySuffixDto(string Suffix);
-public sealed record IdentityProviderDto(Guid TenantId, string Provider, string Issuer, string ClientId, bool Enabled, string GroupMappingJson);
+public sealed record IdentityProviderDto(Guid TenantId, string Provider, string Issuer, string ClientId, bool Enabled,
+    string GroupMappingJson, string ClientSecretRef = "", string RedirectUri = "", string Scopes = "openid profile",
+    string GroupClaim = "groups", string Status = "Active", int Version = 1);

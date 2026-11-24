@@ -10095,6 +10095,10 @@ export interface components {
             subject: string;
             email: string;
             displayName: string;
+            code?: null | string;
+            idToken?: null | string;
+            codeVerifier?: null | string;
+            nonce?: null | string;
         };
         FairnessAuditDto: {
             /** Format: uuid */
@@ -10168,6 +10172,21 @@ export interface components {
             clientId: string;
             enabled: boolean;
             groupMappingJson: string;
+            /** @default  */
+            clientSecretRef: string;
+            /** @default  */
+            redirectUri: string;
+            /** @default openid profile */
+            scopes: string;
+            /** @default groups */
+            groupClaim: string;
+            /** @default Active */
+            status: string;
+            /**
+             * Format: int32
+             * @default 1
+             */
+            version: number | string;
         };
         ImprovementProposal: {
             id: string;

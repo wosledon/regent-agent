@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using RegentAgent.Contracts.Identity;
 using RegentAgent.ControlPlane.Data;
+using RegentAgent.ControlPlane.Identity;
 using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
@@ -17,7 +18,8 @@ public sealed partial class IdentityService(
     JsonDocumentStore<UserTenantProfileRecord> profiles,
     JsonDocumentStore<IdentityProviderRecord> providers,
     JsonDocumentStore<InvitationRecord> invitations,
-    JsonDocumentStore<OwnershipDelegationRecord> ownershipDelegations)
+    JsonDocumentStore<OwnershipDelegationRecord> ownershipDelegations,
+    IExternalIdentityProviderResolver? externalProviders = null)
 {
     public async Task<AuthResult> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
     {
@@ -71,13 +73,21 @@ public sealed partial class IdentityService(
         var identity = await providers.GetAsync($"{request.TenantId}:{provider}", cancellationToken);
         if (identity is null || !identity.Enabled || !string.Equals(identity.Issuer, request.Issuer, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Identity provider is not enabled for this tenant.");
-        if (string.IsNullOrWhiteSpace(request.Subject) || string.IsNullOrWhiteSpace(request.Email))
+        var configuration = new ExternalIdentityProviderConfiguration(identity.Issuer, identity.ClientId,
+            identity.ClientSecretRef, identity.RedirectUri, identity.Scopes, identity.GroupClaim);
+        var resolver = externalProviders ?? new ExternalIdentityProviderResolver(
+            [new LocalExternalIdentityProvider()], new ExternalIdentityOptions());
+        var external = await resolver.Resolve(provider).AuthenticateAsync(new ExternalIdentityRequest(
+            request.TenantId, provider, request.Issuer, request.Subject, request.Email, request.DisplayName,
+            request.Code, request.IdToken, request.CodeVerifier, request.Nonce), configuration, cancellationToken);
+        if (!external.EmailVerified || string.IsNullOrWhiteSpace(external.Subject)
+            || !string.Equals(external.Issuer, identity.Issuer, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Verified issuer and subject are required.");
-        var email = request.Email.Trim().ToLowerInvariant();
+        var email = external.Email.Trim().ToLowerInvariant();
         var user = await db.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
         if (user is null)
         {
-            user = new UserRecord { Id = Guid.NewGuid(), Email = email, DisplayName = request.DisplayName };
+            user = new UserRecord { Id = Guid.NewGuid(), Email = email, DisplayName = external.DisplayName };
             db.Users.Add(user);
         }
         if (!await db.Memberships.AnyAsync(x => x.TenantId == request.TenantId && x.UserId == user.Id, cancellationToken))
