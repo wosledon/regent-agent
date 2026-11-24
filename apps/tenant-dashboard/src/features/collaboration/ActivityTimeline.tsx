@@ -16,7 +16,7 @@ export function ActivityTimeline({ activities, onActivitySelect }: ActivityTimel
             key={activity.id}
             timestamp={activity.occurredAt}
             title={activity.title}
-            description={`${activity.actor} · ${activity.type} · ${activity.sourceType}:${activity.sourceId}${activity.auditHash ? ` · audit ${activity.auditHash.slice(0, 12)}` : ''}`}
+            description={`${activity.actor} · ${activity.actorType} · ${activity.type} · ${activity.sourceType}:${activity.sourceId}${activity.auditHash ? ` · audit ${activity.auditHash.slice(0, 12)}` : ''}`}
             status={activity.type}
             nextAction={activity.evidenceRefs.length ? `Evidence: ${activity.evidenceRefs.join(', ')}` : undefined}
             tone={activity.type === 'Audit' ? 'neutral' : activity.type === 'Message' ? 'warning' : 'info'}

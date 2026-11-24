@@ -31,6 +31,7 @@ public sealed record CollaborationActivityDto(
     string Type,
     string Title,
     string Actor,
+    string ActorType,
     string SourceType,
     string SourceId,
     string? EmployeeId,

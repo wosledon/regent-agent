@@ -142,12 +142,6 @@ export const api = {
   kpis: () => request<KpiSnapshot[]>('/v1/kpis'),
   conversations: () => request<Conversation[]>('/v1/conversations'),
   messages: (id: string) => request<ChatMessage[]>(`/v1/conversations/${id}/messages`),
-  sendMessage: (id: string, body: string, priority = 'P2', options: { replyToMessageId?: string; mentionedEmployeeIds?: string[]; messageType?: string; evidenceRefs?: string[] } = {}) =>
-    request<ChatMessage>(`/v1/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ body, priority, ...options, idempotencyKey: crypto.randomUUID() }) }),
-  createConversation: (body: { title: string; kind: string; memberEmployeeIds: string[]; scopeType: string; scopeId?: string }) =>
-    post<Conversation>('/v1/conversations', body),
-  addConversationMember: (id: string, employeeId: string) =>
-    post<Conversation>(`/v1/conversations/${id}/members`, { employeeId }),
   collaborationGraph: () => request<CollaborationGraph>('/v1/collaboration/graph'),
   collaborationTrace: (entityType: string, entityId: string) =>
     request<CollaborationTrace>(`/v1/collaboration/trace?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId)}`),

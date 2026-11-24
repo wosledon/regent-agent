@@ -53,6 +53,8 @@ export interface Conversation {
   scopeType: string;
   scopeId?: string | null;
   createdBy: string;
+  createdByEmployeeId?: string | null;
+  creatorType: string;
   createdAt: string;
 }
 
@@ -70,6 +72,8 @@ export interface ChatMessage {
   mentionedEmployeeIds: string[];
   evidenceRefs: string[];
   idempotencyKey?: string | null;
+  senderEmployeeId?: string | null;
+  actorType: string;
 }
 
 export interface CollaborationNode {
@@ -105,6 +109,7 @@ export interface CollaborationActivity {
   type: string;
   title: string;
   actor: string;
+  actorType: string;
   sourceType: string;
   sourceId: string;
   employeeId?: string | null;

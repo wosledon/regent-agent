@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
-import { Button, Card, EmptyState, ErrorState, FreshnessBadge, Grid, LoadingState, PageHeader, SegmentedControl, Select, Stack, StatusChip, Text, TextInput } from '@regent/ui-shared';
+import { Card, EmptyState, ErrorState, FreshnessBadge, Grid, LoadingState, PageHeader, SegmentedControl, Select, Stack, StatusChip, Text, TextInput } from '@regent/ui-shared';
 import { api } from '../../lib/api-client/api';
 import type { CollaborationActivity, CollaborationNode } from '../../lib/domain-types';
 import { ActivityTimeline } from './ActivityTimeline';
-import { CreateGroupDialog } from './CreateGroupDialog';
 import { NetworkView } from './NetworkView';
 import { OfficeView } from './OfficeView';
 import { OrgChartView } from './OrgChartView';
@@ -17,7 +16,6 @@ export function CollaborationPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [nodeType, setNodeType] = useState('all');
-  const [createOpen, setCreateOpen] = useState(false);
   const graph = useQuery({ queryKey: ['collaboration', 'graph'], queryFn: api.collaborationGraph });
   const employees = useQuery({ queryKey: ['employees'], queryFn: api.employees });
   const view = (searchParams.get('view') ?? 'office') as CollaborationView;
@@ -67,7 +65,7 @@ export function CollaborationPage() {
       <PageHeader
         title="Organization collaboration"
         description="Switch between the office, reporting chart, relationship network and process timeline. Every node drills into source events."
-        actions={<Button onClick={() => setCreateOpen(true)}>Create group</Button>}
+        actions={<StatusChip label="Agent-managed groups" tone="info" />}
       />
       <Grid columns={4}>
         <Card title="Employees"><Text variant="h2">{graph.data.summary.employeeCount}</Text><Text variant="caption">Active organization members</Text></Card>
@@ -108,17 +106,9 @@ export function CollaborationPage() {
         next.delete('entityId');
         setSearchParams(next);
       }} />
-      <CreateGroupDialog
-        open={createOpen}
-        employees={employees.data ?? []}
-        onClose={() => setCreateOpen(false)}
-        onCreated={conversationId => {
-          const next = new URLSearchParams(searchParams);
-          next.set('entityType', 'conversation');
-          next.set('entityId', conversationId);
-          setSearchParams(next);
-        }}
-      />
+      <Card title="Agent-operated collaboration">
+        <Text>Groups, membership and messages are created by employee Agents through the Agent data plane. This control plane is read-only and shows the resulting process, evidence and audit trail.</Text>
+      </Card>
     </Stack>
   );
 }

@@ -1,15 +1,11 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { Box } from '@mui/material';
-import { Avatar, Button, Card, EmptyState, ErrorState, LoadingState, PageHeader, SemanticLink, Stack, StatusChip, Text, TextInput } from '@regent/ui-shared';
+import { Avatar, Button, Card, EmptyState, ErrorState, LoadingState, PageHeader, SemanticLink, Stack, StatusChip, Text } from '@regent/ui-shared';
 import { api } from '../../lib/api-client/api';
 
 export function MessagesPage() {
-  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [body, setBody] = useState('');
-  const [replyTo, setReplyTo] = useState<string | null>(null);
   const conversations = useQuery({ queryKey: ['conversations'], queryFn: api.conversations });
   const employees = useQuery({ queryKey: ['employees'], queryFn: api.employees });
   const selectedId = searchParams.get('conversation') ?? conversations.data?.[0]?.id ?? '';
@@ -18,18 +14,6 @@ export function MessagesPage() {
     queryKey: ['messages', selectedId],
     queryFn: () => api.messages(selectedId),
     enabled: Boolean(selectedId)
-  });
-  const send = useMutation({
-    mutationFn: () => api.sendMessage(selectedId, body, 'P2', { replyToMessageId: replyTo ?? undefined, messageType: replyTo ? 'Discussion' : 'Chat' }),
-    onSuccess: async () => {
-      setBody('');
-      setReplyTo(null);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['messages', selectedId] }),
-        queryClient.invalidateQueries({ queryKey: ['conversations'] }),
-        queryClient.invalidateQueries({ queryKey: ['collaboration'] })
-      ]);
-    }
   });
   const employeeName = (id: string) => employees.data?.find(employee => employee.id === id)?.displayName ?? id;
 
@@ -40,7 +24,7 @@ export function MessagesPage() {
     <Stack spacing={3}>
       <PageHeader
         title="Messages & collaboration"
-        description="Group membership, replies, mentions and evidence stay linked to the organization collaboration graph."
+        description="Read-only control plane view of Agent-operated groups, replies, mentions, evidence and audit-linked collaboration."
         actions={<SemanticLink href="/organization/collaboration">Open collaboration workspace</SemanticLink>}
       />
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '300px minmax(0, 1fr)' }, gap: 2, alignItems: 'start' }}>
@@ -91,15 +75,11 @@ export function MessagesPage() {
                 {message.replyToMessageId ? <Text variant="caption">Reply to {message.replyToMessageId}</Text> : null}
                 {message.mentionedEmployeeIds.length ? <Text variant="caption">Mentions: {message.mentionedEmployeeIds.map(employeeName).join(', ')}</Text> : null}
                 {message.evidenceRefs.length ? <Text variant="caption">Evidence: {message.evidenceRefs.join(', ')}</Text> : null}
-                <Button tone="neutral" onClick={() => setReplyTo(message.id)}>Reply</Button>
               </Box>
             ))}
           </Card>
-          <Card title="Send message">
-            {replyTo ? <Stack direction="row" spacing={2} alignItems="center"><Text variant="caption">Replying to {replyTo}</Text><Button tone="neutral" onClick={() => setReplyTo(null)}>Cancel reply</Button></Stack> : null}
-            <TextInput value={body} onChange={setBody} multiline minRows={3} placeholder="Write a message" />
-            <Button onClick={() => send.mutate()} loading={send.isPending} disabled={!body.trim() || !selectedId}>Send</Button>
-            {send.error ? <ErrorState message={send.error.message} /> : null}
+          <Card title="Agent-operated conversation">
+            <Text>Messages and replies are sent by employee Agents through <code>/agent/v1/conversations</code>. Human users observe the process here and use governance pages for high-impact decisions.</Text>
           </Card>
         </Stack>
       </Box>

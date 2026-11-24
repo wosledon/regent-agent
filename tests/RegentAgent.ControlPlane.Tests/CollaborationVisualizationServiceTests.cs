@@ -64,13 +64,21 @@ public sealed class CollaborationVisualizationServiceTests
             await using var db = CreateDb();
             var chat = CreateChat(db, root);
             var otherTenant = Guid.NewGuid();
+            var memberId = Guid.NewGuid().ToString();
             var group = await chat.CreateConversationAsync(otherTenant.ToString(), "Other tenant", "Topic",
-                [Guid.NewGuid().ToString()], "Owner", "Topic", null, CancellationToken.None);
+                [memberId], "Agent Owner", memberId, "Topic", null, CancellationToken.None);
+            var sent = await chat.SendAsync(group.Id, otherTenant.ToString(), "Agent Owner", "Agent message", "P2",
+                CancellationToken.None, senderEmployeeId: memberId, actorType: "Agent", requireMembership: true);
+            Assert.Equal("Agent", sent.ActorType);
+            Assert.Equal(memberId, sent.SenderEmployeeId);
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => chat.SendAsync(group.Id,
+                otherTenant.ToString(), "Outsider", "Not allowed", "P2", CancellationToken.None,
+                senderEmployeeId: Guid.NewGuid().ToString(), requireMembership: true));
 
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => chat.ListMessagesAsync(group.Id,
                 TenantId.ToString(), CancellationToken.None));
             await Assert.ThrowsAsync<InvalidOperationException>(() => chat.CreateConversationAsync(
-                otherTenant.ToString(), "Empty", "Topic", [], "Owner", "Topic", null, CancellationToken.None));
+                otherTenant.ToString(), "Empty", "Topic", [], "Owner", null, "Topic", null, CancellationToken.None));
             Assert.DoesNotContain(await chat.ListAsync(TenantId.ToString(), CancellationToken.None), x => x.Id == group.Id);
             var graph = await new CollaborationVisualizationService(db, chat, TimeProvider.System)
                 .GetGraphAsync(otherTenant, CancellationToken.None);

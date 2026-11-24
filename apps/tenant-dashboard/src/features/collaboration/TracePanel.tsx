@@ -1,7 +1,6 @@
-import { useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Box, Drawer, IconButton } from '@mui/material';
-import { Avatar, Button, Card, EmptyState, ErrorState, LoadingState, Select, SemanticLink, Stack, StatusChip, Text, Timeline, TimelineEntry } from '@regent/ui-shared';
+import { Avatar, Card, EmptyState, ErrorState, LoadingState, SemanticLink, Stack, StatusChip, Text, Timeline, TimelineEntry } from '@regent/ui-shared';
 import { api } from '../../lib/api-client/api';
 import type { CollaborationNode } from '../../lib/domain-types';
 
@@ -12,8 +11,6 @@ interface TracePanelProps {
 }
 
 export function TracePanel({ node, employees, onClose }: TracePanelProps) {
-  const queryClient = useQueryClient();
-  const [memberId, setMemberId] = useState('');
   const entityType = node?.type.toLowerCase() ?? '';
   const entityId = node?.employeeId ?? node?.conversationId ?? node?.projectId ?? '';
   const trace = useQuery({
@@ -25,17 +22,6 @@ export function TracePanel({ node, employees, onClose }: TracePanelProps) {
     queryKey: ['messages', node?.conversationId],
     queryFn: () => api.messages(node!.conversationId!),
     enabled: node?.type === 'Conversation'
-  });
-  const addMember = useMutation({
-    mutationFn: () => api.addConversationMember(node!.conversationId!, memberId),
-    onSuccess: async () => {
-      setMemberId('');
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['collaboration'] }),
-        queryClient.invalidateQueries({ queryKey: ['conversations'] }),
-        queryClient.invalidateQueries({ queryKey: ['messages', node?.conversationId] })
-      ]);
-    }
   });
   const employeeName = (id: string) => employees.find(employee => employee.id === id)?.displayName ?? id;
 
@@ -67,15 +53,7 @@ export function TracePanel({ node, employees, onClose }: TracePanelProps) {
                   </Stack>
                 ))}
               </Stack>
-              <Stack direction="row" spacing={1} alignItems="flex-end">
-                <Box sx={{ flexGrow: 1 }}>
-                  <Select label="Add member" value={memberId} onChange={setMemberId} options={[
-                    { value: '', label: 'Select employee' },
-                    ...employees.filter(employee => !node.memberEmployeeIds.includes(employee.id)).map(employee => ({ value: employee.id, label: employee.displayName }))
-                  ]} />
-                </Box>
-                <Button tone="secondary" disabled={!memberId} loading={addMember.isPending} onClick={() => addMember.mutate()}>Add</Button>
-              </Stack>
+              <Text variant="caption">Membership is managed by employee Agents. The control plane only displays the current scope.</Text>
             </Card>
           ) : null}
           {node.type === 'Conversation' ? (
@@ -109,7 +87,7 @@ export function TracePanel({ node, employees, onClose }: TracePanelProps) {
                   key={activity.id}
                   timestamp={activity.occurredAt}
                   title={activity.title}
-                  description={`${activity.actor} · ${activity.sourceType}:${activity.sourceId}`}
+                  description={`${activity.actor} · ${activity.actorType} · ${activity.sourceType}:${activity.sourceId}`}
                   status={activity.type}
                   nextAction={activity.evidenceRefs.length ? `Evidence: ${activity.evidenceRefs.join(', ')}` : activity.auditHash ? `Audit hash: ${activity.auditHash}` : undefined}
                   tone={activity.type === 'Audit' ? 'neutral' : activity.type === 'Message' ? 'warning' : 'info'}

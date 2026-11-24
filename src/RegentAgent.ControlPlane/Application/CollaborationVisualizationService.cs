@@ -108,24 +108,26 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
             var employee = employeeById.GetValueOrDefault(entry.EmployeeId);
             var evidence = JsonSerializer.Deserialize<string[]>(entry.EvidenceJson) ?? [];
             activities.Add(new CollaborationActivityDto($"work:{entry.Id}", entry.OccurredAt, "Work", entry.Title,
-                employee?.DisplayName ?? "Employee", entry.TaskId is null ? "Work" : "Task",
+                employee?.DisplayName ?? "Employee", "Agent", entry.TaskId is null ? "Work" : "Task",
                 entry.TaskId?.ToString() ?? entry.Id.ToString(), entry.EmployeeId.ToString(), null,
                 entry.TaskId is { } taskId ? tasks.FirstOrDefault(x => x.Id == taskId)?.ProjectId.ToString() : null,
                 entry.TaskId?.ToString(), evidence, null));
         }
         foreach (var message in messages)
         {
-            var sender = employeeByName.GetValueOrDefault(message.Sender);
+            var sender = Guid.TryParse(message.SenderEmployeeId, out var senderId)
+                ? employeeById.GetValueOrDefault(senderId)
+                : employeeByName.GetValueOrDefault(message.Sender);
             var title = message.Body.Length <= 160 ? message.Body : message.Body[..160] + "…";
             activities.Add(new CollaborationActivityDto($"message:{message.Id}", message.CreatedAt, "Message",
-                $"{message.MessageType}: {title}", message.Sender, "Message", message.Id, sender?.Id.ToString(),
+                $"{message.MessageType}: {title}", message.Sender, message.ActorType, "Message", message.Id, sender?.Id.ToString(),
                 message.ConversationId, null, null, message.EvidenceRefs, null));
         }
         foreach (var audit in audits)
         {
             var refs = ReadPayloadRefs(audit.PayloadJson);
             activities.Add(new CollaborationActivityDto($"audit:{audit.Seq}", audit.CreatedAt, "Audit", audit.EventType,
-                audit.Actor, "Audit", refs.SourceId ?? audit.Seq.ToString(), refs.EmployeeId, refs.ConversationId,
+                audit.Actor, ReadPayloadActorType(audit.PayloadJson), "Audit", refs.SourceId ?? audit.Seq.ToString(), refs.EmployeeId, refs.ConversationId,
                 refs.ProjectId, refs.TaskId, [], audit.Hash));
         }
         activities = activities.OrderByDescending(x => x.OccurredAt).Take(300).ToList();
@@ -194,6 +196,16 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
                 Read(root, "employee_id"), Read(root, "conversation_id"), Read(root, "project_id"), Read(root, "task_id"));
         }
         catch (JsonException) { return (null, null, null, null, null); }
+    }
+
+    private static string ReadPayloadActorType(string json)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return Read(document.RootElement, "actor_type") ?? "System";
+        }
+        catch (JsonException) { return "System"; }
     }
 
     private static string? Read(JsonElement root, params string[] keys)

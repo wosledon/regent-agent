@@ -28,23 +28,56 @@ test('collaboration workspace switches views and traces employee work', async ({
   await page.screenshot({ path: '/tmp/regent-collaboration-trace.png', fullPage: true });
 });
 
-test('collaboration groups can be created and traced with their members', async ({ page }) => {
+test('employee Agent creates groups and the control plane observes the trace', async ({ page }) => {
   await page.goto('/login');
   await page.getByRole('button', { name: 'Sign in' }).click();
-  await page.goto('/organization/collaboration');
-  await page.getByRole('button', { name: 'Create group' }).click();
-  const dialog = page.getByRole('dialog');
-  await dialog.getByPlaceholder('Release war room').fill('Release War Room');
-  await dialog.getByLabel('Employees').fill('Engineering Lead');
-  await page.getByRole('option', { name: 'Engineering Lead' }).click();
-  await dialog.getByLabel('Employees').fill('Quality Reviewer');
-  await page.getByRole('option', { name: 'Quality Reviewer' }).click();
-  await dialog.getByRole('button', { name: 'Create group' }).click();
+  const employees = await (await page.request.get('/v1/employees')).json();
+  const engineering = employees.find((employee: { displayName: string }) => employee.displayName === 'Engineering Lead');
+  const quality = employees.find((employee: { displayName: string }) => employee.displayName === 'Quality Reviewer');
+  const research = employees.find((employee: { displayName: string }) => employee.displayName === 'Research Analyst');
+  const tenantId = '11111111-1111-1111-1111-111111111111';
+  const issueToken = async (employeeId: string) => {
+    const response = await page.request.post('/auth/dev-agent-token', {
+      data: { tenantId, employeeId }
+    });
+    expect(response.ok()).toBeTruthy();
+    return (await response.json()).token as string;
+  };
+  const token = await issueToken(engineering.id);
+  const groupResponse = await page.request.post('/agent/v1/conversations', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      title: 'Agent Release Room', kind: 'Project',
+      memberEmployeeIds: [engineering.id, quality.id], scopeType: 'Project'
+    }
+  });
+  expect(groupResponse.ok()).toBeTruthy();
+  const group = await groupResponse.json();
+  expect(group.creatorType).toBe('Agent');
+  expect(group.createdByEmployeeId).toBe(engineering.id);
 
-  await expect(page.getByRole('heading', { name: 'Release War Room', exact: true })).toBeVisible();
-  await expect(page.getByText('Engineering Lead').last()).toBeVisible();
-  await expect(page.getByText('Quality Reviewer').last()).toBeVisible();
-  await expect(page.getByRole('link', { name: 'Open messages' })).toBeVisible();
+  const messageResponse = await page.request.post(`/agent/v1/conversations/${group.id}/messages`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      body: 'Agent checkpoint is ready for independent review.', priority: 'P1',
+      messageType: 'ReviewRequest', evidenceRefs: ['task:agent-group-review']
+    }
+  });
+  expect(messageResponse.ok()).toBeTruthy();
+  const message = await messageResponse.json();
+  expect(message.actorType).toBe('Agent');
+  expect(message.senderEmployeeId).toBe(engineering.id);
+
+  const outsiderToken = await issueToken(research.id);
+  const outsiderRead = await page.request.get(`/agent/v1/conversations/${group.id}/messages`, {
+    headers: { Authorization: `Bearer ${outsiderToken}` }
+  });
+  expect(outsiderRead.status()).toBe(403);
+
+  await page.goto(`/organization/collaboration?view=network&entityType=conversation&entityId=${group.id}`);
+  await expect(page.getByRole('heading', { name: 'Agent Release Room', exact: true })).toBeVisible();
+  await expect(page.getByText('Agent checkpoint is ready for independent review.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Create group' })).toHaveCount(0);
   await page.screenshot({ path: '/tmp/regent-collaboration-group.png', fullPage: true });
 });
 
