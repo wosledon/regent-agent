@@ -173,7 +173,7 @@ scopes: space-separated permissions
 | 域 | 主要端点 |
 |---|---|
 | 认证 | `/auth/login`、`/auth/refresh`、`/auth/logout` |
-| 租户 | `/tenants`、`/tenants/{id}/members`；`/tenants/{id}/export` 按 Q-033 延后 |
+| 租户 | `/tenants`、`/tenants/{id}/members`、`/exports`、`/billing`；跨环境导入与托管退出后置 |
 | 公司 | `/companies`、`/charters`、`/charters/{id}/activate` |
 | 组织 | `/controllers/{id}/self-position`、`/positions`、`/positions/{id}/assignments`、`/org-delegations`、`/org-changes`、`/successions`、`/employees`、`/employees/{id}/heartbeat` |
 | Tool | `/tools/discover`、`/tools/expand`、`/tools/activate`、`/tools/{name}/invoke`、`/tools/grants`、`/tools/grants/{id}/revoke` |

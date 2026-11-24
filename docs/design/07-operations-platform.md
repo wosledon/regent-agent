@@ -39,7 +39,7 @@ Regent-Agent 分为四个逻辑部分：
 - Provider 价目目录、全局匿名 benchmark 和供应限制。
 - 支持访问申请、临时授权和双人紧急访问。
 - 运营审计、安全调查、内容安全和滥用处置。
-- 租户终止；数据导出和迁移协助按 Q-033 延后。
+- 租户终止；Owner 自助数据导出已提供，跨环境迁移协助与托管退出仍后置。
 
 ### 3.2 运营平台不负责
 
@@ -83,7 +83,7 @@ Regent-Agent 分为四个逻辑部分：
 - `company.status_changed`
 - `usage.summary.updated`
 - `capacity.requested`
-- `export.requested`（Q-033 延后，当前不产生）
+- `export.requested`（租户 Owner 创建导出包时产生）
 - `incident.detected`
 
 运营平台只接收完成聚合所需的数据，不默认接收完整任务载荷、消息正文或模型提示词。
@@ -213,7 +213,7 @@ Pending -> Active -> Suspended -> Active
 - 运营平台管理套餐、订阅、发票和付款状态。
 - 模型费用仍由 BYOK 租户直接承担，平台只收订阅费。
 - Provider 账单差异进入对账队列，不修改原始用量。
-- 支付渠道、套餐和价格按 Q-046 延后，当前不实现。
+- 本地套餐、配额、发票和订阅账本已实现；真实支付渠道、生产价格、税务和退款按 Q-046 后置。
 
 ### 8.6 账户身份与找回支持
 

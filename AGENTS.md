@@ -5,7 +5,7 @@
 ## 1. 项目现状与范围
 
 - 当前已完成 Q-001～Q-052 决策和主要设计文档。
-- Q-033 数据导出、Q-046 支付/套餐/定价保持延后。
+- 租户数据导出、套餐配额与本地订阅计费已实现；真实支付、跨环境导入与托管退出保持后置。
 - 后端：C# / .NET 10 / MAF，17 个已建立项目（含 AgentIdentity）。
 - 前端：React 19 / TypeScript / MUI / SignalR。
 - 数据：Postgres + 强制 RLS + pgvector，RustFS 存对象。

@@ -102,5 +102,5 @@
 ## 本地验收结论与生产后续
 
 - 当前用户约束的本地模式已完成 FR-001～FR-090 的 API、页面与自动化验收；真实支付、跨环境导入、托管退出、容器和真实远程组件保持生产边界。
-- 全量验证包括 .NET 构建与 91 项后端测试、前端类型/规范/7 项单测/构建、12 项 Playwright E2E、OpenAPI/TS schema 生成、文档与 YAML 校验、离线缓存、容量基准和本地备份恢复；详细结果见 [设计一致性审计](./design-conformance-audit.md)。
-- 生产化后续仅包括真实远程 Provider/IdP、Postgres/RustFS、OTLP/Elastic、生产 WORM/异地备份和容器发布验证；这些内容不改变当前本地验收范围，也不表述为已具备生产能力。
+- 全量验证包括 .NET 构建与 120 项后端测试、前端类型/规范/9 项单测/构建、14 项 Playwright E2E、OpenAPI/TS schema 生成、文档与 YAML 校验、272 依赖许可/SBOM/漏洞门禁、迁移与升级演练、离线缓存、容量基准和 95 文件本地备份恢复；详细结果见 [设计一致性审计](./design-conformance-audit.md)。
+- 生产化后续包括真实远程 Provider/IdP、Postgres/RustFS 集成、OTLP/Elastic、生产 WORM/异地备份、真实支付、跨环境导入和容器发布验证；这些内容不改变当前本地验收范围，也不表述为已具备生产能力。

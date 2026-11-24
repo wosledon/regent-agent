@@ -1,8 +1,8 @@
 # 设计一致性审计
 
-- 审计日期：2026-11-23
+- 审计日期：2026-11-24
 - 范围：`docs/design/01`～`50` 与已接受 ADR
-- 基线提交：`1dda65f`
+- 基线提交：`955818f`
 - 口径：`符合（本地）` 表示当前本地模式有实现与自动化证据；`符合（适配）` 表示远程端口、协议和失败语义已实现但未连接真实组件；`部分（生产）` 表示本地闭环成立但生产设计仍有明确缺口。本文不把本地实现表述为生产就绪。
 
 ## 1. 本轮修复的设计偏差
@@ -80,18 +80,20 @@
 ## 3. 验证结果
 
 - `dotnet build RegentAgent.slnx --no-restore`：通过，0 警告、0 错误。
-- `DOTNET_ROLL_FORWARD=Major dotnet test RegentAgent.slnx --no-build --no-restore`：91 项通过（Contracts 1、Gateway 12、ControlPlane 78）。
-- `corepack pnpm typecheck`、`corepack pnpm lint`、`corepack pnpm test`、`corepack pnpm build`：全部通过；Vitest 共 7 项通过。
-- `corepack pnpm test:e2e`：12 项 Playwright 全部通过，覆盖协作四视图、Agent 建群/发消息、Tool 调用、权限边界和移动端。
+- `DOTNET_ROLL_FORWARD=Major dotnet test RegentAgent.slnx --no-build --no-restore`：120 项通过（Contracts 1、Gateway 18、ControlPlane 101）。
+- `corepack pnpm typecheck`、`corepack pnpm lint`、`corepack pnpm test`、`corepack pnpm build`：全部通过；Vitest 共 9 项通过。
+- `corepack pnpm test:e2e`：14 项 Playwright 全部通过，覆盖协作四视图、Agent 建群/发消息、Tool 调用、权限边界、移动端、本地计费和导出校验。
 - OpenAPI 与 Tenant Dashboard TypeScript schema 已从当前 ControlPlane 重新生成。
 - 文档链接/围栏/表格/编号、Compose 与 Collector YAML、离线缓存前置检查：全部通过。
-- 容量基线：50 请求，P50 2.3ms、P95 20.3ms。
-- 本地备份创建与恢复 round trip：通过，81 个文件。
+- 容量基线：50 请求，P50 3.1ms、P95 20.3ms。
+- 本地备份创建与恢复 round trip：通过，95 个文件。
+- LicenseInventory/SBOM：272 个依赖，0 未知或阻断许可；NuGet/pnpm 已知漏洞为 0；第三方 Action 全部固定完整 commit SHA。
+- Postgres Expand/Contract dry-run、N/N-1 升级计划、成功/Deploy 失败/Smoke 失败/Contract 失败演练和 ReleaseManifest dry-run：全部通过。
 - ControlPlane、Gateway、Operations 健康检查与 OpenAI/Anthropic 本地 SSE 冒烟：通过。
 - 未创建或启动容器，未连接真实 Provider、IdP、Postgres、RustFS、OTLP/Elastic。
 
 ## 4. 审计结论
 
-- 当前本地业务闭环没有发现新的未实现模块；本轮修复了身份、密码、目录、流式、生产启动和远程凭据等关键偏差。
-- 剩余 `部分（生产）` 项均需真实组件、完整生产迁移或明确后置能力，不能通过本地替身证明。
+- 当前用户约束下的 FR-001～FR-090 本地实现均已完成并通过自动化回归，没有剩余本地未实现模块。
+- 剩余 `部分（生产）` 项均需真实远程组件、生产数据库集成、真实支付、跨环境导入或容器发布验证，不能通过本地替身证明。
 - 后续生产化必须按 01、03、15、16、17、27、31、47、49 的缺口逐项闭环，且不得把本文的本地结论改写成生产就绪。
