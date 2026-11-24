@@ -11,6 +11,7 @@
     <ProjectReference Include="..\RegentAgent.Storage\RegentAgent.Storage.csproj" />
     <ProjectReference Include="..\RegentAgent.Providers\RegentAgent.Providers.csproj" />
     <ProjectReference Include="..\RegentAgent.Agents\RegentAgent.Agents.csproj" />
+    <ProjectReference Include="..\RegentAgent.Observability\RegentAgent.Observability.csproj" />
   </ItemGroup>
 
   <ItemGroup>

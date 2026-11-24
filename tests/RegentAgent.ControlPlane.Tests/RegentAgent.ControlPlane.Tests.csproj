@@ -23,6 +23,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\RegentAgent.ControlPlane\RegentAgent.ControlPlane.csproj" />
     <ProjectReference Include="..\..\src\RegentAgent.Agents\RegentAgent.Agents.csproj" />
+    <ProjectReference Include="..\..\src\RegentAgent.Observability\RegentAgent.Observability.csproj" />
   </ItemGroup>
 
 </Project>

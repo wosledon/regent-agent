@@ -17,6 +17,7 @@ using RegentAgent.Chat;
 using RegentAgent.Communication;
 using RegentAgent.Evaluation;
 using RegentAgent.Memory;
+using RegentAgent.Observability;
 using RegentAgent.Performance;
 using RegentAgent.Projects;
 using RegentAgent.Providers;
@@ -38,6 +39,7 @@ using RegentAgent.Contracts.Runtime;
 using RegentAgent.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRegentObservability(builder.Configuration);
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {

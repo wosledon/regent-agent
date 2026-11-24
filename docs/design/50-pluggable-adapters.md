@@ -23,7 +23,7 @@
 | 对象存储 | `IObjectStore` + 本地/S3 适配 | `Storage:ObjectProvider` 在组合根选择 Local 或 S3，S3 保存 checksum 元数据 | 真实 RustFS 连通性按约束不调试 |
 | Gateway 密钥 | `IKeyVault` + 本地文件密钥库 | 已有信封加密端口 | Postgres `keyvault` 适配、配置选择与迁移脚本 |
 | 外部身份 | `IExternalIdentityProvider` + 本地/GitHub/OIDC 适配 | `Identity:Mode` 选择 local 或 remote；OIDC 校验 discovery/JWKS、issuer/audience/nonce，GitHub 交换 code 并读取已验证邮箱 | 真实 IdP 连通性按约束不调试 |
-| 可观测性 | Operations 中的 Profile/SLO 记录 | 没有 OpenTelemetry SDK/Exporter | `off/local/otlp/elastic` 启动 Profile 与 OTLP Exporter |
+| 可观测性 | `RegentAgent.Observability` + OpenTelemetry SDK | 四个服务通过 `Observability:Profile` 选择 off/local/otlp/elastic，支持独立信号开关、采样和 endpoint 校验 | 真实 OTLP/Elastic 连通性按约束不调试 |
 | 审计锚定 | `AuditIntegrityService` 本地 JSONL | WORM/anchored 都写本地文件 | `IAuditAnchorStore`、HTTP/对象存储锚定适配 |
 | 备份 | Python 本地脚本与 manifest | 仅本地目录/文件 | `IBackupTarget`、S3/NAS/外置盘目标与配置校验 |
 | 部署 | Compose 骨架与校验脚本 | 硬编码 Postgres，无 RustFS/可选 Profile | 可选组件 Profile、配置模板和启动前校验 |

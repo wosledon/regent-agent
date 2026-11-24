@@ -18,5 +18,6 @@
     <ProjectReference Include="..\RegentAgent.Workflows\RegentAgent.Workflows.csproj" />
     <ProjectReference Include="..\RegentAgent.Sandbox\RegentAgent.Sandbox.csproj" />
     <ProjectReference Include="..\RegentAgent.Storage\RegentAgent.Storage.csproj" />
+    <ProjectReference Include="..\RegentAgent.Observability\RegentAgent.Observability.csproj" />
   </ItemGroup>
 </Project>

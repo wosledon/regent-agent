@@ -3,10 +3,12 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using RegentAgent.Contracts.Operations;
+using RegentAgent.Observability;
 using RegentAgent.Operations;
 using RegentAgent.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRegentObservability(builder.Configuration);
 builder.Services.AddOpenApi("v1");
 builder.Services.AddProblemDetails();
 builder.Services.AddSingleton(sp => new OperationsService(

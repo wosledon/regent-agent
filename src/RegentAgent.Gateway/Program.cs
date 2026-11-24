@@ -1,9 +1,11 @@
 using System.Text.Json.Nodes;
 using RegentAgent.Gateway.KeyVault;
 using RegentAgent.Gateway.Metering;
+using RegentAgent.Observability;
 using RegentAgent.Providers;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRegentObservability(builder.Configuration);
 builder.Services.AddOpenApi("v1");
 builder.Services.AddProblemDetails();
 var providerMode = builder.Configuration["Gateway:ProviderMode"] ?? "local";

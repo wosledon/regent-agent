@@ -1,8 +1,10 @@
 using RegentAgent.Agents;
+using RegentAgent.Observability;
 using RegentAgent.Runner;
 using RegentAgent.Sandbox;
 
 var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddRegentObservability(builder.Configuration);
 builder.Services.AddHttpClient("controlplane", client =>
     client.BaseAddress = new Uri(builder.Configuration["ControlPlane:BaseUrl"] ?? "http://localhost:5080"));
 builder.Services.AddHttpClient("gateway", client =>

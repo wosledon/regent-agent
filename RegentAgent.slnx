@@ -8,6 +8,7 @@
     <Project Path="src/RegentAgent.Evaluation/RegentAgent.Evaluation.csproj" />
     <Project Path="src/RegentAgent.Gateway/RegentAgent.Gateway.csproj" />
     <Project Path="src/RegentAgent.Memory/RegentAgent.Memory.csproj" />
+    <Project Path="src/RegentAgent.Observability/RegentAgent.Observability.csproj" />
     <Project Path="src/RegentAgent.Operations/RegentAgent.Operations.csproj" />
     <Project Path="src/RegentAgent.Performance/RegentAgent.Performance.csproj" />
     <Project Path="src/RegentAgent.Projects/RegentAgent.Projects.csproj" />
