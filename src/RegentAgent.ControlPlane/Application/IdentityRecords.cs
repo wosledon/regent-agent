@@ -52,6 +52,32 @@ public sealed class InvitationRecord
     public string Status { get; set; } = "Pending";
 }
 
+public sealed class ExternalIdentityBindingRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public string Provider { get; set; } = string.Empty;
+    public string Issuer { get; set; } = string.Empty;
+    public string Subject { get; set; } = string.Empty;
+    public Guid UserId { get; set; }
+    public DateTimeOffset LinkedAt { get; set; }
+}
+
+public sealed class ExternalLoginTransactionRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public string Provider { get; set; } = string.Empty;
+    public string State { get; set; } = string.Empty;
+    public string Nonce { get; set; } = string.Empty;
+    public string CodeVerifier { get; set; } = string.Empty;
+    public string CodeChallenge { get; set; } = string.Empty;
+    public string RedirectUri { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset ExpiresAt { get; set; }
+    public string Status { get; set; } = "Pending";
+}
+
 public sealed class UserTenantProfileRecord
 {
     public Guid UserId { get; set; }

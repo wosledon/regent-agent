@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using RegentAgent.ControlPlane.Application;
 using RegentAgent.ControlPlane.Data;
+using RegentAgent.ControlPlane.Identity;
 using RegentAgent.Contracts.Identity;
 using RegentAgent.Storage;
 using Xunit;
@@ -63,11 +64,63 @@ public sealed class IdentityServiceTests
         }
     }
 
+    [Fact]
+    public async Task Remote_identity_requires_invitation_and_persists_subject_binding()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"identity-remote-{Guid.NewGuid():N}");
+        try
+        {
+            await using var db = CreateDb();
+            var resolver = new ExternalIdentityProviderResolver([new StubRemoteIdentityProvider()],
+                new ExternalIdentityOptions { Mode = "remote" });
+            var service = CreateService(db, root, resolver);
+            var owner = await service.RegisterAsync(new RegisterRequest("owner@remote.test", "strong-password-123", "Owner", "Remote Co"), CancellationToken.None);
+            await service.ConfigureProviderAsync(owner.UserId, owner.TenantId, new IdentityProviderDto(
+                owner.TenantId, "Oidc", "https://idp.example.test/tenant", "client", true, "{}",
+                RedirectUri: "https://app.example.test/auth/oidc/callback"), CancellationToken.None);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.ExternalLoginAsync(
+                new ExternalLoginRequest(owner.TenantId, "https://idp.example.test/tenant", "subject-1", "member@remote.test", "Member"),
+                "Oidc", CancellationToken.None));
+            var invitation = await service.CreateInvitationAsync(owner.UserId, owner.TenantId,
+                new InvitationRequest("member@remote.test", "CoOwner", 24), CancellationToken.None);
+            var firstStart = await service.StartExternalLoginAsync(owner.TenantId, "oidc", null, CancellationToken.None);
+            var first = await service.CompleteExternalLoginAsync("oidc", firstStart.TransactionId,
+                new ExternalCallbackRequest("code-1", firstStart.State), CancellationToken.None);
+            Assert.Equal("CoOwner", first.Role);
+            Assert.Equal("member@remote.test", first.Email);
+
+            var secondStart = await service.StartExternalLoginAsync(owner.TenantId, "oidc", null, CancellationToken.None);
+            var second = await service.CompleteExternalLoginAsync("oidc", secondStart.TransactionId,
+                new ExternalCallbackRequest("code-2", secondStart.State), CancellationToken.None);
+            Assert.Equal(first.UserId, second.UserId);
+            Assert.Equal("Accepted", (await service.ListInvitationsAsync(owner.UserId, owner.TenantId, CancellationToken.None))
+                .Single(x => x.Id == invitation.Id).Status);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    private sealed class StubRemoteIdentityProvider : IExternalIdentityProvider
+    {
+        public string Provider => "Oidc";
+        public Task<string> BuildAuthorizationUrlAsync(ExternalAuthorizationParameters parameters,
+            ExternalIdentityProviderConfiguration configuration, CancellationToken cancellationToken) =>
+            Task.FromResult($"https://idp.example.test/authorize?state={parameters.State}");
+        public Task<ExternalIdentityResult> AuthenticateAsync(ExternalIdentityRequest request,
+            ExternalIdentityProviderConfiguration configuration, CancellationToken cancellationToken) =>
+            Task.FromResult(new ExternalIdentityResult(configuration.Issuer, "subject-1", "member@remote.test", true,
+                "Member", new Dictionary<string, string>()));
+    }
+
     private static RegentDbContext CreateDb() => new(
         new DbContextOptionsBuilder<RegentDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
 
-    private static IdentityService CreateService(RegentDbContext db, string root) => new(
+    private static IdentityService CreateService(RegentDbContext db, string root,
+        IExternalIdentityProviderResolver? resolver = null) => new(
         db, TimeProvider.System, new LoginRateLimiter(),
         new JsonDocumentStore<CredentialRecord>(Path.Combine(root, "credentials.json")),
         new JsonDocumentStore<AuthSessionRecord>(Path.Combine(root, "sessions.json")),
@@ -75,5 +128,7 @@ public sealed class IdentityServiceTests
         new JsonDocumentStore<UserTenantProfileRecord>(Path.Combine(root, "profiles.json")),
         new JsonDocumentStore<IdentityProviderRecord>(Path.Combine(root, "providers.json")),
         new JsonDocumentStore<InvitationRecord>(Path.Combine(root, "invitations.json")),
-        new JsonDocumentStore<OwnershipDelegationRecord>(Path.Combine(root, "delegations.json")));
+        new JsonDocumentStore<OwnershipDelegationRecord>(Path.Combine(root, "delegations.json")),
+        new JsonDocumentStore<ExternalIdentityBindingRecord>(Path.Combine(root, "external-bindings.json")),
+        new JsonDocumentStore<ExternalLoginTransactionRecord>(Path.Combine(root, "external-transactions.json")), resolver);
 }

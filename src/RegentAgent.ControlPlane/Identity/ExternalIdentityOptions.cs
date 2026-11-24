@@ -13,6 +13,7 @@ public sealed class ExternalIdentityOptions
 
 public sealed class GitHubIdentityOptions
 {
+    public string AuthorizationUrl { get; set; } = "https://github.com/login/oauth/authorize";
     public string TokenUrl { get; set; } = "https://github.com/login/oauth/access_token";
     public string UserUrl { get; set; } = "https://api.github.com/user";
     public string EmailsUrl { get; set; } = "https://api.github.com/user/emails";

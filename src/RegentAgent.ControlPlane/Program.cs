@@ -176,6 +176,8 @@ builder.Services.AddSingleton(new JsonDocumentStore<UserTenantProfileRecord>("da
 builder.Services.AddSingleton(new JsonDocumentStore<IdentityProviderRecord>("data/modules/identity-providers.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<InvitationRecord>("data/modules/invitations.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<OwnershipDelegationRecord>("data/modules/ownership-delegations.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<ExternalIdentityBindingRecord>("data/modules/external-identity-bindings.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<ExternalLoginTransactionRecord>("data/modules/external-login-transactions.json"));
 var externalIdentityOptions = new ExternalIdentityOptions
 {
     Mode = builder.Configuration["Identity:Mode"] ?? "local",
@@ -183,6 +185,7 @@ var externalIdentityOptions = new ExternalIdentityOptions
     MaxResponseBytes = builder.Configuration.GetValue("Identity:MaxResponseBytes", 1024 * 1024),
     GitHub = new GitHubIdentityOptions
     {
+        AuthorizationUrl = builder.Configuration["Identity:GitHub:AuthorizationUrl"] ?? "https://github.com/login/oauth/authorize",
         TokenUrl = builder.Configuration["Identity:GitHub:TokenUrl"] ?? "https://github.com/login/oauth/access_token",
         UserUrl = builder.Configuration["Identity:GitHub:UserUrl"] ?? "https://api.github.com/user",
         EmailsUrl = builder.Configuration["Identity:GitHub:EmailsUrl"] ?? "https://api.github.com/user/emails"
@@ -210,7 +213,7 @@ builder.Services.AddSingleton<IExternalIdentityProvider>(provider => new GitHubE
     provider.GetRequiredService<ExternalIdentityOptions>(), provider.GetRequiredService<IExternalIdentitySecretProvider>()));
 builder.Services.AddSingleton<IExternalIdentityProvider>(provider => new OidcExternalIdentityProvider(
     provider.GetRequiredService<IHttpClientFactory>().CreateClient("oidc-discovery"),
-    provider.GetRequiredService<ExternalIdentityOptions>()));
+    provider.GetRequiredService<ExternalIdentityOptions>(), provider.GetRequiredService<IExternalIdentitySecretProvider>()));
 builder.Services.AddSingleton<IExternalIdentityProviderResolver, ExternalIdentityProviderResolver>();
 builder.Services.AddScoped<IdentityService>();
 builder.Services.AddSingleton(new JsonDocumentStore<ButlerReport>("data/modules/butler-reports.json"));
@@ -432,6 +435,29 @@ app.MapPost("/auth/github/login", async (ExternalLoginRequest request, IdentityS
 app.MapPost("/auth/oidc/login", async (ExternalLoginRequest request, IdentityService identity,
     HttpContext context, CancellationToken cancellationToken) =>
     await CompleteAuthAsync(context, await identity.ExternalLoginAsync(request, "Oidc", cancellationToken))).AllowAnonymous();
+app.MapGet("/auth/{provider}/start", async (string provider, StartExternalLoginRequest request,
+    IdentityService identity, HttpContext context, CancellationToken cancellationToken) =>
+{
+    var authorization = await identity.StartExternalLoginAsync(request.TenantId, provider, request.RedirectUri, cancellationToken);
+    context.Response.Cookies.Append("regent.external.tx", authorization.TransactionId.ToString(), new CookieOptions
+    {
+        HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps,
+        Expires = authorization.ExpiresAt
+    });
+    return Results.Ok(authorization);
+}).AllowAnonymous();
+app.MapGet("/auth/{provider}/callback", async (string provider, ExternalCallbackRequest request,
+    IdentityService identity, HttpContext context, CancellationToken cancellationToken) =>
+{
+    if (!context.Request.Cookies.TryGetValue("regent.external.tx", out var transactionId)
+        || !Guid.TryParse(transactionId, out var id))
+        throw new UnauthorizedAccessException("External login transaction cookie is missing.");
+    var result = await identity.CompleteExternalLoginAsync(provider, id, request, cancellationToken);
+    context.Response.Cookies.Delete("regent.external.tx");
+    await SignInTenantAsync(context, result.UserId, result.TenantId, result.DisplayName, result.Role, result.SessionId);
+    return Results.Redirect(context.RequestServices.GetRequiredService<IConfiguration>()["Frontend:TenantUrl"]
+        ?? "http://localhost:5173");
+}).AllowAnonymous();
 
 app.MapGet("/auth/sessions", async (HttpContext context, IdentityService identity,
     CancellationToken cancellationToken) => Results.Ok(await identity.ListSessionsAsync(

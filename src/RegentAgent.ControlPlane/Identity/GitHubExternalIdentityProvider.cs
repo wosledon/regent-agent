@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.WebUtilities;
 using RegentAgent.Contracts.Identity;
 
 namespace RegentAgent.ControlPlane.Identity;
@@ -15,6 +16,25 @@ public sealed class GitHubExternalIdentityProvider(
     private readonly IExternalIdentitySecretProvider secrets = secrets;
 
     public string Provider => "GitHub";
+
+    public Task<string> BuildAuthorizationUrlAsync(ExternalAuthorizationParameters parameters,
+        ExternalIdentityProviderConfiguration configuration, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        IdentityHttpContent.ValidateEndpoint(options.GitHub.AuthorizationUrl);
+        if (string.IsNullOrWhiteSpace(configuration.ClientId)) throw new ExternalIdentityException("GitHub client id is required.");
+        var query = new Dictionary<string, string?>
+        {
+            ["client_id"] = configuration.ClientId,
+            ["redirect_uri"] = parameters.RedirectUri,
+            ["scope"] = configuration.Scopes,
+            ["state"] = parameters.State,
+            ["code_challenge"] = parameters.CodeChallenge,
+            ["code_challenge_method"] = "S256"
+        };
+        var url = QueryHelpers.AddQueryString(options.GitHub.AuthorizationUrl, query);
+        return Task.FromResult(url);
+    }
 
     public async Task<ExternalIdentityResult> AuthenticateAsync(ExternalIdentityRequest request,
         ExternalIdentityProviderConfiguration configuration, CancellationToken cancellationToken)

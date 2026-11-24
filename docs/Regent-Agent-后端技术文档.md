@@ -24,7 +24,7 @@
 - GitHub 只保存源码和版本 Tag；本地用 Docker Compose 构建。
 - Q-033 数据导出、Q-046 支付/套餐/定价保持延后。
 - 本地身份使用 PBKDF2 密码哈希、一次性恢复码、持久会话和登录限流；会话撤销会在后续请求生效。
-- OIDC/GitHub 使用本地适配契约校验 `issuer + subject`，不发起远程网络请求。
+- OIDC/GitHub 默认使用本地适配；远程模式支持 state/PKCE/nonce 授权事务、code 交换、JWKS 校验和 subject 绑定，新用户必须有效邀请。
 - 租户邀请、Co-Owner、限时所有权委托和 Boss 展示后缀已提供 API 与设置页面。
 - 管家支持确定性问答、定时/事件报告和失败重试；Operations 提供本地健康检查、公开状态页、租户启停和支持访问审批。
 - 记忆模块提供确定性 256 维向量、关键词/向量/图混合召回、冲突提示、低风险降权、投毒隔离、独立纠错、影响记录和索引删除传播；生产 pgvector/全文检索仍未接入。
@@ -44,7 +44,7 @@
 - 个人记忆可沿岗位向上提名为组织候选，原记录、置信度和 taint 保留，候选独立复核后才进入召回。
 - 模型目录支持手工添加、契约测试、版本轮换和绑定引用保护删除；轮换后员工绑定进入 RestoreRequired。管家安全问答和报告实时读取治理事件。
 - Gateway 通过 `ProviderMode` 选择本地或远程适配；OpenAI/Anthropic 适配透传原生 JSON、密钥和错误响应，并实施有界超时、重试和 `Retry-After`。模型目录通过 `IModelCatalogSource` 选择本地或 models.dev 源，快照保存原始 JSON 与 checksum。
-- 外部身份通过 `Identity:Mode` 选择本地测试适配、GitHub Code Exchange 或 OIDC discovery/JWKS 校验；client secret 只从 secret_ref 解析，OIDC 强制校验 issuer、audience、nonce 和已验证邮箱。
+- 外部身份通过 `Identity:Mode` 选择本地测试适配、GitHub Code Exchange 或 OIDC discovery/JWKS 校验；client secret 只从 secret_ref 解析，OIDC 强制校验 issuer、audience、nonce 和已验证邮箱。授权事务短期绑定浏览器 Cookie、state、PKCE 和 nonce，远程新用户必须有效邀请，登录持久化 provider+issuer+subject 绑定。
 - 四个服务统一接入 `RegentAgent.Observability`，按 `off/local/otlp/elastic` Profile 选择 Console 或 OTLP Exporter；指标、日志、追踪可独立开关，启动时校验采样和 endpoint。启用 ASP.NET Core/HTTP 仪表，严格脱敏处理器移除敏感属性、消息体、格式化消息和异常详情，OTLP 导出超时为 5 秒。
 - 审计检查点通过 `IAuditAnchorStore` 选择本地 JSONL 或对象存储锚定，验证时按租户和检查点序号读取并比对 Merkle 根。
 - Gateway KeyVault 通过 `IKeyVault` 选择本地文件或 Postgres `keyvault`；Postgres 适配使用 AES-GCM 信封加密、事务级 `app.tenant_id` 作用域和强制 RLS，迁移由独立角色执行。

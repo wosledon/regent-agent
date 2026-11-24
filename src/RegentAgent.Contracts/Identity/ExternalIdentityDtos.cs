@@ -20,6 +20,12 @@ public sealed record ExternalIdentityProviderConfiguration(
     string Scopes,
     string GroupClaim);
 
+public sealed record ExternalAuthorizationParameters(
+    string State,
+    string Nonce,
+    string CodeChallenge,
+    string RedirectUri);
+
 public sealed record ExternalIdentityResult(
     string Issuer,
     string Subject,
@@ -33,6 +39,9 @@ public interface IExternalIdentityProvider
     string Provider { get; }
     Task<ExternalIdentityResult> AuthenticateAsync(ExternalIdentityRequest request,
         ExternalIdentityProviderConfiguration configuration, CancellationToken cancellationToken);
+    Task<string> BuildAuthorizationUrlAsync(ExternalAuthorizationParameters parameters,
+        ExternalIdentityProviderConfiguration configuration, CancellationToken cancellationToken) =>
+        throw new ExternalIdentityException("Authorization URL generation is not supported by this adapter.");
 }
 
 public interface IExternalIdentityProviderResolver

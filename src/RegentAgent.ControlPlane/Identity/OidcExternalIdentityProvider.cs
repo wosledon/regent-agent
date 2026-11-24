@@ -1,4 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Net;
+using System.Net.Http.Json;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.IdentityModel.Protocols;
 using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using Microsoft.IdentityModel.Tokens;
@@ -8,33 +11,49 @@ namespace RegentAgent.ControlPlane.Identity;
 
 public sealed class OidcExternalIdentityProvider(
     HttpClient http,
-    ExternalIdentityOptions options) : IExternalIdentityProvider
+    ExternalIdentityOptions options,
+    IExternalIdentitySecretProvider? secrets = null) : IExternalIdentityProvider
 {
     private readonly HttpClient http = http;
     private readonly ExternalIdentityOptions options = options;
+    private readonly IExternalIdentitySecretProvider? secrets = secrets;
 
     public string Provider => "Oidc";
+
+    public async Task<string> BuildAuthorizationUrlAsync(ExternalAuthorizationParameters parameters,
+        ExternalIdentityProviderConfiguration configuration, CancellationToken cancellationToken)
+    {
+        var metadata = await GetDiscoveryAsync(configuration, cancellationToken);
+        if (string.IsNullOrWhiteSpace(metadata.AuthorizationEndpoint))
+            throw new ExternalIdentityException("OIDC discovery document does not contain an authorization endpoint.");
+        IdentityHttpContent.ValidateEndpoint(metadata.AuthorizationEndpoint);
+        return QueryHelpers.AddQueryString(metadata.AuthorizationEndpoint, new Dictionary<string, string?>
+        {
+            ["response_type"] = "code",
+            ["client_id"] = configuration.ClientId,
+            ["redirect_uri"] = parameters.RedirectUri,
+            ["scope"] = configuration.Scopes,
+            ["state"] = parameters.State,
+            ["nonce"] = parameters.Nonce,
+            ["code_challenge"] = parameters.CodeChallenge,
+            ["code_challenge_method"] = "S256"
+        });
+    }
 
     public async Task<ExternalIdentityResult> AuthenticateAsync(ExternalIdentityRequest request,
         ExternalIdentityProviderConfiguration configuration, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.IdToken)) throw new ExternalIdentityException("OIDC ID token is required.");
         if (string.IsNullOrWhiteSpace(configuration.Issuer) || string.IsNullOrWhiteSpace(configuration.ClientId))
             throw new ExternalIdentityException("OIDC issuer and client id are required.");
         if (options.Oidc.RequireNonce && string.IsNullOrWhiteSpace(request.Nonce))
             throw new ExternalIdentityException("OIDC nonce is required.");
-        IdentityHttpContent.ValidateEndpoint(configuration.Issuer);
         try
         {
-            var issuer = configuration.Issuer.TrimEnd('/');
-            var discoveryUrl = issuer + "/.well-known/openid-configuration";
-            IdentityHttpContent.ValidateEndpoint(discoveryUrl);
-            var documentRetriever = new HttpDocumentRetriever(http)
-            {
-                RequireHttps = discoveryUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
-            };
-            var metadata = await OpenIdConnectConfigurationRetriever
-                .GetAsync(discoveryUrl, documentRetriever, cancellationToken);
+            var metadata = await GetDiscoveryAsync(configuration, cancellationToken);
+            var idToken = request.IdToken;
+            if (!string.IsNullOrWhiteSpace(request.Code))
+                idToken = await ExchangeCodeAsync(request, configuration, metadata, cancellationToken);
+            if (string.IsNullOrWhiteSpace(idToken)) throw new ExternalIdentityException("OIDC ID token is required.");
             if (string.IsNullOrWhiteSpace(metadata.JwksUri))
                 throw new ExternalIdentityException("OIDC discovery document does not contain a JWKS endpoint.");
             IdentityHttpContent.ValidateEndpoint(metadata.JwksUri);
@@ -57,7 +76,7 @@ public sealed class OidcExternalIdentityProvider(
                 RequireExpirationTime = true,
                 ClockSkew = TimeSpan.FromSeconds(options.Oidc.ClockSkewSeconds)
             };
-            var principal = new JwtSecurityTokenHandler().ValidateToken(request.IdToken, validation, out var validated);
+            var principal = new JwtSecurityTokenHandler().ValidateToken(idToken, validation, out var validated);
             if (validated is not JwtSecurityToken token || !options.Oidc.AllowedAlgorithms.Contains(token.Header.Alg, StringComparer.OrdinalIgnoreCase))
                 throw new ExternalIdentityException("OIDC signing algorithm is not allowed.");
             var claims = token.Claims.GroupBy(claim => claim.Type, StringComparer.Ordinal)
@@ -77,5 +96,53 @@ public sealed class OidcExternalIdentityProvider(
         {
             throw new ExternalIdentityException("OIDC identity validation failed.", exception);
         }
+    }
+
+    private async Task<OpenIdConnectConfiguration> GetDiscoveryAsync(
+        ExternalIdentityProviderConfiguration configuration, CancellationToken cancellationToken)
+    {
+        IdentityHttpContent.ValidateEndpoint(configuration.Issuer);
+        var issuer = configuration.Issuer.TrimEnd('/');
+        var discoveryUrl = issuer + "/.well-known/openid-configuration";
+        IdentityHttpContent.ValidateEndpoint(discoveryUrl);
+        var documentRetriever = new HttpDocumentRetriever(http)
+        {
+            RequireHttps = discoveryUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+        };
+        var metadata = await OpenIdConnectConfigurationRetriever.GetAsync(discoveryUrl, documentRetriever, cancellationToken);
+        if (!string.Equals(metadata.Issuer, configuration.Issuer.TrimEnd('/'), StringComparison.Ordinal))
+            throw new ExternalIdentityException("OIDC discovery issuer does not match the configured issuer.");
+        return metadata;
+    }
+
+    private async Task<string> ExchangeCodeAsync(ExternalIdentityRequest request,
+        ExternalIdentityProviderConfiguration configuration, OpenIdConnectConfiguration metadata,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(metadata.TokenEndpoint)) throw new ExternalIdentityException("OIDC token endpoint is missing.");
+        IdentityHttpContent.ValidateEndpoint(metadata.TokenEndpoint);
+        var clientSecret = secrets is null ? string.Empty : await secrets.GetSecretAsync(configuration.ClientSecretRef, cancellationToken);
+        if (string.IsNullOrWhiteSpace(clientSecret)) throw new ExternalIdentityException("OIDC client secret is not configured.");
+        var form = new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["code"] = request.Code!,
+            ["client_id"] = configuration.ClientId,
+            ["client_secret"] = clientSecret,
+            ["redirect_uri"] = configuration.RedirectUri
+        };
+        if (!string.IsNullOrWhiteSpace(request.CodeVerifier)) form["code_verifier"] = request.CodeVerifier;
+        using var tokenRequest = new HttpRequestMessage(HttpMethod.Post, metadata.TokenEndpoint)
+        {
+            Content = new FormUrlEncodedContent(form)
+        };
+        using var response = await http.SendAsync(tokenRequest, cancellationToken);
+        var body = await IdentityHttpContent.ReadBoundedAsync(response, options.MaxResponseBytes, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+            throw new ExternalIdentityException($"OIDC token exchange returned HTTP {(int)response.StatusCode}.");
+        var json = System.Text.Json.Nodes.JsonNode.Parse(body) as System.Text.Json.Nodes.JsonObject
+            ?? throw new ExternalIdentityException("OIDC token response is invalid.");
+        return json["id_token"]?.GetValue<string>()
+            ?? throw new ExternalIdentityException("OIDC token response did not contain an ID token.");
     }
 }

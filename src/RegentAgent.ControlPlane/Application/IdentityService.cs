@@ -19,6 +19,8 @@ public sealed partial class IdentityService(
     JsonDocumentStore<IdentityProviderRecord> providers,
     JsonDocumentStore<InvitationRecord> invitations,
     JsonDocumentStore<OwnershipDelegationRecord> ownershipDelegations,
+    JsonDocumentStore<ExternalIdentityBindingRecord> externalBindings,
+    JsonDocumentStore<ExternalLoginTransactionRecord> externalTransactions,
     IExternalIdentityProviderResolver? externalProviders = null)
 {
     public async Task<AuthResult> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
@@ -67,36 +69,152 @@ public sealed partial class IdentityService(
         return new AuthResult(user.Email, displayName, user.Id, membership.TenantId, session.Id, membership.Role, []);
     }
 
+    public async Task<ExternalAuthorizationDto> StartExternalLoginAsync(Guid tenantId, string provider,
+        string? redirectUri, CancellationToken cancellationToken)
+    {
+        provider = NormalizeProvider(provider);
+        var identity = await providers.GetAsync($"{tenantId}:{provider}", cancellationToken)
+            ?? throw new UnauthorizedAccessException("Identity provider is not enabled for this tenant.");
+        if (!identity.Enabled) throw new UnauthorizedAccessException("Identity provider is not enabled for this tenant.");
+        redirectUri = string.IsNullOrWhiteSpace(redirectUri) ? identity.RedirectUri : redirectUri.Trim();
+        if (!string.Equals(redirectUri, identity.RedirectUri, StringComparison.Ordinal))
+            throw new UnauthorizedAccessException("Redirect URI does not match the tenant identity provider.");
+        var configuration = ProviderConfiguration(identity);
+        var resolver = IdentityResolver();
+        var state = UrlToken();
+        var nonce = UrlToken();
+        var verifier = UrlToken();
+        var challenge = Base64Url(SHA256.HashData(Encoding.UTF8.GetBytes(verifier)));
+        var authorizationUrl = await resolver.Resolve(provider).BuildAuthorizationUrlAsync(
+            new ExternalAuthorizationParameters(state, nonce, challenge, redirectUri), configuration, cancellationToken);
+        var transaction = new ExternalLoginTransactionRecord
+        {
+            TenantId = tenantId, Provider = provider, State = state, Nonce = nonce,
+            CodeVerifier = verifier, CodeChallenge = challenge, RedirectUri = redirectUri,
+            CreatedAt = clock.GetUtcNow(), ExpiresAt = clock.GetUtcNow().AddMinutes(10)
+        };
+        await externalTransactions.PutAsync(transaction.Id.ToString(), transaction, cancellationToken);
+        return new ExternalAuthorizationDto(authorizationUrl, state, transaction.Id, transaction.ExpiresAt);
+    }
+
+    public async Task<AuthResult> CompleteExternalLoginAsync(string provider, Guid transactionId,
+        ExternalCallbackRequest callback, CancellationToken cancellationToken)
+    {
+        provider = NormalizeProvider(provider);
+        var transaction = await externalTransactions.GetAsync(transactionId.ToString(), cancellationToken)
+            ?? throw new UnauthorizedAccessException("External login transaction is invalid.");
+        if (transaction.Provider != provider || transaction.Status != "Pending" || transaction.ExpiresAt <= clock.GetUtcNow()
+            || !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(transaction.State), Encoding.UTF8.GetBytes(callback.State)))
+            throw new UnauthorizedAccessException("External login transaction is invalid or expired.");
+        transaction.Status = "Consumed";
+        await externalTransactions.PutAsync(transaction.Id.ToString(), transaction, cancellationToken);
+        var identity = await providers.GetAsync($"{transaction.TenantId}:{provider}", cancellationToken)
+            ?? throw new UnauthorizedAccessException("Identity provider is not enabled for this tenant.");
+        if (!identity.Enabled) throw new UnauthorizedAccessException("Identity provider is not enabled for this tenant.");
+        var external = await IdentityResolver().Resolve(provider).AuthenticateAsync(new ExternalIdentityRequest(
+            transaction.TenantId, provider, identity.Issuer, null, null, null, callback.Code,
+            CodeVerifier: transaction.CodeVerifier, Nonce: transaction.Nonce), ProviderConfiguration(identity), cancellationToken);
+        var user = await ResolveExternalUserAsync(transaction.TenantId, provider, external, false, cancellationToken);
+        var session = await CreateSessionAsync(user.Id, transaction.TenantId, cancellationToken, TimeSpan.FromHours(8));
+        var displayName = await DisplayNameAsync(user.Id, transaction.TenantId, user.DisplayName, cancellationToken);
+        var role = await db.Memberships.AsNoTracking().Where(x => x.TenantId == transaction.TenantId && x.UserId == user.Id)
+            .Select(x => x.Role).SingleAsync(cancellationToken);
+        return new AuthResult(user.Email, displayName, user.Id, transaction.TenantId, session.Id, role, []);
+    }
+
     public async Task<AuthResult> ExternalLoginAsync(ExternalLoginRequest request, string provider,
         CancellationToken cancellationToken)
     {
-        var identity = await providers.GetAsync($"{request.TenantId}:{provider}", cancellationToken);
-        if (identity is null || !identity.Enabled || !string.Equals(identity.Issuer, request.Issuer, StringComparison.OrdinalIgnoreCase))
+        provider = NormalizeProvider(provider);
+        var identity = await providers.GetAsync($"{request.TenantId}:{provider}", cancellationToken)
+            ?? throw new UnauthorizedAccessException("Identity provider is not enabled for this tenant.");
+        if (!identity.Enabled || !string.Equals(identity.Issuer, request.Issuer, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Identity provider is not enabled for this tenant.");
-        var configuration = new ExternalIdentityProviderConfiguration(identity.Issuer, identity.ClientId,
-            identity.ClientSecretRef, identity.RedirectUri, identity.Scopes, identity.GroupClaim);
-        var resolver = externalProviders ?? new ExternalIdentityProviderResolver(
-            [new LocalExternalIdentityProvider()], new ExternalIdentityOptions());
-        var external = await resolver.Resolve(provider).AuthenticateAsync(new ExternalIdentityRequest(
+        var adapter = IdentityResolver().Resolve(provider);
+        if (!adapter.Provider.Equals("local", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Remote identity login requires the authorization transaction endpoints.");
+        var external = await adapter.AuthenticateAsync(new ExternalIdentityRequest(
             request.TenantId, provider, request.Issuer, request.Subject, request.Email, request.DisplayName,
-            request.Code, request.IdToken, request.CodeVerifier, request.Nonce), configuration, cancellationToken);
+            request.Code, request.IdToken, request.CodeVerifier, request.Nonce), ProviderConfiguration(identity), cancellationToken);
+        var user = await ResolveExternalUserAsync(request.TenantId, provider, external, true, cancellationToken);
+        var session = await CreateSessionAsync(user.Id, request.TenantId, cancellationToken, TimeSpan.FromHours(8));
+        var displayName = await DisplayNameAsync(user.Id, request.TenantId, user.DisplayName, cancellationToken);
+        var role = await db.Memberships.AsNoTracking().Where(x => x.TenantId == request.TenantId && x.UserId == user.Id)
+            .Select(x => x.Role).SingleAsync(cancellationToken);
+        return new AuthResult(user.Email, displayName, user.Id, request.TenantId, session.Id, role, []);
+    }
+
+    private async Task<UserRecord> ResolveExternalUserAsync(Guid tenantId, string provider,
+        ExternalIdentityResult external, bool allowLocalJit, CancellationToken cancellationToken)
+    {
         if (!external.EmailVerified || string.IsNullOrWhiteSpace(external.Subject)
-            || !string.Equals(external.Issuer, identity.Issuer, StringComparison.OrdinalIgnoreCase))
-            throw new UnauthorizedAccessException("Verified issuer and subject are required.");
+            || string.IsNullOrWhiteSpace(external.Email))
+            throw new UnauthorizedAccessException("Verified issuer, subject and email are required.");
+        var bindings = await externalBindings.GetAllAsync(cancellationToken);
+        var binding = bindings.SingleOrDefault(x => x.Provider == provider && x.Issuer == external.Issuer && x.Subject == external.Subject);
+        if (binding is not null)
+        {
+            var boundUser = await db.Users.SingleOrDefaultAsync(x => x.Id == binding.UserId, cancellationToken)
+                ?? throw new UnauthorizedAccessException("External identity binding is invalid.");
+            if (!await db.Memberships.AnyAsync(x => x.TenantId == tenantId && x.UserId == boundUser.Id, cancellationToken))
+                throw new UnauthorizedAccessException("External identity is not a member of this tenant.");
+            return boundUser;
+        }
         var email = external.Email.Trim().ToLowerInvariant();
         var user = await db.Users.SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+        var invitation = (await invitations.GetAllAsync(cancellationToken)).SingleOrDefault(x =>
+            x.TenantId == tenantId && x.Email == email && x.Status == "Pending" && x.ExpiresAt > clock.GetUtcNow());
+        var isMember = user is not null && await db.Memberships.AnyAsync(x => x.TenantId == tenantId && x.UserId == user.Id, cancellationToken);
         if (user is null)
         {
+            if (invitation is null && !allowLocalJit)
+                throw new UnauthorizedAccessException("A valid tenant invitation is required for external login.");
             user = new UserRecord { Id = Guid.NewGuid(), Email = email, DisplayName = external.DisplayName };
             db.Users.Add(user);
         }
-        if (!await db.Memberships.AnyAsync(x => x.TenantId == request.TenantId && x.UserId == user.Id, cancellationToken))
-            db.Memberships.Add(new MembershipRecord { Id = Guid.NewGuid(), TenantId = request.TenantId, UserId = user.Id, Role = "Member" });
+        if (invitation is not null)
+        {
+            if (!await db.Memberships.AnyAsync(x => x.TenantId == tenantId && x.UserId == user.Id, cancellationToken))
+                db.Memberships.Add(new MembershipRecord
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, UserId = user.Id, Role = invitation.Role
+                });
+            invitation.Status = "Accepted";
+            await invitations.PutAsync(invitation.Id.ToString(), invitation, cancellationToken);
+        }
+        else if (!isMember)
+        {
+            if (!allowLocalJit)
+                throw new UnauthorizedAccessException("A valid tenant invitation is required for external login.");
+            db.Memberships.Add(new MembershipRecord { Id = Guid.NewGuid(), TenantId = tenantId, UserId = user.Id, Role = "Member" });
+        }
+        await externalBindings.PutAsync(Guid.NewGuid().ToString(), new ExternalIdentityBindingRecord
+        {
+            TenantId = tenantId, Provider = provider, Issuer = external.Issuer, Subject = external.Subject,
+            UserId = user.Id, LinkedAt = clock.GetUtcNow()
+        }, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
-        var session = await CreateSessionAsync(user.Id, request.TenantId, cancellationToken);
-        var displayName = await DisplayNameAsync(user.Id, request.TenantId, user.DisplayName, cancellationToken);
-        return new AuthResult(user.Email, displayName, user.Id, request.TenantId, session.Id, "Member", []);
+        return user;
     }
+
+    private IExternalIdentityProviderResolver IdentityResolver() => externalProviders
+        ?? new ExternalIdentityProviderResolver([new LocalExternalIdentityProvider()], new ExternalIdentityOptions());
+
+    private static ExternalIdentityProviderConfiguration ProviderConfiguration(IdentityProviderRecord identity) =>
+        new(identity.Issuer, identity.ClientId, identity.ClientSecretRef, identity.RedirectUri, identity.Scopes, identity.GroupClaim);
+
+    private static string NormalizeProvider(string provider) => provider.ToLowerInvariant() switch
+    {
+        "github" => "GitHub",
+        "oidc" => "Oidc",
+        _ => throw new InvalidOperationException("Unsupported identity provider.")
+    };
+
+    private static string UrlToken() => Base64Url(RandomNumberGenerator.GetBytes(32));
+
+    private static string Base64Url(byte[] value) =>
+        Convert.ToBase64String(value).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     public async Task RecoverAsync(RecoveryRequest request, CancellationToken cancellationToken)
     {
@@ -154,10 +272,15 @@ public sealed partial class IdentityService(
     public Task<AuthSessionRecord> StartTenantSessionAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken) =>
         CreateSessionAsync(userId, tenantId, cancellationToken);
 
-    private async Task<AuthSessionRecord> CreateSessionAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken)
+    private async Task<AuthSessionRecord> CreateSessionAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken,
+        TimeSpan? lifetime = null)
     {
         var now = clock.GetUtcNow();
-        var session = new AuthSessionRecord { UserId = userId, TenantId = tenantId, CreatedAt = now, ExpiresAt = now.AddHours(12) };
+        var session = new AuthSessionRecord
+        {
+            UserId = userId, TenantId = tenantId, CreatedAt = now,
+            ExpiresAt = now.Add(lifetime ?? TimeSpan.FromHours(12))
+        };
         await sessions.PutAsync(session.Id.ToString(), session, cancellationToken);
         return session;
     }

@@ -7,6 +7,9 @@ public sealed record RecoveryRequest(string Email, string Code, string NewPasswo
 public sealed record SessionDto(Guid Id, Guid TenantId, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, string Status);
 public sealed record ExternalLoginRequest(Guid TenantId, string Issuer, string Subject, string Email, string DisplayName,
     string? Code = null, string? IdToken = null, string? CodeVerifier = null, string? Nonce = null);
+public sealed record StartExternalLoginRequest(Guid TenantId, string? RedirectUri = null);
+public sealed record ExternalAuthorizationDto(string AuthorizationUrl, string State, Guid TransactionId, DateTimeOffset ExpiresAt);
+public sealed record ExternalCallbackRequest(string Code, string State);
 public sealed record InvitationRequest(string Email, string Role, int ExpiresInHours);
 public sealed record InvitationDto(Guid Id, string Email, string Role, DateTimeOffset ExpiresAt, string Status, string? Token);
 public sealed record AcceptInvitationRequest(string Token);
