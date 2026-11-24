@@ -103,6 +103,13 @@ export const api = {
     post<Schema['EmergencyAccessDto']>(`/v1/tenants/${tenantId}/emergency-access`),
   useEmergencyAccess: (tenantId: string, credential: string, purpose: string) =>
     post<Schema['EmergencyAccessResult'] & { email: string }>('/auth/emergency-access', { tenantId, credential, purpose }),
+  billingPlans: () => request<Schema['PlanDefinition'][]>('/v1/billing/plans'),
+  billing: () => request<Schema['BillingSummaryDto']>('/v1/billing'),
+  checkout: (planId: string) => post<Schema['BillingInvoiceDto']>('/v1/billing/checkout', { planId }),
+  payLocal: (invoiceId: string) => post<Schema['BillingInvoiceDto']>(`/v1/billing/invoices/${invoiceId}/pay-local`, { confirmation: 'PAY_LOCAL' }),
+  exports: () => request<Schema['DataExportDto'][]>('/v1/exports'),
+  createExport: () => post<Schema['DataExportDto']>('/v1/exports'),
+  validateExport: (id: string) => post<Schema['DataExportValidationDto']>(`/v1/exports/${id}/validate`),
   localization: () => request<Schema['LocalizationSettings']>('/v1/localization'),
   updateLocalization: (settings: Schema['LocalizationSettings']) => put<Schema['LocalizationSettings']>('/v1/localization', settings),
   displaySuffix: () => request<Schema['DisplaySuffixDto']>('/v1/profile/display-suffix'),

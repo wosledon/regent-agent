@@ -220,6 +220,9 @@ issued_at
 - Co-Owner 不自动获得账单信息或支付权限。
 - 多公司不能通过拆分租户绕过平台总配额。
 - 删除一个 Tenant 不影响其他 Tenant。
+- 本地套餐包含 Starter/Pro/Enterprise，员工、项目和存储配额在创建前检查；Primary Owner 可创建发票并通过本地支付适配激活套餐。
+- 订阅发票与只增账本按 Tenant 隔离，记录金额、币种、价格版本和支付引用；真实支付、税务、退款和生产定价后置。
+- 数据导出只允许 Owner 生成含 manifest/SHA-256 的 ZIP 迁移包，排除凭据、会话、恢复码和 KeyVault；跨环境导入仍后置。
 
 ## 13. OIDC 集成
 

@@ -31,6 +31,7 @@ import { RecruitmentPage } from '../features/performance/RecruitmentPage';
 import { AgentGovernancePage } from '../features/agents/AgentGovernancePage';
 import { EvaluationPage } from '../features/evaluation/EvaluationPage';
 import { BudgetPage } from '../features/budget/BudgetPage';
+import { BillingPage } from '../features/billing/BillingPage';
 import { RuntimePolicyPage } from '../features/budget/RuntimePolicyPage';
 import { ModelsPage } from '../features/models/ModelsPage';
 import { JournalPage } from '../features/journal/JournalPage';
@@ -74,6 +75,7 @@ export function App() {
           <Route path="evaluations" element={<EvaluationPage />} />
           <Route path="budget" element={<BudgetPage />} />
           <Route path="budget/runtime" element={<RuntimePolicyPage />} />
+          <Route path="billing" element={<BillingPage />} />
           <Route path="models" element={<ModelsPage />} />
           <Route path="journal" element={<JournalPage />} />
           <Route path="settings" element={<SettingsPage />} />

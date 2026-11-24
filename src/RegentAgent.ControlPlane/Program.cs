@@ -28,6 +28,7 @@ using RegentAgent.Projects;
 using RegentAgent.Providers;
 using RegentAgent.Workflows;
 using RegentAgent.Contracts.Agents;
+using RegentAgent.Contracts.Billing;
 using RegentAgent.Contracts.Artifacts;
 using RegentAgent.Contracts.Collaboration;
 using RegentAgent.Contracts.Dashboard;
@@ -60,7 +61,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 builder.Services.AddOpenApi("v1");
 builder.Services.AddSignalR();
 var httpContextAccessor = new HttpContextAccessor();
-builder.Services.AddSingleton(httpContextAccessor);
+builder.Services.AddSingleton<IHttpContextAccessor>(httpContextAccessor);
 builder.Services.AddScoped<ITenantContext, TenantContext>();
 var operationsDataPath = builder.Configuration["Data:OperationsPath"]
     ?? (builder.Environment.IsDevelopment()
@@ -259,6 +260,14 @@ builder.Services.AddSingleton<IExternalIdentityProvider>(provider => new OidcExt
     provider.GetRequiredService<ExternalIdentityOptions>(), provider.GetRequiredService<IExternalIdentitySecretProvider>()));
 builder.Services.AddSingleton<IExternalIdentityProviderResolver, ExternalIdentityProviderResolver>();
 builder.Services.AddScoped<IdentityService>();
+var billingProvider = builder.Configuration["Billing:Provider"] ?? "local";
+if (!billingProvider.Equals("local", StringComparison.OrdinalIgnoreCase))
+    throw new InvalidOperationException("External payment adapter is not configured; use local mode for self-hosted billing.");
+builder.Services.AddSingleton<ISubscriptionPaymentAdapter, LocalSubscriptionPaymentAdapter>();
+builder.Services.AddSingleton(new JsonDocumentStore<BillingStateRecord>("data/modules/billing.json"));
+builder.Services.AddSingleton(new JsonDocumentStore<DataExportDto>("data/modules/exports.json"));
+builder.Services.AddScoped<BillingService>();
+builder.Services.AddScoped<DataExportService>();
 builder.Services.AddSingleton(new JsonDocumentStore<ButlerReport>("data/modules/butler-reports.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<ReportSchedule>("data/modules/report-schedules.json"));
 builder.Services.AddScoped<ButlerService>();
@@ -723,6 +732,32 @@ api.MapPost("/tenants/{tenantId:guid}/emergency-access", async (Guid tenantId,
     Results.Ok(await identity.ConfigureEmergencyAccessAsync(CurrentUserId(context), tenantId, cancellationToken)))
     .Produces<EmergencyAccessDto>().WithTags("Identity");
 
+api.MapGet("/billing/plans", () => Results.Ok(BillingPlans.All)).Produces<IReadOnlyList<PlanDefinition>>().WithTags("Billing");
+api.MapGet("/billing", async (HttpContext context, BillingService billing, CancellationToken cancellationToken) =>
+    Results.Ok(await billing.GetSummaryAsync(CurrentUserId(context), Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<BillingSummaryDto>().WithTags("Billing");
+api.MapPost("/billing/checkout", async (CheckoutRequest request, HttpContext context, BillingService billing,
+    CancellationToken cancellationToken) => Results.Ok(await billing.CheckoutAsync(CurrentUserId(context),
+        Guid.Parse(CurrentTenant(context)), request, cancellationToken))).Produces<BillingInvoiceDto>().WithTags("Billing");
+api.MapPost("/billing/invoices/{invoiceId:guid}/pay-local", async (Guid invoiceId, LocalPaymentRequest request,
+    HttpContext context, BillingService billing, CancellationToken cancellationToken) =>
+    Results.Ok(await billing.PayLocalAsync(CurrentUserId(context), Guid.Parse(CurrentTenant(context)),
+        invoiceId, request, cancellationToken))).Produces<BillingInvoiceDto>().WithTags("Billing");
+api.MapPost("/exports", async (HttpContext context, DataExportService exports, CancellationToken cancellationToken) =>
+    Results.Ok(await exports.CreateAsync(CurrentUserId(context), Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<DataExportDto>().WithTags("Data Export");
+api.MapGet("/exports", async (HttpContext context, DataExportService exports, CancellationToken cancellationToken) =>
+    Results.Ok(await exports.ListAsync(CurrentUserId(context), Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<IReadOnlyList<DataExportDto>>().WithTags("Data Export");
+api.MapGet("/exports/{exportId:guid}/content", async (Guid exportId, HttpContext context, DataExportService exports,
+    CancellationToken cancellationToken) => Results.File(await exports.DownloadAsync(CurrentUserId(context),
+        Guid.Parse(CurrentTenant(context)), exportId, cancellationToken), "application/zip", $"regent-export-{exportId:N}.zip"))
+    .Produces(StatusCodes.Status200OK, contentType: "application/zip").WithTags("Data Export");
+api.MapPost("/exports/{exportId:guid}/validate", async (Guid exportId, HttpContext context, DataExportService exports,
+    CancellationToken cancellationToken) => Results.Ok(await exports.ValidateAsync(CurrentUserId(context),
+        Guid.Parse(CurrentTenant(context)), exportId, cancellationToken)))
+    .Produces<DataExportValidationDto>().WithTags("Data Export");
+
 api.MapGet("/tenants", async (TenantService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListForUserAsync(cancellationToken))).Produces<IReadOnlyList<TenantDto>>().WithTags("Tenancy");
 api.MapPost("/tenants", async (CreateTenantRequest request, TenantService service, CancellationToken cancellationToken) =>
@@ -823,9 +858,12 @@ api.MapGet("/dashboard/summary", async (DashboardService service, CancellationTo
     Results.Ok(await service.GetAsync(cancellationToken)))
     .Produces<DashboardSummary>(StatusCodes.Status200OK).RequireAuthorization("DashboardRead").WithTags("Dashboard");
 
-api.MapPost("/projects", async (CreateProjectDto input, ProjectService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.CreateAsync(input, cancellationToken)))
-    .Produces<ProjectDetail>().WithTags("Projects");
+api.MapPost("/projects", async (CreateProjectDto input, ProjectService service, BillingService billing,
+    ITenantContext tenantContext, CancellationToken cancellationToken) =>
+{
+    await billing.EnsureQuotaAsync(tenantContext.TenantId.Value, "projects", 1, cancellationToken);
+    return Results.Ok(await service.CreateAsync(input, cancellationToken));
+}).Produces<ProjectDetail>().WithTags("Projects");
 api.MapGet("/projects", async (ProjectService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(cancellationToken)))
     .Produces<IReadOnlyList<ProjectSummary>>(StatusCodes.Status200OK).WithTags("Projects");

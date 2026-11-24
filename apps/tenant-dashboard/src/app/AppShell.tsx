@@ -24,6 +24,7 @@ const navigation = [
   { key: 'evaluations', path: '/evaluations', icon: 'evaluation' as const },
   { key: 'models', path: '/models', icon: 'evaluation' as const },
   { key: 'budget', path: '/budget', icon: 'evaluation' as const },
+  { key: 'billing', path: '/billing', icon: 'evaluation' as const },
   { key: 'runtimePolicy', path: '/budget/runtime', icon: 'evaluation' as const },
   { key: 'governance', path: '/governance/approvals', icon: 'notification' as const },
   { key: 'actionCenter', path: '/governance/action-center', icon: 'notification' as const },

@@ -70,6 +70,7 @@ flowchart TB
 | `/messages/:conversationId` | 会话详情 | `message.read` | SplitLayout | 消息流、委派/交接面板 |
 | `/models` | 模型池 | `models.read` | DetailLayout | ModelBindingCard、ProviderRegionSelect |
 | `/budget` | 预算与成本 | `budget.read` | DetailLayout | BudgetCostCard、CostBreakdownChart |
+| `/billing` | 套餐与计费 | Owner | DetailLayout | PlanQuotaTable、InvoiceTable、BillingLedgerTable |
 | `/knowledge` | 知识与记忆 | `memory.read` | DetailLayout | 搜索结果、来源和权限 |
 | `/journal` | 公司志 | `journal.read` | DetailLayout | AuditTimeline、RecentDecisionList |
 | `/governance/action-center` | 行动中心 | `action_center.read` | ListLayout | ActionCenterList |
@@ -78,7 +79,7 @@ flowchart TB
 | `/governance/audit` | 审计与合规 | `audit.read` | DetailLayout | ComplianceStatusCard、AuditTimeline |
 | `/governance/performance-reviews` | 人事事后审查 | `performance.review.read` | DetailLayout | 审查列表、证据面板 |
 | `/settings/profile` | 个人设置 | `self.manage` | SettingsLayout | 表单、会话管理 |
-| `/settings/tenant` | 租户设置 | `tenant.manage` | SettingsLayout | 租户信息、成员和所有权 |
+| `/settings/tenant` | 租户设置 | `tenant.manage` | SettingsLayout | 租户信息、成员和所有权、OIDC 策略、紧急凭据、Owner 数据导出 |
 | `/settings/locale` | 语言与时区 | `self.manage` | SettingsLayout | LocaleSelect、DateTimeField |
 | `/settings/notifications` | 通知偏好 | `self.manage` | SettingsLayout | 通知级别和静默设置 |
 | `/dev/components` | 组件展示页 | 开发环境 | GalleryLayout | ComponentGalleryPage |

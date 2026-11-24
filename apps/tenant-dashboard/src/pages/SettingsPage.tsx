@@ -5,6 +5,7 @@ import { Button, Card, DataTable, ErrorState, FormField, Grid, LoadingState, Pag
 import { api } from '../lib/api-client/api';
 import { useAuth } from '../app/useAuth';
 import { AuthenticationPolicyPanel } from '../features/identity/AuthenticationPolicyPanel';
+import { DataExportPanel } from '../features/billing/DataExportPanel';
 import i18n from '../lib/i18n';
 
 export function SettingsPage() {
@@ -74,6 +75,7 @@ export function SettingsPage() {
     <Stack spacing={3}>
       <PageHeader title={t('settings')} description="Language, tenant context, identity providers, sessions and ownership." />
       <AuthenticationPolicyPanel tenantId={tenantId} canManage={canManage} />
+      <DataExportPanel canManage={canManage} />
       <Grid columns={2}>
         <Card title="Preferences">
           <Select label="Language" value={localizationDraft?.locale ?? localization.data?.locale ?? translator.language}

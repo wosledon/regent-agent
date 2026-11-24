@@ -1415,6 +1415,282 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/billing/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanDefinition"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingSummaryDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CheckoutRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingInvoiceDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/billing/invoices/{invoiceId}/pay-local": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    invoiceId: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["LocalPaymentRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BillingInvoiceDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/exports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataExportDto"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataExportDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/exports/{exportId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    exportId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/exports/{exportId}/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    exportId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DataExportValidationDto"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/tenants": {
         parameters: {
             query?: never;
@@ -10968,6 +11244,45 @@ export interface components {
             /** Format: date-time */
             createdAt?: string;
         };
+        BillingInvoiceDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenantId: string;
+            planId: string;
+            /** Format: int64 */
+            amountMinor: number | string;
+            currency: string;
+            status: string;
+            paymentProvider: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            paidAt: null | string;
+            paymentRef: null | string;
+        };
+        BillingLedgerEntry: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenantId: string;
+            /** Format: uuid */
+            invoiceId: string;
+            entryType: string;
+            /** Format: int64 */
+            amountMinor: number | string;
+            currency: string;
+            priceVersion: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        BillingSummaryDto: {
+            subscription: components["schemas"]["SubscriptionDto"];
+            plan: components["schemas"]["PlanDefinition"];
+            quotas: components["schemas"]["QuotaUsageDto"][];
+            invoices: components["schemas"]["BillingInvoiceDto"][];
+            ledger: components["schemas"]["BillingLedgerEntry"][];
+        };
         BudgetPolicy: {
             /** Format: uuid */
             projectId?: string;
@@ -11122,6 +11437,9 @@ export interface components {
             id: string;
             name: string;
             charter: components["schemas"]["CharterDto"];
+        };
+        CheckoutRequest: {
+            planId: string;
         };
         ClaimScoreDto: {
             /** Format: uuid */
@@ -11488,6 +11806,41 @@ export interface components {
             actions: components["schemas"]["ActionCenterItem"][];
             /** Format: date-time */
             generatedAt: string;
+        };
+        DataExportDto: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenantId: string;
+            status: string;
+            format: string;
+            schemaVersion: string;
+            objectKey: string;
+            sha256: string;
+            /** Format: int64 */
+            length: number | string;
+            /** Format: int32 */
+            tableCount: number | string;
+            /** Format: int32 */
+            moduleCount: number | string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            validatedAt: null | string;
+            validationError: null | string;
+        };
+        DataExportValidationDto: {
+            /** Format: uuid */
+            exportId: string;
+            valid: boolean;
+            sha256: string;
+            /** Format: int32 */
+            tableCount: number | string;
+            /** Format: int32 */
+            moduleCount: number | string;
+            /** Format: date-time */
+            validatedAt: string;
+            error: null | string;
         };
         DataLifecycleState: {
             /** Format: uuid */
@@ -12130,6 +12483,9 @@ export interface components {
             /** Format: int32 */
             version: number | string;
         };
+        LocalPaymentRequest: {
+            confirmation: string;
+        };
         LoginRequest: {
             email: string;
             password: string;
@@ -12501,6 +12857,21 @@ export interface components {
             appealResolution?: null | string;
             appealReviewer?: null | string;
         };
+        PlanDefinition: {
+            id: string;
+            name: string;
+            /** Format: int64 */
+            monthlyAmountMinor: number | string;
+            currency: string;
+            /** Format: int32 */
+            maxEmployees: number | string;
+            /** Format: int32 */
+            maxProjects: number | string;
+            /** Format: int64 */
+            maxStorageBytes: number | string;
+            /** Format: int64 */
+            monthlyModelBudgetMinor: number | string;
+        };
         PositionDto: {
             /** Format: uuid */
             id: string;
@@ -12645,6 +13016,14 @@ export interface components {
         };
         PurgeRequest: {
             confirmation: string;
+        };
+        QuotaUsageDto: {
+            resource: string;
+            /** Format: int64 */
+            used: number | string;
+            /** Format: int64 */
+            limit: number | string;
+            exceeded: boolean;
         };
         ReadyRequirementRequest: {
             /** Format: int32 */
@@ -12934,6 +13313,19 @@ export interface components {
         };
         SubmitTaskRequest: {
             author: string;
+        };
+        SubscriptionDto: {
+            /** Format: uuid */
+            tenantId: string;
+            planId: string;
+            status: string;
+            currency: string;
+            /** Format: date-time */
+            currentPeriodStart: string;
+            /** Format: date-time */
+            currentPeriodEnd: string;
+            /** Format: int32 */
+            version: number | string;
         };
         SwitchTenantRequest: {
             /** Format: uuid */

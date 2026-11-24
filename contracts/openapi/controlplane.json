@@ -1118,6 +1118,208 @@
         }
       }
     },
+    "/v1/billing/plans": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlanDefinition"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingSummaryDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/checkout": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckoutRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingInvoiceDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/billing/invoices/{invoiceId}/pay-local": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "parameters": [
+          {
+            "name": "invoiceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LocalPaymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingInvoiceDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/exports": {
+      "post": {
+        "tags": [
+          "Data Export"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataExportDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Data Export"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DataExportDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/exports/{exportId}/content": {
+      "get": {
+        "tags": [
+          "Data Export"
+        ],
+        "parameters": [
+          {
+            "name": "exportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/exports/{exportId}/validate": {
+      "post": {
+        "tags": [
+          "Data Export"
+        ],
+        "parameters": [
+          {
+            "name": "exportId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataExportValidationDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/tenants": {
       "get": {
         "tags": [
@@ -9686,6 +9888,152 @@
           }
         }
       },
+      "BillingInvoiceDto": {
+        "required": [
+          "id",
+          "tenantId",
+          "planId",
+          "amountMinor",
+          "currency",
+          "status",
+          "paymentProvider",
+          "createdAt",
+          "paidAt",
+          "paymentRef"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "planId": {
+            "type": "string"
+          },
+          "amountMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "paymentProvider": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "paidAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "paymentRef": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "BillingLedgerEntry": {
+        "required": [
+          "id",
+          "tenantId",
+          "invoiceId",
+          "entryType",
+          "amountMinor",
+          "currency",
+          "priceVersion",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "invoiceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entryType": {
+            "type": "string"
+          },
+          "amountMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "priceVersion": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "BillingSummaryDto": {
+        "required": [
+          "subscription",
+          "plan",
+          "quotas",
+          "invoices",
+          "ledger"
+        ],
+        "type": "object",
+        "properties": {
+          "subscription": {
+            "$ref": "#/components/schemas/SubscriptionDto"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/PlanDefinition"
+          },
+          "quotas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QuotaUsageDto"
+            }
+          },
+          "invoices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingInvoiceDto"
+            }
+          },
+          "ledger": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingLedgerEntry"
+            }
+          }
+        }
+      },
       "BudgetPolicy": {
         "type": "object",
         "properties": {
@@ -10231,6 +10579,17 @@
           },
           "charter": {
             "$ref": "#/components/schemas/CharterDto"
+          }
+        }
+      },
+      "CheckoutRequest": {
+        "required": [
+          "planId"
+        ],
+        "type": "object",
+        "properties": {
+          "planId": {
+            "type": "string"
           }
         }
       },
@@ -11663,6 +12022,140 @@
           "generatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "DataExportDto": {
+        "required": [
+          "id",
+          "tenantId",
+          "status",
+          "format",
+          "schemaVersion",
+          "objectKey",
+          "sha256",
+          "length",
+          "tableCount",
+          "moduleCount",
+          "createdAt",
+          "validatedAt",
+          "validationError"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "schemaVersion": {
+            "type": "string"
+          },
+          "objectKey": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "length": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "tableCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "moduleCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "validatedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "validationError": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "DataExportValidationDto": {
+        "required": [
+          "exportId",
+          "valid",
+          "sha256",
+          "tableCount",
+          "moduleCount",
+          "validatedAt",
+          "error"
+        ],
+        "type": "object",
+        "properties": {
+          "exportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "valid": {
+            "type": "boolean"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "tableCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "moduleCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "validatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -13901,6 +14394,17 @@
           }
         }
       },
+      "LocalPaymentRequest": {
+        "required": [
+          "confirmation"
+        ],
+        "type": "object",
+        "properties": {
+          "confirmation": {
+            "type": "string"
+          }
+        }
+      },
       "LoginRequest": {
         "required": [
           "email",
@@ -15273,6 +15777,70 @@
           }
         }
       },
+      "PlanDefinition": {
+        "required": [
+          "id",
+          "name",
+          "monthlyAmountMinor",
+          "currency",
+          "maxEmployees",
+          "maxProjects",
+          "maxStorageBytes",
+          "monthlyModelBudgetMinor"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "monthlyAmountMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "maxEmployees": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "maxProjects": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "maxStorageBytes": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "monthlyModelBudgetMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          }
+        }
+      },
       "PositionDto": {
         "required": [
           "id",
@@ -15797,6 +16365,39 @@
         "properties": {
           "confirmation": {
             "type": "string"
+          }
+        }
+      },
+      "QuotaUsageDto": {
+        "required": [
+          "resource",
+          "used",
+          "limit",
+          "exceeded"
+        ],
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string"
+          },
+          "used": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "limit": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "exceeded": {
+            "type": "boolean"
           }
         }
       },
@@ -16762,6 +17363,49 @@
           }
         }
       },
+      "SubscriptionDto": {
+        "required": [
+          "tenantId",
+          "planId",
+          "status",
+          "currency",
+          "currentPeriodStart",
+          "currentPeriodEnd",
+          "version"
+        ],
+        "type": "object",
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "planId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currentPeriodStart": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "currentPeriodEnd": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
       "SwitchTenantRequest": {
         "required": [
           "tenantId"
@@ -17686,6 +18330,12 @@
     },
     {
       "name": "Identity"
+    },
+    {
+      "name": "Billing"
+    },
+    {
+      "name": "Data Export"
     },
     {
       "name": "Tenancy"
