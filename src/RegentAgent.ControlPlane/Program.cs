@@ -135,8 +135,29 @@ builder.Services.AddSingleton(sp => new EvaluationService(
     new JsonDocumentStore<JudgeAssignment>("data/modules/judges.json")));
 builder.Services.AddSingleton(sp => new EvaluationQaService(
     new JsonDocumentStore<EvaluationQaState>("data/modules/evaluation-qa.json")));
-builder.Services.AddSingleton<IObjectStore>(sp =>
-    new LocalFileObjectStore(sp.GetRequiredService<IConfiguration>()["Storage:ObjectRoot"] ?? "data/objects"));
+var objectProvider = builder.Configuration["Storage:ObjectProvider"] ?? "Local";
+if (objectProvider.Equals("Local", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IObjectStore>(provider =>
+        new LocalFileObjectStore(provider.GetRequiredService<IConfiguration>()["Storage:ObjectRoot"] ?? "data/objects"));
+}
+else if (objectProvider.Equals("S3", StringComparison.OrdinalIgnoreCase))
+{
+    var s3Options = new S3ObjectStoreOptions
+    {
+        ServiceUrl = builder.Configuration["Storage:S3:ServiceUrl"] ?? string.Empty,
+        Region = builder.Configuration["Storage:S3:Region"] ?? "us-east-1",
+        Bucket = builder.Configuration["Storage:S3:Bucket"] ?? string.Empty,
+        AccessKey = builder.Configuration["Storage:S3:AccessKey"] ?? string.Empty,
+        SecretKey = builder.Configuration["Storage:S3:SecretKey"] ?? string.Empty,
+        ForcePathStyle = builder.Configuration.GetValue("Storage:S3:ForcePathStyle", true),
+        TimeoutSeconds = builder.Configuration.GetValue("Storage:S3:TimeoutSeconds", 120),
+        MaxRetries = builder.Configuration.GetValue("Storage:S3:MaxRetries", 2)
+    };
+    s3Options.Validate();
+    builder.Services.AddSingleton<IObjectStore>(S3ObjectStore.Create(s3Options));
+}
+else throw new InvalidOperationException("Object storage provider must be Local or S3.");
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<LoginRateLimiter>();
 builder.Services.AddSingleton(new JsonDocumentStore<CredentialRecord>("data/modules/credentials.json"));
