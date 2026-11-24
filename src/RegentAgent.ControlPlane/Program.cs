@@ -26,6 +26,7 @@ using RegentAgent.Providers;
 using RegentAgent.Workflows;
 using RegentAgent.Contracts.Agents;
 using RegentAgent.Contracts.Artifacts;
+using RegentAgent.Contracts.Collaboration;
 using RegentAgent.Contracts.Dashboard;
 using RegentAgent.Contracts.Enums;
 using RegentAgent.Contracts.Evaluation;
@@ -56,6 +57,7 @@ builder.Services.AddSignalR();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, TenantContext>();
 builder.Services.AddScoped<DashboardService>();
+builder.Services.AddScoped<CollaborationVisualizationService>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<ApprovalService>();
@@ -355,7 +357,10 @@ if (app.Environment.IsDevelopment())
     await scope.ServiceProvider.GetRequiredService<WorkflowService>().SeedAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<MemoryService>().SeedAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<PerformanceService>().SeedAsync(CancellationToken.None);
-    await scope.ServiceProvider.GetRequiredService<ChatService>().SeedAsync(CancellationToken.None);
+    var chatEmployees = (await db.Employees.AsNoTracking().Where(x => x.TenantId == Guid.Parse("11111111-1111-1111-1111-111111111111"))
+        .Select(x => new { x.Id, x.DisplayName, x.Position }).ToListAsync(CancellationToken.None))
+        .Select(x => new ChatEmployee(x.Id.ToString(), x.DisplayName, x.Position)).ToArray();
+    await scope.ServiceProvider.GetRequiredService<ChatService>().SeedAsync(chatEmployees, CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<EvaluationService>().SeedAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<ComplianceService>().SeedAsync(CancellationToken.None);
     foreach (var tenantId in await db.Tenants.Select(x => x.Id).ToListAsync(CancellationToken.None))
@@ -1552,6 +1557,14 @@ api.MapPost("/performance-actions/{id}/appeal/resolve", async (string id, Resolv
     return Results.Ok(action);
 }).Produces<PerformanceActionRecord>().WithTags("Performance");
 
+api.MapGet("/collaboration/graph", async (HttpContext context, CollaborationVisualizationService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.GetGraphAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
+    .Produces<CollaborationGraphDto>().WithTags("Collaboration");
+api.MapGet("/collaboration/trace", async (HttpContext context, CollaborationVisualizationService service,
+    string entityType, string entityId, CancellationToken cancellationToken) =>
+    Results.Ok(await service.GetTraceAsync(Guid.Parse(CurrentTenant(context)), entityType, entityId, cancellationToken)))
+    .Produces<CollaborationTraceDto>().WithTags("Collaboration");
+
 api.MapGet("/communication/routes", (CommunicationRouter router) =>
 {
     var nodes = new[]
@@ -1570,13 +1583,38 @@ api.MapGet("/communication/routes", (CommunicationRouter router) =>
 api.MapGet("/conversations", async (HttpContext context, ChatService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken)))
     .WithTags("Chat");
-api.MapGet("/conversations/{id}/messages", async (string id, ChatService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.ListMessagesAsync(id, cancellationToken))).WithTags("Chat");
+api.MapGet("/conversations/{id}/messages", async (string id, HttpContext context, ChatService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ListMessagesAsync(id, CurrentTenant(context), cancellationToken))).WithTags("Chat");
+api.MapPost("/conversations", async (CreateConversationRequest request, HttpContext context,
+    ChatService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+{
+    var conversation = await service.CreateConversationAsync(CurrentTenant(context), request.Title, request.Kind,
+        request.MemberEmployeeIds, CurrentUser(context), request.ScopeType, request.ScopeId, cancellationToken);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "chat.conversation.created", CurrentUser(context),
+        new { conversation_id = conversation.Id, kind = conversation.Kind, member_count = conversation.MemberEmployeeIds.Count, scope_type = conversation.ScopeType }, cancellationToken);
+    return Results.Ok(conversation);
+}).WithTags("Chat");
+api.MapPost("/conversations/{id}/members", async (string id, AddConversationMemberRequest request, HttpContext context,
+    ChatService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+{
+    var conversation = await service.AddMemberAsync(id, CurrentTenant(context), request.EmployeeId, cancellationToken);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "chat.member.added", CurrentUser(context),
+        new { conversation_id = id, employee_id = request.EmployeeId }, cancellationToken);
+    return Results.Ok(conversation);
+}).WithTags("Chat");
 api.MapPost("/conversations/{id}/messages", async (string id, SendMessageRequest request, HttpContext context,
-    ChatService service, IHubContext<TenantHub> hub, CancellationToken cancellationToken) =>
+    ChatService service, IHubContext<TenantHub> hub, AuditIntegrityService audit, CancellationToken cancellationToken) =>
 {
     var message = await service.SendAsync(id, CurrentTenant(context), CurrentUser(context), request.Body,
-        request.Priority, cancellationToken);
+        request.Priority, cancellationToken, request.ReplyToMessageId, request.MentionedEmployeeIds,
+        request.MessageType, request.EvidenceRefs, request.IdempotencyKey);
+    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "chat.message.sent", CurrentUser(context),
+        new
+        {
+            message_id = message.Id, conversation_id = id, seq = message.Seq, message_type = message.MessageType,
+            priority = message.Priority, body_length = message.Body.Length, mention_count = message.MentionedEmployeeIds.Count,
+            evidence_count = message.EvidenceRefs.Count
+        }, cancellationToken);
     await hub.Clients.Group(CurrentTenant(context)).SendAsync("message.created", message, cancellationToken);
     return Results.Ok(message);
 }).WithTags("Chat");
@@ -1751,7 +1789,12 @@ public sealed record EvaluationGateRequest(string SuiteId, Guid CandidateEmploye
 public sealed record CreateReviewRequest(string EmployeeId, string Conclusion, string EvidenceJson);
 public sealed record CreateWorkflowRequest(string Name, IReadOnlyList<string> Steps, string ScopePositionId);
 public sealed record ReviewWorkflowRequest(string Decision, string Reviewer, string Note);
-public sealed record SendMessageRequest(string Body, string Priority);
+public sealed record SendMessageRequest(string Body, string Priority, string? ReplyToMessageId = null,
+    IReadOnlyList<string>? MentionedEmployeeIds = null, string MessageType = "Chat",
+    IReadOnlyList<string>? EvidenceRefs = null, string? IdempotencyKey = null);
+public sealed record CreateConversationRequest(string Title, string Kind, IReadOnlyList<string> MemberEmployeeIds,
+    string ScopeType = "Topic", string? ScopeId = null);
+public sealed record AddConversationMemberRequest(string EmployeeId);
 public sealed record RunEvaluationRequest(string SuiteId, string CandidateEmployeeId, int Seed);
 public sealed record CreateImprovementRequest(string EmployeeId, string Category, string Summary, string ExpectedBenefit);
 public sealed record ReviewImprovementRequest(bool Approved, string Reviewer, string Note);
