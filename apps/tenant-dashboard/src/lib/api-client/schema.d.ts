@@ -292,6 +292,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/{provider}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    tenantId: string;
+                    redirectUri?: string;
+                };
+                header?: never;
+                path: {
+                    provider: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/{provider}/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    code: string;
+                    state: string;
+                };
+                header?: never;
+                path: {
+                    provider: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/sessions": {
         parameters: {
             query?: never;
@@ -10525,6 +10601,7 @@ export interface components {
             tierAssignments?: components["schemas"]["ModelTierAssignment"][];
             bindings?: components["schemas"]["EmployeeModelBinding"][];
             unavailableEvents?: components["schemas"]["ModelUnavailableEvent"][];
+            lastCatalogError?: null | string;
         };
         ModelSnapshot: {
             id: string;
@@ -10536,6 +10613,7 @@ export interface components {
             checksum?: null | string;
             /** Format: date-time */
             fetchedAt?: null | string;
+            status?: string;
         };
         ModelTestResult: {
             provider: string;

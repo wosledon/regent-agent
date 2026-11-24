@@ -6,7 +6,7 @@
   },
   "servers": [
     {
-      "url": "http://localhost:5080/"
+      "url": "http://127.0.0.1:5180/"
     }
   ],
   "paths": {
@@ -159,6 +159,82 @@
           },
           "required": true
         },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/auth/{provider}/start": {
+      "get": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tenantId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "redirectUri",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/auth/{provider}/callback": {
+      "get": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK"
@@ -12342,6 +12418,12 @@
             "items": {
               "$ref": "#/components/schemas/ModelUnavailableEvent"
             }
+          },
+          "lastCatalogError": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -12385,6 +12467,9 @@
               "string"
             ],
             "format": "date-time"
+          },
+          "status": {
+            "type": "string"
           }
         }
       },

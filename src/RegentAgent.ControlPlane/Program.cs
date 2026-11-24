@@ -449,10 +449,10 @@ app.MapPost("/auth/github/login", async (ExternalLoginRequest request, IdentityS
 app.MapPost("/auth/oidc/login", async (ExternalLoginRequest request, IdentityService identity,
     HttpContext context, CancellationToken cancellationToken) =>
     await CompleteAuthAsync(context, await identity.ExternalLoginAsync(request, "Oidc", cancellationToken))).AllowAnonymous();
-app.MapGet("/auth/{provider}/start", async (string provider, StartExternalLoginRequest request,
+app.MapGet("/auth/{provider}/start", async (string provider, Guid tenantId, string? redirectUri,
     IdentityService identity, HttpContext context, CancellationToken cancellationToken) =>
 {
-    var authorization = await identity.StartExternalLoginAsync(request.TenantId, provider, request.RedirectUri, cancellationToken);
+    var authorization = await identity.StartExternalLoginAsync(tenantId, provider, redirectUri, cancellationToken);
     context.Response.Cookies.Append("regent.external.tx", authorization.TransactionId.ToString(), new CookieOptions
     {
         HttpOnly = true, SameSite = SameSiteMode.Strict, Secure = context.Request.IsHttps,
@@ -460,13 +460,13 @@ app.MapGet("/auth/{provider}/start", async (string provider, StartExternalLoginR
     });
     return Results.Ok(authorization);
 }).AllowAnonymous();
-app.MapGet("/auth/{provider}/callback", async (string provider, ExternalCallbackRequest request,
+app.MapGet("/auth/{provider}/callback", async (string provider, string code, string state,
     IdentityService identity, HttpContext context, CancellationToken cancellationToken) =>
 {
     if (!context.Request.Cookies.TryGetValue("regent.external.tx", out var transactionId)
         || !Guid.TryParse(transactionId, out var id))
         throw new UnauthorizedAccessException("External login transaction cookie is missing.");
-    var result = await identity.CompleteExternalLoginAsync(provider, id, request, cancellationToken);
+    var result = await identity.CompleteExternalLoginAsync(provider, id, new ExternalCallbackRequest(code, state), cancellationToken);
     context.Response.Cookies.Delete("regent.external.tx");
     await SignInTenantAsync(context, result.UserId, result.TenantId, result.DisplayName, result.Role, result.SessionId);
     return Results.Redirect(context.RequestServices.GetRequiredService<IConfiguration>()["Frontend:TenantUrl"]
