@@ -21,6 +21,7 @@
 - 两个独立前端：Tenant Dashboard、Ops Console。
 - 模型只支持 OpenAI 与 Anthropic 云端原生端点；Gateway 模型调用必须使用员工 Assignment Token。
 - 控制面 `/v1` 用于人类治理与只读观察；`/agent/v1` 使用短期员工 Token，绑定租户、员工、任务、Runner、scope 和有效期。
+- `/agent/v1/tools` 提供受控 Tool 发现与调用，覆盖聊天、任务、记忆、工作流、项目、组织、改进、招聘、绩效、评测、Agent 演进和任务治理；执行层重新鉴权并记录幂等审计。
 - API、Tool、MCP 和通知均只用于系统内部。
 - GitHub 只保存源码和版本 Tag；本地用 Docker Compose 构建。
 - Q-033 数据导出、Q-046 支付/套餐/定价保持延后。

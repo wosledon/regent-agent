@@ -191,7 +191,7 @@ scopes: space-separated permissions
 | 模型 | `/admin/tenants/{tenant}/models`、`/test`、`/rotate`、`DELETE` |
 | 计量 | `/internal/llm-usage`、`/internal/tool-usage`、`/usage/reconcile` |
 | 运维 | `/gateways/register`、`/gateways/{id}/heartbeat`、`/backups` |
-| Agent 数据面 | `/agent/v1/me`、`/agent/v1/tasks/{id}`、`/agent/v1/conversations`、`/agent/v1/agent-runtime` |
+| Agent 数据面 | `/agent/v1/me`、`/agent/v1/tasks/{id}`、`/agent/v1/conversations`、`/agent/v1/agent-runtime`、`/agent/v1/tools` |
 | 运营 | `/ops/tenants`、`/ops/quotas`、`/ops/runner-pools`、`/ops/incidents`、`/ops/support-grants`、`/ops/audit-events` |
 
 ### 4.4 Tool 契约

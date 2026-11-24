@@ -7435,6 +7435,47 @@
         }
       }
     },
+    "/agent/v1/tools/discover": {
+      "get": {
+        "tags": [
+          "Agent Tools"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/agent/v1/tools/invoke": {
+      "post": {
+        "tags": [
+          "Agent Tools"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentToolInvocationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentToolInvocationResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agent/v1/tasks/{id}/checkpoint": {
       "post": {
         "tags": [
@@ -7973,6 +8014,81 @@
             "items": {
               "$ref": "#/components/schemas/PublicAsset"
             }
+          }
+        }
+      },
+      "AgentToolInvocationRequest": {
+        "required": [
+          "toolName",
+          "version",
+          "capability",
+          "taskGrant",
+          "taint",
+          "argumentsJson"
+        ],
+        "type": "object",
+        "properties": {
+          "toolName": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "capability": {
+            "type": "string"
+          },
+          "taskGrant": {
+            "type": "string"
+          },
+          "taint": {
+            "type": "string"
+          },
+          "argumentsJson": {
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "AgentToolInvocationResult": {
+        "required": [
+          "allowed",
+          "success",
+          "reason",
+          "digest",
+          "result",
+          "auditHash"
+        ],
+        "type": "object",
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "digest": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "result": { },
+          "auditHash": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -15994,6 +16110,9 @@
     },
     {
       "name": "Agent"
+    },
+    {
+      "name": "Agent Tools"
     },
     {
       "name": "Agent Chat"

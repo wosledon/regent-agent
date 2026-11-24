@@ -81,6 +81,13 @@
 - 外部第三方制品的公共分发当前不做，但租户显式导入仍按同一准入规则。
 - 不提供自动更新、自动安装或市场评分。
 
+## 6.1 Agent Tool 调用面
+
+- `/agent/v1/tools/discover` 只返回 Agent Token scope 内且已准入的 Tool。
+- `/agent/v1/tools/invoke` 使用员工 Assignment Token，并在执行层重新校验能力、TaskGrant、taint、注入、签名、digest、SBOM 和资源边界。
+- Tool 参数中的演员、租户、员工和任务字段不构成身份依据；控制面使用 Token claim 覆盖。
+- 调用、拒绝和失败写入审计，写操作支持幂等键；解雇、预算、模型密钥和高影响治理不开放给普通员工 Tool。
+
 ## 7. 安全边界
 
 - 内部 API 不因路径含 `/v1` 而降低鉴权要求。

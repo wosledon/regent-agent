@@ -9246,6 +9246,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/v1/tools/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/v1/tools/invoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AgentToolInvocationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentToolInvocationResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent/v1/tasks/{id}/checkpoint": {
         parameters: {
             query?: never;
@@ -9706,6 +9778,23 @@ export interface components {
             toolPolicies?: components["schemas"]["ToolDisclosurePolicy"][];
             onboardingBaselines?: components["schemas"]["OnboardingBaseline"][];
             publicAssets?: components["schemas"]["PublicAsset"][];
+        };
+        AgentToolInvocationRequest: {
+            toolName: string;
+            version: string;
+            capability: string;
+            taskGrant: string;
+            taint: string;
+            argumentsJson: string;
+            idempotencyKey?: null | string;
+        };
+        AgentToolInvocationResult: {
+            allowed: boolean;
+            success: boolean;
+            reason: null | string;
+            digest: null | string;
+            result: unknown;
+            auditHash: null | string;
         };
         AllocationRule: {
             /** Format: uuid */
