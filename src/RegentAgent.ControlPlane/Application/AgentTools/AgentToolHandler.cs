@@ -61,4 +61,11 @@ internal static class AgentToolArguments
 
     public static long OptionalLong(JsonElement arguments, string name, long fallback) =>
         arguments.TryGetProperty(name, out var value) && value.TryGetInt64(out var parsed) ? parsed : fallback;
+
+    public static decimal OptionalDecimal(JsonElement arguments, string name, decimal fallback) =>
+        arguments.TryGetProperty(name, out var value) && value.TryGetDecimal(out var parsed) ? parsed : fallback;
+
+    public static bool OptionalBool(JsonElement arguments, string name, bool fallback) =>
+        arguments.TryGetProperty(name, out var value) && value.ValueKind is JsonValueKind.True or JsonValueKind.False
+            ? value.GetBoolean() : fallback;
 }

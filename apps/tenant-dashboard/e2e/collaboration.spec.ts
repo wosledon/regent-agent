@@ -96,7 +96,8 @@ test('employee Agent invokes governed tools with task-scoped identity', async ({
   const discovered = await (await page.request.get('/agent/v1/tools/discover', { headers })).json();
   expect(discovered.some((tool: { name: string }) => tool.name === 'memory.capture')).toBeTruthy();
 
-  const invoke = async (idempotencyKey: string) => page.request.post('/agent/v1/tools/invoke', {
+  const idempotencyKey = `agent-tool-smoke-${crypto.randomUUID()}`;
+  const invoke = async () => page.request.post('/agent/v1/tools/invoke', {
     headers,
     data: {
       toolName: 'memory.capture', version: '1.0.0', capability: 'memory.write',
@@ -107,8 +108,8 @@ test('employee Agent invokes governed tools with task-scoped identity', async ({
       })
     }
   });
-  const first = await (await invoke('agent-tool-smoke-1')).json();
-  const repeated = await (await invoke('agent-tool-smoke-1')).json();
+  const first = await (await invoke()).json();
+  const repeated = await (await invoke()).json();
   expect(first.allowed).toBeTruthy();
   expect(first.success).toBeTruthy();
   expect(first.result.author).toBe('Engineering Lead');
@@ -123,6 +124,56 @@ test('employee Agent invokes governed tools with task-scoped identity', async ({
     }
   });
   expect(denied.status()).toBe(403);
+});
+
+test('additional domain tools preserve Agent and human boundaries', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  const employees = await (await page.request.get('/v1/employees')).json();
+  const engineering = employees.find((employee: { displayName: string }) => employee.displayName === 'Engineering Lead');
+  const timeline = await (await page.request.get(`/v1/employees/${engineering.id}/timeline`)).json();
+  const taskId = timeline.entries.find((entry: { taskId?: string }) => entry.taskId)?.taskId;
+  const issueToken = async (scopes: string[]) => {
+    const response = await page.request.post('/auth/dev-agent-token', {
+      data: { tenantId: '11111111-1111-1111-1111-111111111111', employeeId: engineering.id, taskId, scopes }
+    });
+    return (await response.json()).token as string;
+  };
+  const invoke = async (token: string, toolName: string, capability: string, argumentsJson: object) =>
+    page.request.post('/agent/v1/tools/invoke', {
+      headers: { Authorization: `Bearer ${token}` },
+      data: {
+        toolName, version: '1.0.0', capability, taskGrant: '*', taint: 'Low',
+        argumentsJson: JSON.stringify(argumentsJson)
+      }
+    });
+
+  const evolutionToken = await issueToken(['agent.evolve']);
+  const prompt = await (await invoke(evolutionToken, 'agent_evolution.create_prompt', 'agent.evolve', {
+    operation: 'create_prompt', name: 'Agent Evolution Smoke', content: 'Use evidence before acting.', kind: 'Operations'
+  })).json();
+  expect(prompt.success).toBeTruthy();
+  expect(prompt.result.name).toBe('Agent Evolution Smoke');
+
+  const performanceToken = await issueToken(['performance.action']);
+  const termination = await invoke(performanceToken, 'performance.action', 'performance.action', {
+    operation: 'action', employeeId: engineering.id, actionType: 'Terminate', reason: 'Must remain human-only'
+  });
+  expect(termination.status()).toBe(403);
+
+  const organizationToken = await issueToken(['org.design']);
+  const position = await (await invoke(organizationToken, 'organization.create_position', 'org.design', {
+    operation: 'create_position', name: 'Agent Recruitment Position', responsibilities: 'Execute hiring work.',
+    capabilities: ['recruitment.execute'], budgetMinor: 0
+  })).json();
+  expect(position.success).toBeTruthy();
+  const recruitmentToken = await issueToken(['recruitment.execute']);
+  const candidate = await (await invoke(recruitmentToken, 'recruitment.create_candidate', 'recruitment.execute', {
+    operation: 'create_candidate', positionId: position.result.id, displayName: 'Agent Candidate',
+    modelVersion: 'local-cheap-v1', jobDescription: 'Execute and verify deterministic delivery.'
+  })).json();
+  expect(candidate.success).toBeTruthy();
+  expect(candidate.result.displayName).toBe('Agent Candidate');
 });
 
 test('collaboration office remains usable on a mobile viewport', async ({ page }) => {

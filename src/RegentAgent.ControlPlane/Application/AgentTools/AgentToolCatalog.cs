@@ -24,7 +24,30 @@ public sealed class AgentToolCatalog(GovernanceService governance)
         new("project.claim_task", "1.0.0", "tasks:execute"),
         new("project.submit_task", "1.0.0", "tasks:execute"),
         new("organization.create_position", "1.0.0", "org.design"),
-        new("improvement.propose", "1.0.0", "improvement.propose")
+        new("improvement.propose", "1.0.0", "improvement.propose"),
+        new("recruitment.create_candidate", "1.0.0", "recruitment.execute"),
+        new("recruitment.assess", "1.0.0", "recruitment.execute"),
+        new("recruitment.reject", "1.0.0", "recruitment.execute"),
+        new("recruitment.retry", "1.0.0", "recruitment.execute"),
+        new("recruitment.interview", "1.0.0", "recruitment.execute"),
+        new("recruitment.fairness_audit", "1.0.0", "recruitment.execute"),
+        new("performance.review", "1.0.0", "performance.review"),
+        new("performance.action", "1.0.0", "performance.action"),
+        new("performance.improvement_review", "1.0.0", "performance.review"),
+        new("evaluation.run", "1.0.0", "evaluation.execute"),
+        new("evaluation.qa_gate", "1.0.0", "evaluation.judge"),
+        new("agent_evolution.create_prompt", "1.0.0", "agent.evolve"),
+        new("agent_evolution.create_skill", "1.0.0", "agent.evolve"),
+        new("agent_evolution.activate_prompt", "1.0.0", "agent.evolve"),
+        new("agent_evolution.activate_skill", "1.0.0", "agent.evolve"),
+        new("agent_evolution.onboarding", "1.0.0", "agent.evolve"),
+        new("agent_evolution.publish_asset", "1.0.0", "agent.evolve"),
+        new("task_governance.record_work", "1.0.0", "tasks:execute"),
+        new("task_governance.create_review", "1.0.0", "acceptance.review"),
+        new("task_governance.approve_review", "1.0.0", "acceptance.review"),
+        new("task_governance.create_debate", "1.0.0", "technical.review"),
+        new("task_governance.decide_debate", "1.0.0", "technical.review"),
+        new("task_governance.adjudicate", "1.0.0", "project.decide")
     ];
 
     private readonly GovernanceService governance = governance;
