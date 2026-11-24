@@ -28,7 +28,7 @@
 |---|---|---|---|
 | 01 基础契约与状态 | Cookie 控制面 + Agent Assignment Token、租户上下文、Outbox、幂等服务 | 部分（生产） | 生产 JWKS 轮换与完整 Token 吊销传播尚未实现 |
 | 02 运行时可靠性 | `TaskExecutionService`、租约/fencing、Outbox/Inbox、本地沙箱 | 符合（本地） | 真实多 Worker 故障演练未执行 |
-| 03 模型、计量与预算 | Provider 路由、原生 HTTP/SSE、Agent JWT、KeyVault、租户预算与用量归因 | 部分（生产） | 预算仍为本地令牌计数，未完成金额预留/结算与 Provider 账单对账 |
+| 03 模型、计量与预算 | Provider 路由、原生 HTTP/SSE、Agent JWT、KeyVault、价格快照、金额预留/结算/释放/过期、独立尝试用量和账单更正 | 符合（本地） | 生产多 Worker 原子预留与真实 Provider 账单未连接 |
 | 04 安全、治理与恢复 | Tool PEP、审批、审计、DLP、事件响应、备份脚本 | 部分（生产） | 容器隔离、真实 WORM 与异地恢复按约束未执行 |
 | 05 产品交付闭环 | `DeliveryPolicy`、`DeliveryService`、独立验收、发布/回滚 | 符合（本地） | 容器发布未执行 |
 | 06 主控与动态组织 | `OrganizationService`、能力授权、组织调整、继任 | 符合（本地） | 无 |

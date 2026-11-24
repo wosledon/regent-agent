@@ -68,7 +68,7 @@ public sealed class LocalProviderClient : IProviderClient
         (provider == "openai" && protocol == "openai_chat_completions") ||
         (provider == "anthropic" && protocol == "anthropic_messages");
 
-    public Task<ProviderResponse> CompleteAsync(ProviderRequest request, CancellationToken cancellationToken)
+    public async Task<ProviderResponse> CompleteAsync(ProviderRequest request, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var prompt = request.Prompt.Trim();
@@ -76,7 +76,9 @@ public sealed class LocalProviderClient : IProviderClient
         var text = $"Local deterministic response for {request.Model}: {summary}";
         var inputTokens = Math.Max(1, Encoding.UTF8.GetByteCount(prompt) / 4);
         var outputTokens = Math.Max(1, Encoding.UTF8.GetByteCount(text) / 4);
-        return Task.FromResult(new ProviderResponse(
-            $"local-{Guid.NewGuid():N}", text, inputTokens, outputTokens, 1));
+        var response = new ProviderResponse($"local-{Guid.NewGuid():N}", text, inputTokens, outputTokens, 1);
+        if (request.AttemptObserver is { } observer)
+            await observer(new ProviderAttemptRecord(1, response.ProviderRequestId, inputTokens, 0, outputTokens, 0, true), cancellationToken);
+        return response;
     }
 }

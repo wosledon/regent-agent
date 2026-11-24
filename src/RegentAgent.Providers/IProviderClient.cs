@@ -7,7 +7,18 @@ public sealed record ProviderRequest(
     string Prompt,
     int MaxOutputTokens,
     string? ApiKey,
-    string? NativeRequestJson = null);
+    string? NativeRequestJson = null,
+    Func<ProviderAttemptRecord, CancellationToken, Task>? AttemptObserver = null);
+
+public sealed record ProviderAttemptRecord(
+    int Attempt,
+    string ProviderRequestId,
+    int InputTokens,
+    int CachedInputTokens,
+    int OutputTokens,
+    int ReasoningTokens,
+    bool Succeeded,
+    string? ErrorCode = null);
 
 public sealed record ProviderResponse(
     string ProviderRequestId,
@@ -15,7 +26,11 @@ public sealed record ProviderResponse(
     int InputTokens,
     int OutputTokens,
     long LatencyMs,
-    string? NativeResponseJson = null);
+    string? NativeResponseJson = null)
+{
+    public int CachedInputTokens { get; init; }
+    public int ReasoningTokens { get; init; }
+}
 
 public sealed record ProviderStreamChunk(string Data, string? EventType = null);
 

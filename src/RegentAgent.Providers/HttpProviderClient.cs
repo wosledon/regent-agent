@@ -75,29 +75,43 @@ public abstract class HttpProviderClient(HttpClient http, ProviderEndpointOption
                 var body = await ProviderHttpContent.ReadBoundedAsync(response, options.MaxResponseBytes, cancellationToken);
                 if (response.IsSuccessStatusCode)
                 {
-                    try { return ParseResponse(body, stopwatch.ElapsedMilliseconds); }
+                    ProviderResponse parsed;
+                    try { parsed = ParseResponse(body, stopwatch.ElapsedMilliseconds); }
                     catch (Exception exception) when (exception is JsonException or InvalidOperationException)
                     {
+                        await NotifyFailureAsync(request, attempt + 1, "PROVIDER_RESPONSE_INVALID", body, cancellationToken);
                         throw new ProviderRequestException((int)response.StatusCode, "PROVIDER_RESPONSE_INVALID", false,
                             $"Provider {ProviderName} returned an invalid response.", body);
                     }
+                    await NotifySuccessAsync(request, attempt + 1, parsed, cancellationToken);
+                    return parsed;
                 }
                 var retryable = ProviderHttpRetry.IsRetryable(response.StatusCode);
                 if (!retryable || attempt >= options.MaxRetries)
+                {
+                    await NotifyFailureAsync(request, attempt + 1, "PROVIDER_REJECTED", body, cancellationToken);
                     throw new ProviderRequestException((int)response.StatusCode, "PROVIDER_REJECTED", retryable,
                         $"Provider {ProviderName} returned HTTP {(int)response.StatusCode}.", body);
+                }
+                await NotifyFailureAsync(request, attempt + 1, "PROVIDER_RETRYABLE_ERROR", body, cancellationToken);
                 retryDelay = ProviderHttpRetry.Delay(response, attempt, options.BaseDelayMilliseconds);
             }
             catch (ProviderRequestException) { throw; }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 if (attempt >= options.MaxRetries)
+                {
+                    await NotifyFailureAsync(request, attempt + 1, "PROVIDER_TIMEOUT", null, cancellationToken);
                     throw new ProviderRequestException(GatewayTimeoutStatus, "PROVIDER_TIMEOUT", true, $"Provider {ProviderName} timed out.");
+                }
             }
             catch (HttpRequestException)
             {
                 if (attempt >= options.MaxRetries)
+                {
+                    await NotifyFailureAsync(request, attempt + 1, "PROVIDER_UNAVAILABLE", null, cancellationToken);
                     throw new ProviderRequestException(null, "PROVIDER_UNAVAILABLE", true, $"Provider {ProviderName} is unavailable.");
+                }
             }
             await Task.Delay(retryDelay ?? ProviderHttpRetry.Delay(attempt, options.BaseDelayMilliseconds), cancellationToken);
         }
@@ -109,13 +123,13 @@ public abstract class HttpProviderClient(HttpClient http, ProviderEndpointOption
         if (!CanHandle(request.Provider, request.Protocol)) throw new InvalidOperationException("Provider protocol mismatch.");
         if (string.IsNullOrWhiteSpace(request.ApiKey)) throw new ProviderRequestException(null, "PROVIDER_KEY_MISSING", false, "Provider API key is not configured.");
         options.Validate(ProviderName);
-        using var response = await OpenStreamingResponseAsync(BuildPayload(request), request.ApiKey, cancellationToken);
+        using var response = await OpenStreamingResponseAsync(request, BuildPayload(request), request.ApiKey, cancellationToken);
         var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         await foreach (var chunk in ProviderSseReader.ReadAsync(stream, options.MaxResponseBytes, cancellationToken))
             yield return chunk;
     }
 
-    private async Task<HttpResponseMessage> OpenStreamingResponseAsync(string payload, string apiKey,
+    private async Task<HttpResponseMessage> OpenStreamingResponseAsync(ProviderRequest request, string payload, string apiKey,
         CancellationToken cancellationToken)
     {
         for (var attempt = 0; ; attempt++)
@@ -134,14 +148,19 @@ public abstract class HttpProviderClient(HttpClient http, ProviderEndpointOption
                     if (response.Content.Headers.ContentType?.MediaType?.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase) == true)
                         return response;
                     var invalidBody = await ProviderHttpContent.ReadBoundedAsync(response, options.MaxResponseBytes, cancellationToken);
+                    await NotifyFailureAsync(request, attempt + 1, "PROVIDER_RESPONSE_INVALID", invalidBody, cancellationToken);
                     throw new ProviderRequestException((int)response.StatusCode, "PROVIDER_RESPONSE_INVALID", false,
                         $"Provider {ProviderName} did not return an event stream.", invalidBody);
                 }
                 var body = await ProviderHttpContent.ReadBoundedAsync(response, options.MaxResponseBytes, cancellationToken);
                 var retryable = ProviderHttpRetry.IsRetryable(response.StatusCode);
                 if (!retryable || attempt >= options.MaxRetries)
+                {
+                    await NotifyFailureAsync(request, attempt + 1, "PROVIDER_REJECTED", body, cancellationToken);
                     throw new ProviderRequestException((int)response.StatusCode, "PROVIDER_REJECTED", retryable,
                         $"Provider {ProviderName} returned HTTP {(int)response.StatusCode}.", body);
+                }
+                await NotifyFailureAsync(request, attempt + 1, "PROVIDER_RETRYABLE_ERROR", body, cancellationToken);
                 retryDelay = ProviderHttpRetry.Delay(response, attempt, options.BaseDelayMilliseconds);
             }
             catch (ProviderRequestException) { response?.Dispose(); throw; }
@@ -149,17 +168,56 @@ public abstract class HttpProviderClient(HttpClient http, ProviderEndpointOption
             {
                 response?.Dispose();
                 if (attempt >= options.MaxRetries)
+                {
+                    await NotifyFailureAsync(request, attempt + 1, "PROVIDER_TIMEOUT", null, cancellationToken);
                     throw new ProviderRequestException(GatewayTimeoutStatus, "PROVIDER_TIMEOUT", true, $"Provider {ProviderName} timed out.");
+                }
             }
             catch (HttpRequestException)
             {
                 response?.Dispose();
                 if (attempt >= options.MaxRetries)
+                {
+                    await NotifyFailureAsync(request, attempt + 1, "PROVIDER_UNAVAILABLE", null, cancellationToken);
                     throw new ProviderRequestException(null, "PROVIDER_UNAVAILABLE", true, $"Provider {ProviderName} is unavailable.");
+                }
             }
             response?.Dispose();
             await Task.Delay(retryDelay ?? ProviderHttpRetry.Delay(attempt, options.BaseDelayMilliseconds), cancellationToken);
         }
+    }
+
+    private Task NotifySuccessAsync(ProviderRequest request, int attempt, ProviderResponse response,
+        CancellationToken cancellationToken) => request.AttemptObserver?.Invoke(new ProviderAttemptRecord(attempt,
+            response.ProviderRequestId, response.InputTokens, response.CachedInputTokens, response.OutputTokens,
+            response.ReasoningTokens, true), cancellationToken) ?? Task.CompletedTask;
+
+    private Task NotifyFailureAsync(ProviderRequest request, int attempt, string errorCode, string? body,
+        CancellationToken cancellationToken)
+    {
+        if (request.AttemptObserver is null) return Task.CompletedTask;
+        var (input, cached, output, reasoning) = ReadUsage(body);
+        return request.AttemptObserver(new ProviderAttemptRecord(attempt,
+            $"{ProviderName}-attempt-{Guid.NewGuid():N}", input, cached, output, reasoning, false, errorCode), cancellationToken);
+    }
+
+    private (int Input, int Cached, int Output, int Reasoning) ReadUsage(string? body)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(body)) return (0, 0, 0, 0);
+            var root = JsonNode.Parse(body);
+            if (ProviderName == "openai")
+                return (root?["usage"]?["prompt_tokens"]?.GetValue<int>() ?? 0,
+                    root?["usage"]?["prompt_tokens_details"]?["cached_tokens"]?.GetValue<int>() ?? 0,
+                    root?["usage"]?["completion_tokens"]?.GetValue<int>() ?? 0,
+                    root?["usage"]?["completion_tokens_details"]?["reasoning_tokens"]?.GetValue<int>() ?? 0);
+            return (root?["usage"]?["input_tokens"]?.GetValue<int>() ?? 0,
+                (root?["usage"]?["cache_read_input_tokens"]?.GetValue<int>() ?? 0)
+                    + (root?["usage"]?["cache_creation_input_tokens"]?.GetValue<int>() ?? 0),
+                root?["usage"]?["output_tokens"]?.GetValue<int>() ?? 0, 0);
+        }
+        catch (JsonException) { return (0, 0, 0, 0); }
     }
 
     public bool CanHandle(string provider, string protocol) =>

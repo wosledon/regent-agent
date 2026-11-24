@@ -75,9 +75,14 @@ public sealed class HttpProviderClientTests
             BaseUrl = "http://localhost/v1", MaxRetries = 1, BaseDelayMilliseconds = 0
         });
 
+        var observed = new List<ProviderAttemptRecord>();
         var response = await client.CompleteAsync(new ProviderRequest("openai", "gpt-test", "openai_chat_completions",
-            "hello", 32, "secret", """{"messages":[]}"""), CancellationToken.None);
+            "hello", 32, "secret", """{"messages":[]}""",
+            (attempt, _) => { observed.Add(attempt); return Task.CompletedTask; }), CancellationToken.None);
 
+        Assert.Equal(2, observed.Count);
+        Assert.False(observed[0].Succeeded);
+        Assert.True(observed[1].Succeeded);
         Assert.Equal(2, attempts);
         Assert.Equal(2, handler.Requests.Count);
         Assert.Equal(handler.Requests[0].Body, handler.Requests[1].Body);

@@ -102,8 +102,16 @@ else
         new LocalMasterKeyProvider(builder.Configuration["Gateway:MasterKeyPath"] ?? "data/secrets/master.key",
             builder.Configuration["Gateway:MasterKey"]), sp.GetRequiredService<PostgresKeyVaultOptions>()));
 }
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(ModelPriceBook.FromConfiguration(builder.Configuration));
+builder.Services.AddSingleton(new ModelPricingService(
+    builder.Configuration.GetValue("Gateway:Pricing:SafetyMarginBasisPoints", 1000)));
 builder.Services.AddSingleton(sp => new LocalBudgetService(
-    sp.GetRequiredService<IConfiguration>().GetValue<long>("Gateway:MonthlyLimit", 8_000_000)));
+    sp.GetRequiredService<IConfiguration>().GetValue<long>("Gateway:MonthlyLimit", 800_000),
+    builder.Configuration["Gateway:BudgetCurrency"] ?? "CNY",
+    builder.Configuration["Gateway:BudgetPath"] ?? "data/gateway-budget.json",
+    sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddHostedService<BudgetExpiryWorker>();
 var app = builder.Build();
 app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 {
@@ -157,7 +165,8 @@ app.Use(async (context, next) =>
             return;
         }
     }
-    if (path.StartsWith("/admin/keys", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(gatewayAdminToken)
+    if ((path.StartsWith("/admin/keys", StringComparison.Ordinal) || path.StartsWith("/admin/budget", StringComparison.Ordinal))
+        && !string.IsNullOrWhiteSpace(gatewayAdminToken)
         && !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(context.Request.Headers["X-Regent-Admin-Key"].ToString()),
             Encoding.UTF8.GetBytes(gatewayAdminToken)))
     {
@@ -171,82 +180,86 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live" })).AllowAnony
 app.MapGet("/health/ready", () => Results.Ok(new { status = "ready", mode = providerMode })).AllowAnonymous();
 
 app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderRouter provider,
-    IKeyVault keyVault, IUsageJournal usage, LocalBudgetService budget, CancellationToken cancellationToken) =>
+    IKeyVault keyVault, IUsageJournal usage, LocalBudgetService budget, ModelPriceBook priceBook,
+    ModelPricingService pricing, TimeProvider clock, CancellationToken cancellationToken) =>
 {
     var body = await ReadBodyAsync(context, cancellationToken);
     var model = Header(context, "X-Regent-Model") ?? body?["model"]?.GetValue<string>() ?? "local-cheap";
     var identity = AgentIdentityContext.Required(context.Items);
-    var tenant = identity.TenantId.ToString();
     var prompt = ExtractOpenAiPrompt(body);
     var maxOutput = body?["max_tokens"]?.GetValue<int?>() ?? 512;
-    var key = await ResolveKeyAsync(context, tenant, keyVault, cancellationToken);
-    if (!await budget.TryReserveAsync(tenant, Math.Max(1, maxOutput), cancellationToken))
+    var key = await ResolveKeyAsync(context, identity.TenantId.ToString(), keyVault, cancellationToken);
+    var reservation = await ReserveBudgetAsync(context, identity, "openai", model, prompt, maxOutput,
+        priceBook, pricing, budget, clock, cancellationToken);
+    if (reservation is null) return BudgetLimitProblem();
+    context.Response.Headers["X-Regent-Budget-Reservation-Id"] = reservation.Id.ToString();
+    var request = new ProviderRequest("openai", model, "openai_chat_completions", prompt, maxOutput, key,
+        body?.ToJsonString(), (attempt, token) => ObserveAttemptAsync(usage, budget, pricing, clock, reservation, attempt, token));
+    try
     {
-        return Results.Problem(statusCode: 429, title: "Budget limit reached.", extensions: new Dictionary<string, object?>
+        if (body?["stream"]?.GetValue<bool>() == true)
         {
-            ["error"] = new { code = "BUDGET_HARD_LIMIT", message = "Local monthly limit reached.", retryable = false }
+            await WriteProviderStreamAsync(context, provider, usage, budget, pricing, clock, reservation, request, cancellationToken);
+            await budget.CompleteAsync(reservation.Id, cancellationToken);
+            return Results.Empty;
+        }
+        var response = await provider.CompleteAsync(request, cancellationToken);
+        await budget.CompleteAsync(reservation.Id, cancellationToken);
+        if (response.NativeResponseJson is { } nativeResponse) return Results.Content(nativeResponse, "application/json");
+        return Results.Json(new
+        {
+            id = $"chatcmpl-{response.ProviderRequestId}", @object = "chat.completion",
+            created = clock.GetUtcNow().ToUnixTimeSeconds(), model,
+            choices = new[] { new { index = 0, message = new { role = "assistant", content = response.Text }, finish_reason = "stop" } },
+            usage = new { prompt_tokens = response.InputTokens, completion_tokens = response.OutputTokens, total_tokens = response.InputTokens + response.OutputTokens }
         });
     }
-    if (body?["stream"]?.GetValue<bool>() == true)
+    catch
     {
-        await WriteProviderStreamAsync(context, provider, usage, identity, "openai", "openai_chat_completions",
-            model, prompt, maxOutput, key, body?.ToJsonString(), cancellationToken);
-        return Results.Empty;
+        await budget.ReleaseAsync(reservation.Id, "Provider request failed", cancellationToken);
+        throw;
     }
-    var response = await provider.CompleteAsync(new ProviderRequest("openai", model, "openai_chat_completions", prompt, maxOutput, key, body?.ToJsonString()), cancellationToken);
-    await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, tenant, "openai", model,
-        response.InputTokens, response.OutputTokens, response.ProviderRequestId,
-        identity.EmployeeId.ToString(), identity.TaskId?.ToString()), cancellationToken);
-    if (response.NativeResponseJson is { } nativeResponse) return Results.Content(nativeResponse, "application/json");
-    return Results.Json(new
-    {
-        id = $"chatcmpl-{response.ProviderRequestId}",
-        @object = "chat.completion",
-        created = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
-        model,
-        choices = new[] { new { index = 0, message = new { role = "assistant", content = response.Text }, finish_reason = "stop" } },
-        usage = new { prompt_tokens = response.InputTokens, completion_tokens = response.OutputTokens, total_tokens = response.InputTokens + response.OutputTokens }
-    });
 }).AllowAnonymous();
 
 app.MapPost("/v1/messages", async (HttpContext context, IProviderRouter provider,
-    IKeyVault keyVault, IUsageJournal usage, LocalBudgetService budget, CancellationToken cancellationToken) =>
+    IKeyVault keyVault, IUsageJournal usage, LocalBudgetService budget, ModelPriceBook priceBook,
+    ModelPricingService pricing, TimeProvider clock, CancellationToken cancellationToken) =>
 {
     var body = await ReadBodyAsync(context, cancellationToken);
     var model = Header(context, "X-Regent-Model") ?? body?["model"]?.GetValue<string>() ?? "local-cheap";
     var identity = AgentIdentityContext.Required(context.Items);
-    var tenant = identity.TenantId.ToString();
     var prompt = ExtractAnthropicPrompt(body);
     var maxOutput = body?["max_tokens"]?.GetValue<int?>() ?? 512;
-    var key = await ResolveKeyAsync(context, tenant, keyVault, cancellationToken);
-    if (!await budget.TryReserveAsync(tenant, Math.Max(1, maxOutput), cancellationToken))
+    var key = await ResolveKeyAsync(context, identity.TenantId.ToString(), keyVault, cancellationToken);
+    var reservation = await ReserveBudgetAsync(context, identity, "anthropic", model, prompt, maxOutput,
+        priceBook, pricing, budget, clock, cancellationToken);
+    if (reservation is null) return BudgetLimitProblem();
+    context.Response.Headers["X-Regent-Budget-Reservation-Id"] = reservation.Id.ToString();
+    var request = new ProviderRequest("anthropic", model, "anthropic_messages", prompt, maxOutput, key,
+        body?.ToJsonString(), (attempt, token) => ObserveAttemptAsync(usage, budget, pricing, clock, reservation, attempt, token));
+    try
     {
-        return Results.Problem(statusCode: 429, title: "Budget limit reached.", extensions: new Dictionary<string, object?>
+        if (body?["stream"]?.GetValue<bool>() == true)
         {
-            ["error"] = new { code = "BUDGET_HARD_LIMIT", message = "Local monthly limit reached.", retryable = false }
+            await WriteProviderStreamAsync(context, provider, usage, budget, pricing, clock, reservation, request, cancellationToken);
+            await budget.CompleteAsync(reservation.Id, cancellationToken);
+            return Results.Empty;
+        }
+        var response = await provider.CompleteAsync(request, cancellationToken);
+        await budget.CompleteAsync(reservation.Id, cancellationToken);
+        if (response.NativeResponseJson is { } nativeResponse) return Results.Content(nativeResponse, "application/json");
+        return Results.Json(new
+        {
+            id = $"msg-{response.ProviderRequestId}", type = "message", role = "assistant", model,
+            content = new[] { new { type = "text", text = response.Text } }, stop_reason = "end_turn",
+            usage = new { input_tokens = response.InputTokens, output_tokens = response.OutputTokens }
         });
     }
-    if (body?["stream"]?.GetValue<bool>() == true)
+    catch
     {
-        await WriteProviderStreamAsync(context, provider, usage, identity, "anthropic", "anthropic_messages",
-            model, prompt, maxOutput, key, body?.ToJsonString(), cancellationToken);
-        return Results.Empty;
+        await budget.ReleaseAsync(reservation.Id, "Provider request failed", cancellationToken);
+        throw;
     }
-    var response = await provider.CompleteAsync(new ProviderRequest("anthropic", model, "anthropic_messages", prompt, maxOutput, key, body?.ToJsonString()), cancellationToken);
-    await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, tenant, "anthropic", model,
-        response.InputTokens, response.OutputTokens, response.ProviderRequestId,
-        identity.EmployeeId.ToString(), identity.TaskId?.ToString()), cancellationToken);
-    if (response.NativeResponseJson is { } nativeResponse) return Results.Content(nativeResponse, "application/json");
-    return Results.Json(new
-    {
-        id = $"msg-{response.ProviderRequestId}",
-        type = "message",
-        role = "assistant",
-        model,
-        content = new[] { new { type = "text", text = response.Text } },
-        stop_reason = "end_turn",
-        usage = new { input_tokens = response.InputTokens, output_tokens = response.OutputTokens }
-    });
 }).AllowAnonymous();
 
 var admin = app.MapGroup("/admin/keys").AllowAnonymous();
@@ -263,6 +276,26 @@ admin.MapDelete("/{keyRef}", async (string keyRef, IKeyVault keyVault, Cancellat
     await keyVault.DeleteAsync("demo", keyRef, cancellationToken);
     return Results.NoContent();
 });
+
+var budgetAdmin = app.MapGroup("/admin/budget").AllowAnonymous();
+budgetAdmin.MapGet("/{tenantId}/periods/{period}", async (string tenantId, string period,
+    LocalBudgetService budget, CancellationToken cancellationToken) =>
+    Results.Ok(await budget.GetSnapshotAsync(tenantId, period, cancellationToken)))
+    .Produces<BudgetSnapshot>();
+budgetAdmin.MapGet("/{tenantId}/ledger", async (string tenantId, string? period, string? provider,
+    LocalBudgetService budget, CancellationToken cancellationToken) =>
+    Results.Ok(await budget.ListLedgerAsync(tenantId, period, provider, cancellationToken)))
+    .Produces<IReadOnlyList<BudgetLedgerEntry>>();
+budgetAdmin.MapPost("/{tenantId}/reconcile", async (string tenantId, BudgetReconciliationRequest request,
+    LocalBudgetService budget, CancellationToken cancellationToken) =>
+    Results.Ok(await budget.ReconcileAsync(tenantId, request, cancellationToken)))
+    .Produces<BudgetReconciliationResult>();
+budgetAdmin.MapPost("/{tenantId}/corrections", async (string tenantId, BudgetCorrectionRequest request,
+    LocalBudgetService budget, CancellationToken cancellationToken) =>
+    Results.Ok(await budget.CorrectAsync(tenantId, request, cancellationToken)))
+    .Produces<BudgetLedgerEntry>();
+budgetAdmin.MapPost("/expire", async (LocalBudgetService budget, CancellationToken cancellationToken) =>
+    Results.Ok(new { expired = await budget.ExpireAsync(cancellationToken) }));
 
 app.Run();
 
@@ -302,36 +335,89 @@ static string ExtractAnthropicPrompt(JsonNode? body)
     return string.Join("\n", parts);
 }
 
+static async Task<BudgetReservationRecord?> ReserveBudgetAsync(HttpContext context, AgentIdentity identity,
+    string provider, string model, string prompt, int maxOutput, ModelPriceBook priceBook,
+    ModelPricingService pricing, LocalBudgetService budget, TimeProvider clock, CancellationToken cancellationToken)
+{
+    var now = clock.GetUtcNow();
+    PriceQuote quote;
+    try { quote = priceBook.Quote(provider, model, now); }
+    catch (InvalidOperationException exception) when (exception.Message.StartsWith("UNPRICED", StringComparison.Ordinal))
+    {
+        throw new ProviderRequestException(422, "UNPRICED", false, "Model has no effective price snapshot.");
+    }
+    var options = context.RequestServices.GetRequiredService<ProviderHttpOptions>();
+    var maxAttempts = (provider == "openai" ? options.OpenAI.MaxRetries : options.Anthropic.MaxRetries) + 1;
+    var amount = pricing.EstimateReservationMinor(quote, prompt, maxOutput, maxAttempts);
+    return await budget.TryReserveAsync(new BudgetReservationRequest(identity.TenantId.ToString(),
+        ModelPricingService.Period(now), amount, quote.Currency, now.AddMinutes(10),
+        Header(context, "X-Regent-Request-Id") ?? context.TraceIdentifier,
+        identity.EmployeeId.ToString(), identity.TaskId?.ToString(), provider, model, quote), cancellationToken);
+}
+
+static async Task ObserveAttemptAsync(IUsageJournal usage, LocalBudgetService budget, ModelPricingService pricing,
+    TimeProvider clock, BudgetReservationRecord reservation, ProviderAttemptRecord attempt,
+    CancellationToken cancellationToken)
+{
+    var quote = reservation.Quote ?? throw new InvalidOperationException("Reservation has no price snapshot.");
+    var now = clock.GetUtcNow();
+    var amount = pricing.CalculateAmountMinor(quote, attempt.InputTokens, attempt.CachedInputTokens, attempt.OutputTokens);
+    var usageEventId = Guid.NewGuid().ToString();
+    await budget.RecordUsageAsync(new BudgetUsageRecord(reservation.Id, usageEventId, amount, now,
+        attempt.ProviderRequestId, attempt.Attempt, attempt.Succeeded, attempt.ErrorCode), cancellationToken);
+    await usage.AppendAsync(new UsageRecord(now, reservation.TenantId, reservation.Provider, reservation.Model,
+        attempt.InputTokens, attempt.OutputTokens, attempt.ProviderRequestId, reservation.EmployeeId, reservation.TaskId)
+    {
+        ReservationId = reservation.Id, UsageEventId = usageEventId, RequestId = reservation.RequestId,
+        CachedInputTokens = attempt.CachedInputTokens, ReasoningTokens = attempt.ReasoningTokens,
+        AmountMinor = amount, Currency = quote.Currency, PriceVersion = quote.PriceVersion,
+        OccurredPeriod = ModelPricingService.Period(now), PostedPeriod = ModelPricingService.Period(now),
+        Status = attempt.Succeeded ? "Succeeded" : "Failed", Attempt = attempt.Attempt, ErrorCode = attempt.ErrorCode
+    }, cancellationToken);
+}
+
+static IResult BudgetLimitProblem() => Results.Problem(statusCode: 429, title: "Budget limit reached.",
+    extensions: new Dictionary<string, object?>
+    {
+        ["error"] = new { code = "BUDGET_HARD_LIMIT", message = "Monthly committed and reserved amount reached the hard limit.", retryable = false }
+    });
+
 static async Task WriteProviderStreamAsync(HttpContext context, IProviderRouter provider, IUsageJournal usage,
-    AgentIdentity identity, string providerName, string protocol, string model, string prompt, int maxOutput, string? key,
-    string? nativeRequestJson, CancellationToken cancellationToken)
+    LocalBudgetService budget, ModelPricingService pricing, TimeProvider clock, BudgetReservationRecord reservation,
+    ProviderRequest request, CancellationToken cancellationToken)
 {
     context.Response.ContentType = "text/event-stream";
     context.Response.Headers.CacheControl = "no-cache";
     context.Response.Headers["X-Accel-Buffering"] = "no";
     var inputTokens = 0;
+    var cachedInputTokens = 0;
     var outputTokens = 0;
-    var requestId = $"{providerName}-{Guid.NewGuid():N}";
+    var reasoningTokens = 0;
+    var requestId = $"{request.Provider}-{Guid.NewGuid():N}";
+    var completed = false;
     try
     {
-        await foreach (var chunk in provider.StreamAsync(new ProviderRequest(providerName, model, protocol,
-            prompt, maxOutput, key, nativeRequestJson), cancellationToken))
+        await foreach (var chunk in provider.StreamAsync(request, cancellationToken))
         {
             if (!string.IsNullOrWhiteSpace(chunk.EventType))
                 await context.Response.WriteAsync($"event: {chunk.EventType}\n", cancellationToken);
             await context.Response.WriteAsync($"data: {chunk.Data}\n\n", cancellationToken);
             await context.Response.Body.FlushAsync(cancellationToken);
-            UpdateStreamUsage(providerName, chunk.Data, ref requestId, ref inputTokens, ref outputTokens);
+            UpdateStreamUsage(request.Provider, chunk.Data, ref requestId, ref inputTokens, ref cachedInputTokens,
+                ref outputTokens, ref reasoningTokens);
         }
+        completed = true;
     }
     finally
     {
-        await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, identity.TenantId.ToString(), providerName, model,
-            inputTokens, outputTokens, requestId, identity.EmployeeId.ToString(), identity.TaskId?.ToString()), cancellationToken);
+        await ObserveAttemptAsync(usage, budget, pricing, clock, reservation, new ProviderAttemptRecord(1,
+            requestId, inputTokens, cachedInputTokens, outputTokens, reasoningTokens, completed,
+            completed ? null : "STREAM_INTERRUPTED"), cancellationToken);
     }
 }
 
-static void UpdateStreamUsage(string providerName, string data, ref string requestId, ref int inputTokens, ref int outputTokens)
+static void UpdateStreamUsage(string providerName, string data, ref string requestId, ref int inputTokens,
+    ref int cachedInputTokens, ref int outputTokens, ref int reasoningTokens)
 {
     if (data == "[DONE]") return;
     try
@@ -342,17 +428,19 @@ static void UpdateStreamUsage(string providerName, string data, ref string reque
         {
             requestId = root["id"]?.GetValue<string>() ?? requestId;
             inputTokens = root["usage"]?["prompt_tokens"]?.GetValue<int>() ?? inputTokens;
+            cachedInputTokens = root["usage"]?["prompt_tokens_details"]?["cached_tokens"]?.GetValue<int>() ?? cachedInputTokens;
             outputTokens = root["usage"]?["completion_tokens"]?.GetValue<int>() ?? outputTokens;
+            reasoningTokens = root["usage"]?["completion_tokens_details"]?["reasoning_tokens"]?.GetValue<int>() ?? reasoningTokens;
         }
         else if (root["type"]?.GetValue<string>() == "message_start")
         {
             requestId = root["message"]?["id"]?.GetValue<string>() ?? requestId;
             inputTokens = root["message"]?["usage"]?["input_tokens"]?.GetValue<int>() ?? inputTokens;
+            cachedInputTokens = (root["message"]?["usage"]?["cache_read_input_tokens"]?.GetValue<int>() ?? 0)
+                + (root["message"]?["usage"]?["cache_creation_input_tokens"]?.GetValue<int>() ?? 0);
         }
         else if (root["type"]?.GetValue<string>() == "message_delta")
-        {
             outputTokens = root["usage"]?["output_tokens"]?.GetValue<int>() ?? outputTokens;
-        }
     }
     catch (JsonException) { }
 }

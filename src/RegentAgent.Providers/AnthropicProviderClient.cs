@@ -22,7 +22,12 @@ public sealed class AnthropicProviderClient(HttpClient http, ProviderEndpointOpt
         var text = root["content"]?[0]?["text"]?.GetValue<string>() ?? string.Empty;
         var input = root["usage"]?["input_tokens"]?.GetValue<int>() ?? 0;
         var output = root["usage"]?["output_tokens"]?.GetValue<int>() ?? 0;
+        var cached = (root["usage"]?["cache_read_input_tokens"]?.GetValue<int>() ?? 0)
+            + (root["usage"]?["cache_creation_input_tokens"]?.GetValue<int>() ?? 0);
         var id = root["id"]?.GetValue<string>() ?? $"anthropic-{Guid.NewGuid():N}";
-        return new ProviderResponse(id, text, input, output, latencyMs, json);
+        return new ProviderResponse(id, text, input, output, latencyMs, json)
+        {
+            CachedInputTokens = cached
+        };
     }
 }

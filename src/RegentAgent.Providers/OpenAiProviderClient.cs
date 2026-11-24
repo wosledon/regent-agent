@@ -21,7 +21,12 @@ public sealed class OpenAiProviderClient(HttpClient http, ProviderEndpointOption
         var text = root["choices"]?[0]?["message"]?["content"]?.GetValue<string>() ?? string.Empty;
         var input = root["usage"]?["prompt_tokens"]?.GetValue<int>() ?? 0;
         var output = root["usage"]?["completion_tokens"]?.GetValue<int>() ?? 0;
+        var cached = root["usage"]?["prompt_tokens_details"]?["cached_tokens"]?.GetValue<int>() ?? 0;
+        var reasoning = root["usage"]?["completion_tokens_details"]?["reasoning_tokens"]?.GetValue<int>() ?? 0;
         var id = root["id"]?.GetValue<string>() ?? $"openai-{Guid.NewGuid():N}";
-        return new ProviderResponse(id, text, input, output, latencyMs, json);
+        return new ProviderResponse(id, text, input, output, latencyMs, json)
+        {
+            CachedInputTokens = cached, ReasoningTokens = reasoning
+        };
     }
 }
