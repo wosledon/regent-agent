@@ -1,6 +1,6 @@
 # 43 自托管安装与离线升级
 
-- 版本：v0.1（待评审）
+- 版本：v0.2（升级计划、Expand/Contract 与回滚演练脚本已实现）
 - 范围：Tag 源码安装、Compose/systemd、脚本、许可证、离线缓存和升级恢复
 - 对应需求：FR-087、BR-148、BR-149、BR-150、BR-151
 - 对应缺口：G-58
@@ -198,3 +198,11 @@ cp .env.example .env
 4. 完全断网不承诺模型推理。
 5. 升级失败保留旧版本并按既有边界恢复。
 6. 安装、升级和回滚均无秘密泄漏。
+
+### 14.1 当前脚本边界
+
+- `scripts/verify-release.py` 生成绑定 Tag、commit、schema、lockfile、LicenseInventory、SBOM 和迁移哈希的 ReleaseManifest；dry-run 不要求创建 Tag。
+- `scripts/plan-upgrade.py` 只接受不可变 `vMAJOR.MINOR.PATCH` Tag，校验 N/N-1 兼容、备份或风险接受，并生成 Drain/Backup/Expand/Deploy/Smoke/Resume/Contract 顺序。
+- `deploy/sql/controlplane-003-contract.sql` 是显式 Contract 门禁：必须已完成 Expand、Smoke 并设置 `regent.allow_contract=on`，否则拒绝执行。
+- `scripts/upgrade-drill.py` 覆盖成功、Deploy 失败、Smoke 失败和 Contract 失败；Contract 前允许恢复旧镜像/Tag，Contract 后只能前滚纠正迁移。
+- 所有升级与迁移脚本均提供 dry-run；当前未启动容器、未连接数据库、未执行真实生产回滚。

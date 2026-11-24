@@ -1,6 +1,6 @@
 # 39 GitHub CI/CD 与本地部署
 
-- 版本：v0.1（待评审）
+- 版本：v0.2（供应链 CI 与不可变 Action 固定已实现）
 - 范围：GitHub 版本 Tag、GitHub Actions 检查、本地 Docker Compose 构建与回滚
 - 对应需求：FR-082、BR-134、BR-135、BR-136
 - 对应缺口：G-54
@@ -167,6 +167,11 @@ operator_id
 - `LocalDeployment`：主机、Tag、镜像 ID、配置版本、操作者和结果。
 
 本地构建和部署可使用简单脚本，不要求额外控制面服务。
+
+### 11.1 当前自动门禁
+
+- CI supply-chain job 固定所有第三方 Action commit，执行 LicenseInventory/SBOM 一致性、NuGet/pnpm 漏洞、Expand/Contract dry-run、N/N-1 升级演练和 ReleaseManifest 校验。
+- CI 不构建或推送镜像；真实容器构建、本地镜像 ID 和 Compose 联调仍按用户约束未执行。
 
 ## 12. 指标
 

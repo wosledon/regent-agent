@@ -12,15 +12,19 @@ ROOT = Path(__file__).resolve().parents[1]
 SQL_DIR = ROOT / "deploy" / "sql"
 
 
-def migrations():
+def migrations(phase="expand"):
     files = sorted(SQL_DIR.glob("controlplane-*.sql"))
+    if phase == "contract":
+        files = [path for path in files if path.stem.endswith("-contract")]
+    elif phase == "expand":
+        files = [path for path in files if not path.stem.endswith("-contract")]
     if not files:
-        raise SystemExit("No ControlPlane migrations found.")
+        raise SystemExit(f"No ControlPlane {phase} migrations found.")
     return files
 
 
 def version(path):
-    match = re.search(r"controlplane-(\d+)\.sql$", path.name)
+    match = re.search(r"controlplane-(\d+)(?:-contract)?\.sql$", path.name)
     if not match:
         raise SystemExit(f"Invalid migration name: {path.name}")
     return int(match.group(1))
@@ -31,8 +35,9 @@ def main():
     parser.add_argument("--database-url", default=os.environ.get("REGENT_POSTGRES_DSN"))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--check", action="store_true")
+    parser.add_argument("--phase", choices=["expand", "contract"], default="expand")
     args = parser.parse_args()
-    files = migrations()
+    files = migrations(args.phase)
     for path in files:
         sql = path.read_text(encoding="utf-8")
         digest = hashlib.sha256(sql.encode()).hexdigest()
@@ -54,7 +59,7 @@ def main():
     ], text=True).strip() or 0)
     for path in files:
         target = version(path)
-        if target <= latest:
+        if args.phase == "expand" and target <= latest:
             print(f"SKIP: {path.name} already applied")
             continue
         lock = str(6_317_000 + target)

@@ -1,0 +1,8 @@
+{
+  "xunit.abstractions@2.0.3": {
+    "spdx": "Apache-2.0",
+    "source": "https://github.com/xunit/xunit/blob/master/license.txt",
+    "reviewedOn": "2026-11-24",
+    "reason": "Package metadata only provides licenseUrl; upstream xUnit.net license is Apache-2.0."
+  }
+}

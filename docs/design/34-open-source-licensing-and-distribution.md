@@ -1,6 +1,6 @@
 # 34 开源许可与分发
 
-- 版本：v0.1（待评审）
+- 版本：v0.2（自动许可/SBOM/漏洞门禁已接入 CI）
 - 范围：Apache-2.0、LICENSE/NOTICE、SBOM、贡献者、第三方通知、商标和商业服务
 - 对应需求：FR-077、BR-114、BR-115、BR-116、BR-117
 - 对应缺口：G-48
@@ -168,6 +168,14 @@ approved_at
 - 许可证扫描进入 CI 门禁。
 - 撤销、漏洞和许可风险按 digest 传播。
 - 普通员工不能绕过发布许可审核。
+
+### 11.1 当前自动门禁
+
+- `scripts/generate-license-inventory.py` 汇总 NuGet 与 pnpm 直接/传递依赖，生成 `deploy/license-inventory.json`、CycloneDX `deploy/sbom.json` 与 `docs/third-party-notices.md`。
+- 未知、强 copyleft 或未批准许可证直接阻断；少量仅提供 licenseUrl 的包使用 `deploy/license-overrides.json` 记录来源、复核日期和理由。
+- `scripts/check-vulnerabilities.py` 查询 NuGet 漏洞源与 npm Registry，任何已知生产依赖漏洞都会失败并输出报告。
+- `scripts/check-workflow-pins.py` 要求第三方 GitHub Action 使用完整 commit SHA；CI supply-chain job 执行许可、漏洞、迁移、升级演练和 ReleaseManifest 检查。
+- ReleaseManifest 绑定 schema 版本、lockfile、LicenseInventory、SBOM 和迁移 SHA-256；容器构建与真实镜像扫描仍按约束未执行。
 
 ## 12. 租户与模型边界
 
