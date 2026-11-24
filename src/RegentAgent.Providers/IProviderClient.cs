@@ -17,9 +17,13 @@ public sealed record ProviderResponse(
     long LatencyMs,
     string? NativeResponseJson = null);
 
+public sealed record ProviderStreamChunk(string Data, string? EventType = null);
+
 public interface IProviderClient
 {
     string Provider { get; }
     bool CanHandle(string provider, string protocol);
     Task<ProviderResponse> CompleteAsync(ProviderRequest request, CancellationToken cancellationToken);
+    IAsyncEnumerable<ProviderStreamChunk> StreamAsync(ProviderRequest request, CancellationToken cancellationToken) =>
+        throw new ProviderRequestException(null, "PROVIDER_STREAM_UNSUPPORTED", false, "Streaming is not supported by this adapter.");
 }

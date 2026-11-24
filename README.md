@@ -6,7 +6,7 @@ Regent-Agent 是一个自主 AI 公司的开源实现。仓库已完成 Q-001～
 
 - .NET 10 后端 Solution，16 个业务与基础设施项目。
 - ControlPlane：开发认证、租户上下文、Boss 首屏、项目、任务、员工时间线、审批、审计、通知、合规、工作流、记忆、KPI、聊天和评测 API。
-- Gateway：本地/远程可插拔 Provider 路由、OpenAI/Anthropic 原生 JSON 透传适配、用量记录、本地预算和 AES-GCM 信封加密密钥库；KeyVault 可选本地文件或 Postgres `keyvault`（信封加密 + RLS），远程适配默认不启用。
+- Gateway：本地/远程可插拔 Provider 路由、OpenAI/Anthropic 原生 JSON/SSE 透传适配、流式用量记录、本地预算和 AES-GCM 信封加密密钥库；KeyVault 可选本地文件或 Postgres `keyvault`（信封加密 + RLS），远程适配默认不启用。
 - Runner：注册、心跳、任务领取、租约、检查点、完成上报、本地 Agent 执行和本地目录沙箱。
 - 四个服务统一接入可插拔 OpenTelemetry Profile（off/local/otlp/elastic），默认本地 Console 导出。
 - Operations：Operator 开发登录、租户账户、SupportGrant、备份配置和运营审计。

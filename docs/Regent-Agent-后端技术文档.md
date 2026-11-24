@@ -43,7 +43,7 @@
 - 章程提供基础/受监管模板并支持自定义版本；招聘要求岗位 JD，支持拒绝、重试、Boss 录用批准、公平审计和申诉。
 - 个人记忆可沿岗位向上提名为组织候选，原记录、置信度和 taint 保留，候选独立复核后才进入召回。
 - 模型目录支持手工添加、契约测试、版本轮换和绑定引用保护删除；轮换后员工绑定进入 RestoreRequired。管家安全问答和报告实时读取治理事件。
-- Gateway 通过 `ProviderMode` 选择本地或远程适配；OpenAI/Anthropic 适配透传原生 JSON、密钥和错误响应，并实施有界超时、重试和 `Retry-After`。模型目录通过 `IModelCatalogSource` 选择本地或 models.dev 源，快照保存原始 JSON 与 checksum。
+- Gateway 通过 `ProviderMode` 选择本地或远程适配；OpenAI/Anthropic 适配透传原生 JSON、SSE 流式事件、密钥和错误响应，并实施有界超时、重试、`Retry-After` 和流式用量提取。模型目录通过 `IModelCatalogSource` 选择本地或 models.dev 源，快照保存原始 JSON 与 checksum。
 - 外部身份通过 `Identity:Mode` 选择本地测试适配、GitHub Code Exchange 或 OIDC discovery/JWKS 校验；client secret 只从 secret_ref 解析，OIDC 强制校验 issuer、audience、nonce 和已验证邮箱。授权事务短期绑定浏览器 Cookie、state、PKCE 和 nonce，远程新用户必须有效邀请，登录持久化 provider+issuer+subject 绑定。
 - 四个服务统一接入 `RegentAgent.Observability`，按 `off/local/otlp/elastic` Profile 选择 Console 或 OTLP Exporter；指标、日志、追踪可独立开关，启动时校验采样和 endpoint。启用 ASP.NET Core/HTTP 仪表，严格脱敏处理器移除敏感属性、消息体、格式化消息和异常详情，OTLP 导出超时为 5 秒。
 - 审计检查点通过 `IAuditAnchorStore` 选择本地 JSONL 或对象存储锚定，验证时按租户和检查点序号读取并比对 Merkle 根。

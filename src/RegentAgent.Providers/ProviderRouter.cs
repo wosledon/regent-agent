@@ -8,6 +8,7 @@ public sealed class ProviderRoutingOptions
 public interface IProviderRouter
 {
     Task<ProviderResponse> CompleteAsync(ProviderRequest request, CancellationToken cancellationToken);
+    IAsyncEnumerable<ProviderStreamChunk> StreamAsync(ProviderRequest request, CancellationToken cancellationToken);
 }
 
 public sealed class ProviderRouter(IEnumerable<IProviderClient> clients, ProviderRoutingOptions options) : IProviderRouter
@@ -17,13 +18,20 @@ public sealed class ProviderRouter(IEnumerable<IProviderClient> clients, Provide
 
     public async Task<ProviderResponse> CompleteAsync(ProviderRequest request, CancellationToken cancellationToken)
     {
+        return await SelectClient(request).CompleteAsync(request, cancellationToken);
+    }
+
+    public IAsyncEnumerable<ProviderStreamChunk> StreamAsync(ProviderRequest request, CancellationToken cancellationToken) =>
+        SelectClient(request).StreamAsync(request, cancellationToken);
+
+    private IProviderClient SelectClient(ProviderRequest request)
+    {
         var mode = options.Mode.Trim().ToLowerInvariant();
         if (mode is not ("local" or "remote")) throw new InvalidOperationException("Provider mode must be local or remote.");
         var candidates = this.clients.Where(client => mode == "local"
             ? client.Provider.Equals("local", StringComparison.OrdinalIgnoreCase)
             : !client.Provider.Equals("local", StringComparison.OrdinalIgnoreCase));
-        var client = candidates.FirstOrDefault(client => client.CanHandle(request.Provider, request.Protocol))
+        return candidates.FirstOrDefault(client => client.CanHandle(request.Provider, request.Protocol))
             ?? throw new InvalidOperationException($"No provider adapter handles {request.Provider}/{request.Protocol} in {mode} mode.");
-        return await client.CompleteAsync(request, cancellationToken);
     }
 }

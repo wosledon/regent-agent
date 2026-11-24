@@ -17,7 +17,7 @@
 
 | 能力 | 当前实现 | 现有边界 | 需要补齐 |
 |---|---|---|---|
-| 模型调用 | `IProviderClient` + `LocalProviderClient` + `IProviderRouter` | 默认本地，可配置 remote；OpenAI/Anthropic HTTP 适配已实现 | 流式与真实契约冒烟仍按约束不调试 |
+| 模型调用 | `IProviderClient` + `LocalProviderClient` + `IProviderRouter` | 默认本地，可配置 remote；OpenAI/Anthropic HTTP 适配支持原生 JSON、SSE 流式透传、有界读取和用量提取 | 真实契约冒烟仍按约束不调试 |
 | 模型目录 | `IModelCatalogSource` + 本地/models.dev 源 | `ModelOperationsService` 通过端口选择，快照保存 raw JSON/checksum | 自动分档与真实远程同步仍按约束不调试 |
 | 关系存储 | EF Core SQLite/Postgres 分支 | Provider 显式校验；生产禁止启动建表/种子，要求 SchemaVersion 和租户表强制 RLS | 真实 Postgres 迁移与 RLS 集成测试按约束不调试 |
 | 对象存储 | `IObjectStore` + 本地/S3 适配 | `Storage:ObjectProvider` 在组合根选择 Local 或 S3，S3 保存 checksum 元数据 | 真实 RustFS 连通性按约束不调试 |

@@ -105,6 +105,30 @@ public sealed class HttpProviderClientTests
     }
 
     [Fact]
+    public async Task OpenAi_adapter_streams_native_sse_without_buffering()
+    {
+        var handler = new FakeHttpMessageHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("data: {\"id\":\"stream-1\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\ndata: [DONE]\n\n",
+                System.Text.Encoding.UTF8, "text/event-stream")
+        }));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiProviderClient(http, new ProviderEndpointOptions
+        {
+            BaseUrl = "http://localhost/v1", MaxRetries = 0
+        });
+        var chunks = new List<ProviderStreamChunk>();
+        await foreach (var chunk in client.StreamAsync(new ProviderRequest("openai", "gpt-test",
+            "openai_chat_completions", "hello", 32, "secret", "{\"stream\":true,\"messages\":[]}"), CancellationToken.None))
+            chunks.Add(chunk);
+
+        Assert.Equal(2, chunks.Count);
+        Assert.Contains("stream-1", chunks[0].Data);
+        Assert.Equal("[DONE]", chunks[1].Data);
+        Assert.True(JsonNode.Parse(Assert.Single(handler.Requests).Body!)!["stream"]!.GetValue<bool>());
+    }
+
+    [Fact]
     public async Task Provider_router_selects_local_or_remote_by_configuration()
     {
         var local = new LocalProviderClient();

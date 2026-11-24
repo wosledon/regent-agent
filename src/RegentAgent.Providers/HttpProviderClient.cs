@@ -103,6 +103,65 @@ public abstract class HttpProviderClient(HttpClient http, ProviderEndpointOption
         }
     }
 
+    public async IAsyncEnumerable<ProviderStreamChunk> StreamAsync(ProviderRequest request,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (!CanHandle(request.Provider, request.Protocol)) throw new InvalidOperationException("Provider protocol mismatch.");
+        if (string.IsNullOrWhiteSpace(request.ApiKey)) throw new ProviderRequestException(null, "PROVIDER_KEY_MISSING", false, "Provider API key is not configured.");
+        options.Validate(ProviderName);
+        using var response = await OpenStreamingResponseAsync(BuildPayload(request), request.ApiKey, cancellationToken);
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        await foreach (var chunk in ProviderSseReader.ReadAsync(stream, options.MaxResponseBytes, cancellationToken))
+            yield return chunk;
+    }
+
+    private async Task<HttpResponseMessage> OpenStreamingResponseAsync(string payload, string apiKey,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            var baseUrl = options.BaseUrl.EndsWith('/') ? options.BaseUrl : options.BaseUrl + "/";
+            using var message = new HttpRequestMessage(HttpMethod.Post, new Uri(new Uri(baseUrl), EndpointPath));
+            message.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+            ConfigureHeaders(message, apiKey);
+            TimeSpan? retryDelay = null;
+            HttpResponseMessage? response = null;
+            try
+            {
+                response = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                if (response.IsSuccessStatusCode)
+                {
+                    if (response.Content.Headers.ContentType?.MediaType?.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase) == true)
+                        return response;
+                    var invalidBody = await ProviderHttpContent.ReadBoundedAsync(response, options.MaxResponseBytes, cancellationToken);
+                    throw new ProviderRequestException((int)response.StatusCode, "PROVIDER_RESPONSE_INVALID", false,
+                        $"Provider {ProviderName} did not return an event stream.", invalidBody);
+                }
+                var body = await ProviderHttpContent.ReadBoundedAsync(response, options.MaxResponseBytes, cancellationToken);
+                var retryable = ProviderHttpRetry.IsRetryable(response.StatusCode);
+                if (!retryable || attempt >= options.MaxRetries)
+                    throw new ProviderRequestException((int)response.StatusCode, "PROVIDER_REJECTED", retryable,
+                        $"Provider {ProviderName} returned HTTP {(int)response.StatusCode}.", body);
+                retryDelay = ProviderHttpRetry.Delay(response, attempt, options.BaseDelayMilliseconds);
+            }
+            catch (ProviderRequestException) { response?.Dispose(); throw; }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                response?.Dispose();
+                if (attempt >= options.MaxRetries)
+                    throw new ProviderRequestException(GatewayTimeoutStatus, "PROVIDER_TIMEOUT", true, $"Provider {ProviderName} timed out.");
+            }
+            catch (HttpRequestException)
+            {
+                response?.Dispose();
+                if (attempt >= options.MaxRetries)
+                    throw new ProviderRequestException(null, "PROVIDER_UNAVAILABLE", true, $"Provider {ProviderName} is unavailable.");
+            }
+            response?.Dispose();
+            await Task.Delay(retryDelay ?? ProviderHttpRetry.Delay(attempt, options.BaseDelayMilliseconds), cancellationToken);
+        }
+    }
+
     public bool CanHandle(string provider, string protocol) =>
         provider.Equals(ProviderName, StringComparison.OrdinalIgnoreCase)
         && protocol.Equals(ProtocolName, StringComparison.OrdinalIgnoreCase);

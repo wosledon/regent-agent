@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Npgsql;
 using RegentAgent.Gateway.KeyVault;
@@ -144,6 +145,12 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderRouter 
             ["error"] = new { code = "BUDGET_HARD_LIMIT", message = "Local monthly limit reached.", retryable = false }
         });
     }
+    if (body?["stream"]?.GetValue<bool>() == true)
+    {
+        await WriteProviderStreamAsync(context, provider, usage, tenant, "openai", "openai_chat_completions",
+            model, prompt, maxOutput, key, body?.ToJsonString(), cancellationToken);
+        return Results.Empty;
+    }
     var response = await provider.CompleteAsync(new ProviderRequest("openai", model, "openai_chat_completions", prompt, maxOutput, key, body?.ToJsonString()), cancellationToken);
     await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, tenant, "openai", model,
         response.InputTokens, response.OutputTokens, response.ProviderRequestId), cancellationToken);
@@ -174,6 +181,12 @@ app.MapPost("/v1/messages", async (HttpContext context, IProviderRouter provider
         {
             ["error"] = new { code = "BUDGET_HARD_LIMIT", message = "Local monthly limit reached.", retryable = false }
         });
+    }
+    if (body?["stream"]?.GetValue<bool>() == true)
+    {
+        await WriteProviderStreamAsync(context, provider, usage, tenant, "anthropic", "anthropic_messages",
+            model, prompt, maxOutput, key, body?.ToJsonString(), cancellationToken);
+        return Results.Empty;
     }
     var response = await provider.CompleteAsync(new ProviderRequest("anthropic", model, "anthropic_messages", prompt, maxOutput, key, body?.ToJsonString()), cancellationToken);
     await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, tenant, "anthropic", model,
@@ -242,6 +255,61 @@ static string ExtractAnthropicPrompt(JsonNode? body)
     }
     if (body?["system"]?.GetValue<string>() is { } system) parts.Insert(0, system);
     return string.Join("\n", parts);
+}
+
+static async Task WriteProviderStreamAsync(HttpContext context, IProviderRouter provider, IUsageJournal usage,
+    string tenant, string providerName, string protocol, string model, string prompt, int maxOutput, string? key,
+    string? nativeRequestJson, CancellationToken cancellationToken)
+{
+    context.Response.ContentType = "text/event-stream";
+    context.Response.Headers.CacheControl = "no-cache";
+    context.Response.Headers["X-Accel-Buffering"] = "no";
+    var inputTokens = 0;
+    var outputTokens = 0;
+    var requestId = $"{providerName}-{Guid.NewGuid():N}";
+    try
+    {
+        await foreach (var chunk in provider.StreamAsync(new ProviderRequest(providerName, model, protocol,
+            prompt, maxOutput, key, nativeRequestJson), cancellationToken))
+        {
+            if (!string.IsNullOrWhiteSpace(chunk.EventType))
+                await context.Response.WriteAsync($"event: {chunk.EventType}\n", cancellationToken);
+            await context.Response.WriteAsync($"data: {chunk.Data}\n\n", cancellationToken);
+            await context.Response.Body.FlushAsync(cancellationToken);
+            UpdateStreamUsage(providerName, chunk.Data, ref requestId, ref inputTokens, ref outputTokens);
+        }
+    }
+    finally
+    {
+        await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, tenant, providerName, model,
+            inputTokens, outputTokens, requestId), cancellationToken);
+    }
+}
+
+static void UpdateStreamUsage(string providerName, string data, ref string requestId, ref int inputTokens, ref int outputTokens)
+{
+    if (data == "[DONE]") return;
+    try
+    {
+        var root = JsonNode.Parse(data);
+        if (root is null) return;
+        if (providerName == "openai")
+        {
+            requestId = root["id"]?.GetValue<string>() ?? requestId;
+            inputTokens = root["usage"]?["prompt_tokens"]?.GetValue<int>() ?? inputTokens;
+            outputTokens = root["usage"]?["completion_tokens"]?.GetValue<int>() ?? outputTokens;
+        }
+        else if (root["type"]?.GetValue<string>() == "message_start")
+        {
+            requestId = root["message"]?["id"]?.GetValue<string>() ?? requestId;
+            inputTokens = root["message"]?["usage"]?["input_tokens"]?.GetValue<int>() ?? inputTokens;
+        }
+        else if (root["type"]?.GetValue<string>() == "message_delta")
+        {
+            outputTokens = root["usage"]?["output_tokens"]?.GetValue<int>() ?? outputTokens;
+        }
+    }
+    catch (JsonException) { }
 }
 
 static async Task<string?> ResolveKeyAsync(HttpContext context, string tenant, IKeyVault keyVault, CancellationToken cancellationToken)
