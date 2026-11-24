@@ -56,6 +56,7 @@ services:
       Storage__S3__SecretKey: "${Storage__S3__SecretKey:-}"
       Audit__AnchorProvider: "${Audit__AnchorProvider:-Local}"
       Runner__Token: "${Runner__Token:-}"
+      Metering__Token: "${Metering__Token:-}"
       Observability__Profile: "${Observability__Profile:-local}"
       Observability__OtlpEndpoint: "${Observability__OtlpEndpoint:-http://otel-collector:4317}"
       AgentIdentity__KeyPath: "/data/secrets/agent-token.key"
@@ -77,6 +78,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_HTTP_PORTS: "8080"
       Gateway__ProviderMode: "${Gateway__ProviderMode:-local}"
+      Gateway__ControlPlaneUrl: "${Gateway__ControlPlaneUrl:-http://controlplane:8080}"
+      Gateway__MeteringToken: "${Metering__Token:-}"
       Gateway__KeyVault__Provider: "${Gateway__KeyVault__Provider:-local}"
       Gateway__KeyVault__ConnectionString: "${Gateway__KeyVault__ConnectionString:-}"
       Observability__Profile: "${Observability__Profile:-local}"

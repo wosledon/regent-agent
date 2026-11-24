@@ -235,6 +235,7 @@ memory.correction.published
 - 高风险 Finding 立即将 claim 置为 `Quarantined`、移出向量召回并创建独立 CorrectionTask；低风险 Finding 保留召回但降权并标记待复核。
 - 隔离记录理由、范围、复核人和到期时间；申诉保留提交人、理由和时间，解封由独立复核者决定且不删除隔离历史。
 - CorrectionTask 必须有拟纠正内容，复核者不能是原始作者或任务执行者；批准后生成 Verified 新版本、旧版本置为 Superseded，并替换向量和图关系。
+- 个人记忆纠错保留原作者 `Author`，复核者只记录在 CorrectionTask，不改变个人 claim ACL；组织记忆纠错由独立复核者署名。
 - 影响记录支持 Task、Summary、Decision、Review、Release、ExternalAction 和 Context；查询按租户和 claim 隔离。
 - 捕获、检测、隔离、申诉、复核、纠错和影响记录写入哈希审计与 Outbox；高风险检测和隔离写入站内通知。`memory.correction.published` 事件携带新旧 claim ID。
 - 索引重建、隔离复核、纠错批准、发布复核、遗忘/归档/删除和图关系变更要求 Owner 或 Co-Owner 的 `MemoryGovernor` 策略；普通认证用户仍可捕获、检索、报告 Finding 和提交申诉。

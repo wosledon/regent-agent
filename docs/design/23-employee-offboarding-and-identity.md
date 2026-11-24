@@ -182,9 +182,10 @@ Boss 批准并确定生效时间
   → 输出离职证明
 ```
 
-- 生效后立即拒绝新调用。
-- 在途工具调用按策略取消或完成。
-- 本地工作区在快照确认后清理。
+- 生效后立即拒绝新调用；现有 Cookie 会话和 Agent Assignment Token 不能继续访问。
+- Pending/Assigned/InProgress/InReview/Blocked 任务转 `Interrupted`，清除租约所有者、token 和到期时间；审计记录中断任务 ID。
+- 任务认领排除 terminated 员工，旧租约迟到提交返回冲突，不恢复员工权限。
+- 在途工具调用按策略取消或完成；本地工作区在快照确认后清理。
 - 所有步骤幂等并审计。
 
 ## 10. OffboardingHandoff

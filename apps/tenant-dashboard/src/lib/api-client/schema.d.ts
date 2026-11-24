@@ -621,6 +621,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/metering/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ModelUsageProjection"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/tasks/claim": {
         parameters: {
             query?: never;
@@ -12073,6 +12110,7 @@ export interface components {
             capabilities: string[];
             rotatedCredential: string;
             email?: string;
+            sessionKind?: string;
         };
         EmployeeModelBinding: {
             /** Format: uuid */
@@ -12763,6 +12801,28 @@ export interface components {
             consecutiveFailures: number | string;
             /** Format: int32 */
             unavailableMinutes: number | string;
+        };
+        ModelUsageProjection: {
+            usageEventId: string;
+            tenantId: string;
+            employeeId: null | string;
+            taskId: null | string;
+            provider: string;
+            model: string;
+            /** Format: int32 */
+            inputTokens: number | string;
+            /** Format: int32 */
+            outputTokens: number | string;
+            /** Format: int64 */
+            amountMinor: number | string;
+            /** Format: double */
+            minorUnitFactor: number | string;
+            currency: string;
+            priceVersion: string;
+            /** Format: date-time */
+            occurredAt: string;
+            requestId: null | string;
+            succeeded: boolean;
         };
         ObserveReleaseRequest: {
             healthy: boolean;

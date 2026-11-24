@@ -55,4 +55,5 @@ public sealed record EmergencyAccessResult(
     string RotatedCredential)
 {
     public string Email { get; init; } = string.Empty;
+    public string SessionKind { get; init; } = "Emergency";
 }

@@ -62,6 +62,8 @@ cp .env.example .env
 - 初始化迁移与日常启动分离。
 - 安装日志不得包含秘密。
 - 失败时保留诊断信息并返回非零退出码。
+- 生产 ControlPlane 必须配置 `Metering__Token`；Gateway 必须配置 `Gateway__ControlPlaneUrl` 和 `Gateway__MeteringToken`（Compose 默认复用 `Metering__Token`），否则启动失败。
+- Gateway 用量投影队列持久化到 `Gateway__UsageProjectionPath`，ControlPlane 不可用时保留事件并退避重试，不静默丢弃。
 
 ## 4. 仓库脚本
 

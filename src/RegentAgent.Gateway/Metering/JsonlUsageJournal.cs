@@ -19,6 +19,7 @@ public sealed record UsageRecord(
     public int CachedInputTokens { get; init; }
     public int ReasoningTokens { get; init; }
     public long AmountMinor { get; init; }
+    public decimal MinorUnitFactor { get; init; } = 100m;
     public string? Currency { get; init; }
     public string? PriceVersion { get; init; }
     public string? OccurredPeriod { get; init; }

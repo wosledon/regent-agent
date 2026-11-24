@@ -222,6 +222,7 @@ public sealed class IdentityServiceTests
                 owner.TenantId, configured.Credential, "Restore unavailable IdP"), CancellationToken.None);
             Assert.True(used.ExpiresAt >= before.AddMinutes(15) && used.ExpiresAt <= DateTimeOffset.UtcNow.AddMinutes(15).AddSeconds(5));
             Assert.NotEqual(configured.Credential, used.RotatedCredential);
+            Assert.Equal("Emergency", used.SessionKind);
             var session = await new JsonDocumentStore<AuthSessionRecord>(Path.Combine(root, "sessions.json"))
                 .GetAsync(used.SessionId.ToString(), CancellationToken.None);
             Assert.Equal("Emergency", session!.SessionKind);

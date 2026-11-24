@@ -2,13 +2,16 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RegentAgent.AgentIdentity;
 using AgentIdentityModel = RegentAgent.AgentIdentity.AgentIdentity;
+using RegentAgent.Contracts.Billing;
 using RegentAgent.Contracts.Collaboration;
 using RegentAgent.Contracts.Enums;
+using RegentAgent.Contracts.Projects;
 using RegentAgent.Contracts.Runtime;
 using RegentAgent.ControlPlane.Application;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.ControlPlane.Infrastructure;
 using RegentAgent.Storage;
+using RegentAgent.Projects;
 using Xunit;
 
 namespace RegentAgent.ControlPlane.Tests;
@@ -251,7 +254,9 @@ public sealed class CollaborationCoordinationServiceTests
                 new IdempotencyService(db, TimeProvider.System), options, new CursorCodec("test-cursor-key"));
             var identityOptions = new AgentIdentityOptions { SigningKey = new string('k', 32), KeyPath = Path.Combine(root, "agent.key") };
             var tokens = new AgentAssignmentTokenService(new FixedAgentKeyProvider(), identityOptions);
-            var execution = new TaskExecutionService(db, new LocalFileObjectStore(root), TimeProvider.System, audit, tokens);
+            var delivery = new DeliveryService(new JsonDocumentStore<ProjectDeliveryState>(Path.Combine(root, "delivery.json")), TimeProvider.System);
+            var projection = new DeliveryRuntimeProjectionService(db, delivery, audit, TimeProvider.System);
+            var execution = new TaskExecutionService(db, new LocalFileObjectStore(root), TimeProvider.System, audit, tokens, projection, new AllowQuotaGuard());
             AgentIdentityModel Identity(Guid employeeId, Guid taskId) => new(tenantId, employeeId, taskId, "runner",
                 ["tasks:execute"], Guid.NewGuid().ToString("N"), now, now.AddHours(1));
             var outsiderId = db.Employees.Single(x => x.TenantId == OtherTenantId).Id;
@@ -273,6 +278,11 @@ public sealed class CollaborationCoordinationServiceTests
             await Db.DisposeAsync();
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
+    }
+
+    private sealed class AllowQuotaGuard : ITenantQuotaGuard
+    {
+        public Task EnsureAsync(Guid tenantId, string resource, int increment, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class FixedAgentKeyProvider : IAgentIdentityKeyProvider

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RegentAgent.AgentIdentity;
+using RegentAgent.Contracts.Billing;
 using RegentAgent.Contracts.Runtime;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.Storage;
@@ -9,7 +10,8 @@ using RegentAgent.Storage;
 namespace RegentAgent.ControlPlane.Application;
 
 public sealed class TaskExecutionService(RegentDbContext db, IObjectStore objects, TimeProvider clock,
-    AuditIntegrityService audit, AgentAssignmentTokenService assignmentTokens)
+    AuditIntegrityService audit, AgentAssignmentTokenService assignmentTokens,
+    DeliveryRuntimeProjectionService deliveryProjection, ITenantQuotaGuard quotaGuard)
 {
     public async Task<TaskClaim?> ClaimAsync(string runnerId, Guid tenantId, CancellationToken cancellationToken)
     {
@@ -18,7 +20,12 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
             : null;
         var now = clock.GetUtcNow();
         var candidates = await db.Tasks.Where(x => x.TenantId == tenantId &&
-            (x.Status == "Pending" || x.Status == "Assigned" || x.Status == "InProgress")).ToListAsync(cancellationToken);
+            (x.Status == "Pending" || x.Status == "Assigned" || x.Status == "InProgress")
+            && !db.Employees.Any(employee => employee.TenantId == tenantId
+                && employee.State == RegentAgent.Contracts.Enums.EmployeeState.Terminated
+                && (employee.Id == x.AssigneeEmployeeId
+                    || (x.AssigneeEmployeeId == null && employee.DisplayName == x.Assignee))))
+            .ToListAsync(cancellationToken);
         var task = candidates.Where(x => x.Status == "Pending").OrderBy(x => x.UpdatedAt).FirstOrDefault()
             ?? candidates.Where(x => x.Status == "Assigned" && (x.LeaseExpiresAt is null || x.LeaseExpiresAt <= now))
                 .OrderBy(x => x.UpdatedAt).FirstOrDefault()
@@ -31,16 +38,7 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
         }
 
         var employeeName = string.IsNullOrWhiteSpace(task.Assignee) ? "Local Agent" : task.Assignee;
-        var employee = await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.DisplayName == employeeName, cancellationToken);
-        if (employee is null)
-        {
-            employee = new EmployeeRecord
-            {
-                Id = Guid.NewGuid(), TenantId = tenantId, EmployeeNo = $"EMP-{Guid.NewGuid():N}"[..12],
-                DisplayName = employeeName, Position = "Runner", State = RegentAgent.Contracts.Enums.EmployeeState.Active
-            };
-            db.Employees.Add(employee);
-        }
+        var employee = await ResolveEmployeeAsync(tenantId, employeeName, task.AssigneeEmployeeId, cancellationToken);
         task.Assignee = employee.DisplayName;
         task.AssigneeEmployeeId = employee.Id;
         task.AccountableEmployeeId ??= employee.Id;
@@ -62,6 +60,7 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
         }
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        await deliveryProjection.MarkRuntimeClaimedAsync(tenantId, task.Id, cancellationToken);
         var scopes = new HashSet<string>(AgentScopes.Baseline, StringComparer.OrdinalIgnoreCase);
         var period = await db.EmploymentPeriods.AsNoTracking().FirstOrDefaultAsync(
             x => x.TenantId == tenantId && x.EmployeeId == employee.Id && x.EndedAt == null, cancellationToken);
@@ -124,16 +123,7 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
         }
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.TenantId == tenantId && x.Id == task.ProjectId, cancellationToken);
         var employeeName = string.IsNullOrWhiteSpace(task.Assignee) ? "Local Runner" : task.Assignee;
-        var employee = await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.DisplayName == employeeName, cancellationToken);
-        if (employee is null)
-        {
-            employee = new EmployeeRecord
-            {
-                Id = Guid.NewGuid(), TenantId = tenantId, EmployeeNo = $"EMP-{Guid.NewGuid():N}"[..12],
-                DisplayName = employeeName, Position = "Runner", State = RegentAgent.Contracts.Enums.EmployeeState.Active
-            };
-            db.Employees.Add(employee);
-        }
+        var employee = await ResolveEmployeeAsync(tenantId, employeeName, task.AssigneeEmployeeId, cancellationToken);
 
         var workId = Guid.NewGuid();
         db.WorkEntries.Add(new WorkEntryRecord
@@ -160,6 +150,26 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
             new { task_id = task.Id, status = task.Status, artifact_id = artifactId, project = project.Name }, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+        await deliveryProjection.MarkRuntimeCompletedAsync(tenantId, task.Id, cancellationToken);
         return true;
+    }
+
+    private async Task<EmployeeRecord> ResolveEmployeeAsync(Guid tenantId, string employeeName, Guid? employeeId,
+        CancellationToken cancellationToken)
+    {
+        var employee = employeeId is { } id
+            ? await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, cancellationToken)
+            : null;
+        if (employeeId is not null && employee is null) throw new KeyNotFoundException("Assigned employee not found.");
+        employee ??= await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.DisplayName == employeeName, cancellationToken);
+        if (employee is not null) return employee;
+        await quotaGuard.EnsureAsync(tenantId, "employees", 1, cancellationToken);
+        employee = new EmployeeRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, EmployeeNo = $"EMP-{Guid.NewGuid():N}"[..12],
+            DisplayName = employeeName, Position = "Runner", State = RegentAgent.Contracts.Enums.EmployeeState.Active
+        };
+        db.Employees.Add(employee);
+        return employee;
     }
 }

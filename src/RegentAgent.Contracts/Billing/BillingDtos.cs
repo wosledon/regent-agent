@@ -53,6 +53,11 @@ public sealed record BillingSummaryDto(
 public sealed record CheckoutRequest(string PlanId);
 public sealed record LocalPaymentRequest(string Confirmation);
 
+public interface ITenantQuotaGuard
+{
+    Task EnsureAsync(Guid tenantId, string resource, int increment, CancellationToken cancellationToken);
+}
+
 public static class BillingPlans
 {
     public static readonly PlanDefinition Starter = new("starter", "Starter", 0, "CNY", 5, 3, 1_073_741_824, 800_000);

@@ -251,7 +251,9 @@ while not stopping:
 - 认领邀请默认 15 分钟有效，拒绝或超时后推荐下一候选人，不静默强派。
 - 工作项关闭前由控制面校验 DoneEvidence；证据不足时保持 InReview 并返回缺失项。
 - 工作流步骤可以推进 Task，但不能跳过就绪、评审和验收门禁。
-- DecompositionPlan 通过校验和审批后才创建 Ready Task；重拆使用增量事件，不改写旧任务历史。
+- DecompositionPlan 通过校验和审批后才创建 Ready Task；批准后幂等投影为运行时 `TaskRecord`，重复同步不重复建任务或审计。
+- 运行时认领和完成分别回写交付任务为 `Claimed` 和 `ReadyForReview`；提交、独立评审和 DoneEvidence 继续推进同一工作项。
+- 重拆使用增量事件，不改写旧任务历史。
 - 评审按 quorum 分派，Ack、完成和 Debate 截止时间由调度器跟踪；超时改派或升级，不自动通过。
 - 调度使用 TaskTypeDefinition 版本选择能力、Tool Profile、权重和 Done 模板；版本变化后重新评估在途任务。
 - 项目暂停或员工离职时，任务按策略释放、阻塞或重新分配。
@@ -335,6 +337,7 @@ while not stopping:
 
 - MemoryFinding 高风险 claim 立即停止召回，低风险降权复核。
 - CorrectionTask 使用普通租约、WIP 和幂等机制。
+- 个人记忆纠错保留原作者 ACL，复核者不成为个人 claim 的所有者；组织记忆仍由独立复核者署名。
 - 纠正通过 Outbox 传播，索引、缓存和派生摘要失败可重试。
 - 在途任务标记上下文失效并重新检索，已完成工作不自动回滚。
 
@@ -342,7 +345,9 @@ while not stopping:
 
 - 调岗在同一事务切换任职并重算权限，保留员工运行时和工号。
 - 再入职创建新任职周期、会话和凭据，不恢复旧私有记忆。
-- 离职立即撤销新调用，在途任务到安全点后快照、释放和交接。
+- 离职立即撤销新调用；Pending/Assigned/InProgress/InReview/Blocked 任务转 `Interrupted`，清除租约所有者、token 和到期时间，并记录中断任务 ID。
+- 任务认领排除 terminated 员工，旧 Assignment Token 和旧租约不能继续访问或完成。
+- 未知 assignee 自动创建 Runner 员工前必须通过租户员工套餐配额；配额不足时任务保持 Pending 并返回冲突，不产生部分员工记录。
 - Boss 批准前不执行移除订阅，申诉期间保持暂停。
 - 本地工作区在 RustFS 快照确认后清理。
 
@@ -385,7 +390,8 @@ while not stopping:
 
 ### 6.21 软删除、恢复与物理清除
 
-- 软删除通过根记录、tombstone 和 Outbox 立即撤销会话、索引和对象访问。
+- 软删除通过根记录、tombstone 和 Outbox 立即撤销会话、索引和对象访问；租户 ID 按 GUID 值比较，不依赖数据库格式化字符串的大小写。
+- 现有 Cookie 会话和 Agent Token 均 fail closed，仅允许租户恢复和会话管理路径。
 - 恢复只能在窗口内执行，并原子恢复根记录、成员能力和新会话。
 - 物理清除分批幂等，关键步骤失败时保持 Purging 并告警。
 - 备份恢复先重放 tombstone，再开放任何查询。

@@ -152,9 +152,13 @@ public sealed class RuntimePolicyServiceTests
         {
             var service = new RuntimePolicyService(new JsonDocumentStore<RuntimePolicyState>(path), TimeProvider.System);
             var tenantId = Guid.NewGuid();
-            var cost = new CostEntry { SourceEventId = "usage-1", Amount = 12.5m, Currency = "USD", Category = "Model" };
-            var first = await service.RecordCostAsync(tenantId, cost, CancellationToken.None);
-            var repeated = await service.RecordCostAsync(tenantId, cost, CancellationToken.None);
+            var occurredAt = new DateTimeOffset(2026, 11, 20, 10, 0, 0, TimeSpan.Zero);
+            var cost = new CostEntry { SourceEventId = "usage-1", Amount = 12.5m, Currency = "USD", Category = "Model", CreatedAt = occurredAt };
+            var (first, firstCreated) = await service.RecordCostOnceAsync(tenantId, cost, CancellationToken.None);
+            var (repeated, repeatedCreated) = await service.RecordCostOnceAsync(tenantId, cost, CancellationToken.None);
+            Assert.True(firstCreated);
+            Assert.False(repeatedCreated);
+            Assert.Equal(occurredAt, first.CreatedAt);
             await service.RecordCostAsync(tenantId, new CostEntry { SourceEventId = "usage-2", Amount = 88m, Currency = "CNY" }, CancellationToken.None);
             await service.UpdateScheduleAsync(tenantId, new WorkSchedule
             {

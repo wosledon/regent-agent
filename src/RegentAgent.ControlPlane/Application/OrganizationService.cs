@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using RegentAgent.Contracts.Billing;
 using RegentAgent.Contracts.Enums;
 using RegentAgent.Contracts.Organization;
 using RegentAgent.ControlPlane.Data;
@@ -8,7 +9,7 @@ using RegentAgent.ControlPlane.Identity;
 namespace RegentAgent.ControlPlane.Application;
 
 public sealed class OrganizationService(RegentDbContext db, ITenantContext tenant, TimeProvider clock,
-    AuditIntegrityService? audit = null)
+    ITenantQuotaGuard quotaGuard, AuditIntegrityService? audit = null)
 {
     public Task<IReadOnlyList<CharterTemplateDto>> ListCharterTemplatesAsync(CancellationToken cancellationToken) =>
         Task.FromResult<IReadOnlyList<CharterTemplateDto>>([
@@ -73,6 +74,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         var controller = await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.DisplayName == "Controller", cancellationToken);
         if (controller is null)
         {
+            await quotaGuard.EnsureAsync(tenantId, "employees", 1, cancellationToken);
             controller = new EmployeeRecord
             {
                 Id = Guid.NewGuid(), TenantId = tenantId, EmployeeNo = "EMP-0001",
@@ -193,6 +195,19 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
             ?? throw new KeyNotFoundException("Employee not found.");
         employee.State = EmployeeState.Terminated;
         employee.StateReason = "Offboarded after Boss approval";
+        var activeTasks = await db.Tasks.Where(x => x.TenantId == tenantId
+            && (x.AssigneeEmployeeId == employeeId || (x.AssigneeEmployeeId == null && x.Assignee == employee.DisplayName))
+            && (x.Status == "Pending" || x.Status == "Assigned" || x.Status == "InProgress" || x.Status == "InReview" || x.Status == "Blocked"))
+            .ToListAsync(cancellationToken);
+        foreach (var task in activeTasks)
+        {
+            task.Status = "Interrupted";
+            task.LeaseOwner = null;
+            task.LeaseToken = null;
+            task.LeaseExpiresAt = null;
+            task.UpdatedAt = clock.GetUtcNow();
+            task.Version++;
+        }
         var periods = await db.EmploymentPeriods.Where(x => x.TenantId == tenantId && x.EmployeeId == employeeId && x.EndedAt == null).ToListAsync(cancellationToken);
         foreach (var period in periods) period.EndedAt = clock.GetUtcNow();
         foreach (var positionId in periods.Select(x => x.PositionId).Distinct())
@@ -205,7 +220,10 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
             }
         }
         await db.SaveChangesAsync(cancellationToken);
-        await AuditAsync("employee.offboarded", new { employee_id = employeeId, approval_id = approvalId }, cancellationToken);
+        await AuditAsync("employee.offboarded", new
+        {
+            employee_id = employeeId, approval_id = approvalId, interrupted_task_ids = activeTasks.Select(x => x.Id).ToArray()
+        }, cancellationToken);
     }
 
     public async Task<EmployeeSummary> RehireAsync(Guid employeeId, Guid positionId, string approvalId,
@@ -224,6 +242,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         if (approval is null) throw new InvalidOperationException("Human Boss approval is required for rehiring.");
         if (await db.Employees.CountAsync(x => x.TenantId == tenantId && x.State != EmployeeState.Terminated, cancellationToken) >= 20)
             throw new InvalidOperationException("Headcount limit reached.");
+        await quotaGuard.EnsureAsync(tenantId, "employees", 1, cancellationToken);
         employee.State = EmployeeState.Active;
         employee.StateReason = null;
         employee.Position = position.Name;
@@ -321,6 +340,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
             throw new InvalidOperationException("Human Boss approval is required for hiring.");
         if (await db.Employees.CountAsync(x => x.TenantId == tenantId && x.State != EmployeeState.Terminated, cancellationToken) >= 20)
             throw new InvalidOperationException("Headcount limit reached.");
+        await quotaGuard.EnsureAsync(tenantId, "employees", 1, cancellationToken);
         var number = await db.Employees.CountAsync(x => x.TenantId == tenantId, cancellationToken) + 1;
         var employee = new EmployeeRecord
         {

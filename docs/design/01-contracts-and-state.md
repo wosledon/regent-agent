@@ -189,7 +189,7 @@ scopes: space-separated permissions
 | 升级 | `/escalations`、`/escalations/{id}/decision` |
 | 管家 | `/butler/chat`、`/butler/jobs`、`/butler/reports` |
 | 模型 | `/admin/tenants/{tenant}/models`、`/test`、`/rotate`、`DELETE` |
-| 计量 | `/internal/llm-usage`、`/internal/tool-usage`、`/usage/reconcile` |
+| 计量 | `/internal/metering/usage`、`/internal/llm-usage`、`/internal/tool-usage`、`/usage/reconcile` |
 | 运维 | `/gateways/register`、`/gateways/{id}/heartbeat`、`/backups` |
 | Agent 数据面 | `/agent/v1/me`、`/agent/v1/tasks/{id}`、`/agent/v1/conversations`、`/agent/v1/collaboration`、`/agent/v1/agent-runtime`、`/agent/v1/tools` |
 | 运营 | `/ops/tenants`、`/ops/quotas`、`/ops/runner-pools`、`/ops/incidents`、`/ops/support-grants`、`/ops/audit-events` |
@@ -631,6 +631,7 @@ Outbox 发布器可以重试，消费者按 `event_id` 去重。事件顺序只�
 - 长流程使用 saga，不引入跨服务分布式事务。
 - 所有外部调用使用 `correlation_id` 和 `idempotency_key` 贯穿控制面、Runner 和网关。
 - 投影表可以重建；账本、审计和 Outbox 是权威源。
+- Gateway 用量通过持久投影队列投递 `/internal/metering/usage`；控制面按 `usage_event_id` 幂等入账，并校验租户、员工和任务归属。
 - 缓存不得成为授权或预算判断的唯一依据。
 
 ## 9. 契约验收
@@ -651,7 +652,7 @@ Outbox 发布器可以重试，消费者按 `event_id` 去重。事件顺序只�
 14. 租户 token 访问 Ops API 返回 403，Operator token 访问租户 API 返回 403。
 15. 无 SupportGrant 的运营人员无法读取租户业务数据。
 16. SupportGrant 过期、撤销或超范围后访问立即拒绝。
-17. 配额变更事件重复投递不会产生重复同步或状态倒退。
+17. 配额变更事件重复投递不会产生重复同步或状态倒退；员工、项目创建和 Runner 自动建员工在应用服务层执行套餐配额，HTTP、Agent/Tool 与内部认领入口不能绕过。
 18. 运营平台无法通过 API 读取模型密钥明文。
 19. 组织树出现环、多个根或超过 4 层时返回 422。
 20. 同一员工不能同时拥有两个 primary assignment，同一岗位不能有两个主任职者。

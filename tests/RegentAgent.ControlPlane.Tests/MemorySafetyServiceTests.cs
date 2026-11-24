@@ -83,6 +83,25 @@ public sealed class MemorySafetyServiceTests
     }
 
     [Fact]
+    public async Task Personal_correction_preserves_author_acl_and_recall()
+    {
+        using var fixture = new MemoryFixture();
+        var original = await fixture.Memory.CaptureAsync(Tenant, "personal",
+            "Private corrected launch fact", "source:private", 0.9, "trusted", "Alice", CancellationToken.None);
+        var task = await fixture.Safety.CreateCorrectionAsync(original.Id, Tenant,
+            new MemoryCorrectionRequest(original.Id, "Private corrected launch fact verified", "Evidence reviewed", "Boss"), CancellationToken.None);
+
+        var corrected = await fixture.Safety.ApproveCorrectionAsync(task.Id, Tenant,
+            new MemoryCorrectionApprovalRequest("Boss"), CancellationToken.None);
+        var alice = await fixture.Index.SearchHybridAsync(Tenant, "corrected launch", null, 10, "Alice", CancellationToken.None);
+        var bob = await fixture.Index.SearchHybridAsync(Tenant, "corrected launch", null, 10, "Bob", CancellationToken.None);
+
+        Assert.Equal("Alice", corrected.Author);
+        Assert.Contains(alice.Hits, hit => hit.ClaimId == corrected.Id);
+        Assert.DoesNotContain(bob.Hits, hit => hit.ClaimId == corrected.Id);
+    }
+
+    [Fact]
     public async Task Quarantine_appeal_preserves_history_and_can_restore_recall()
     {
         using var fixture = new MemoryFixture();

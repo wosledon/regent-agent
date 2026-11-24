@@ -29,7 +29,7 @@ public sealed class BillingStateRecord
 }
 
 public sealed class BillingService(RegentDbContext db, JsonDocumentStore<BillingStateRecord> store,
-    AuditIntegrityService audit, ISubscriptionPaymentAdapter payments, TimeProvider clock)
+    AuditIntegrityService audit, ISubscriptionPaymentAdapter payments, TimeProvider clock) : ITenantQuotaGuard
 {
     private static readonly SemaphoreSlim Gate = new(1, 1);
 
@@ -38,7 +38,7 @@ public sealed class BillingService(RegentDbContext db, JsonDocumentStore<Billing
         await RequireOwnerAsync(userId, tenantId, cancellationToken);
         var state = await LoadAsync(tenantId, cancellationToken);
         var plan = BillingPlans.Find(state.Subscription.PlanId);
-        var employees = await db.Employees.CountAsync(x => x.TenantId == tenantId, cancellationToken);
+        var employees = await db.Employees.CountAsync(x => x.TenantId == tenantId && x.State != RegentAgent.Contracts.Enums.EmployeeState.Terminated, cancellationToken);
         var projects = await db.Projects.CountAsync(x => x.TenantId == tenantId, cancellationToken);
         var storage = await db.Artifacts.Where(x => x.TenantId == tenantId).SumAsync(x => x.Length, cancellationToken);
         var quotas = new[]
@@ -112,6 +112,9 @@ public sealed class BillingService(RegentDbContext db, JsonDocumentStore<Billing
         finally { Gate.Release(); }
     }
 
+    public Task EnsureAsync(Guid tenantId, string resource, int increment, CancellationToken cancellationToken) =>
+        EnsureQuotaAsync(tenantId, resource, increment, cancellationToken);
+
     public async Task EnsureQuotaAsync(Guid tenantId, string resource, int increment, CancellationToken cancellationToken)
     {
         if (increment < 0) throw new InvalidOperationException("Quota increment cannot be negative.");
@@ -119,7 +122,7 @@ public sealed class BillingService(RegentDbContext db, JsonDocumentStore<Billing
         var plan = BillingPlans.Find(state.Subscription.PlanId);
         var used = resource switch
         {
-            "employees" => await db.Employees.CountAsync(x => x.TenantId == tenantId, cancellationToken),
+            "employees" => await db.Employees.CountAsync(x => x.TenantId == tenantId && x.State != RegentAgent.Contracts.Enums.EmployeeState.Terminated, cancellationToken),
             "projects" => await db.Projects.CountAsync(x => x.TenantId == tenantId, cancellationToken),
             "storage_bytes" => await db.Artifacts.Where(x => x.TenantId == tenantId).SumAsync(x => x.Length, cancellationToken),
             _ => throw new InvalidOperationException("Unknown quota resource.")

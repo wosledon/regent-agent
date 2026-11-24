@@ -80,6 +80,7 @@ corepack pnpm build
 corepack pnpm --filter @regent/tenant-dashboard exec playwright install chromium
 corepack pnpm test:e2e
 python3 scripts/validate-docs.py
+python3 scripts/scenario-trial.py
 python3 scripts/check-offline-cache.py --require
 python3 scripts/capacity-baseline.py --requests 50 --concurrency 8
 python3 scripts/backup-local.py --source src --output data/local-backup.zip
@@ -88,8 +89,8 @@ python3 scripts/restore-local.py data/local-backup.zip --target data/restored
 
 ## 后续能力
 
-- 真实 OpenAI/Anthropic Provider 调用（remote 模式需服务凭据，生产管理端点需管理员凭据）。
-- required SSO、紧急恢复、Operator MFA 和完整人工找回流程。
-- 生产 Postgres/RustFS 适配和迁移 Job。
-- 生产备份、恢复和合规证据导出。
-- 容器化部署资料验证。
+- 真实 OpenAI/Anthropic Provider 与 IdP 连通性验证（remote 模式需服务凭据，生产管理端点需管理员凭据）。
+- Operator MFA、完整人工找回、真实支付/税务/退款和跨环境导入。
+- 生产 Postgres/RustFS 集成、RLS/事务/多 Worker 并发和迁移 Job。
+- 生产备份、WORM/异地恢复、合规证据导出与真实 OTLP/Elastic。
+- 容器构建、部署、升级、回滚、soak 与混沌验证。

@@ -216,9 +216,9 @@ tool_usage:
 
 ### 4.4 投递与去重
 
-- 网关和 Runner 批量上报，至少一次投递。
-- 控制面以 `(source, source_event_id)` 唯一约束去重。
-- 迟到事件允许入库，但按发生时间归属预算周期。
+- 网关和 Runner 批量上报，至少一次投递；Gateway 先写持久投影队列，再由后台任务投递 `/internal/metering/usage`，失败指数退避。
+- 控制面以 `(source, source_event_id)` 唯一约束去重；无效或跨租户员工/任务归属拒绝，不进入 Unallocated 猜测。
+- 迟到事件允许入库，但按发生时间归属预算周期；控制面保留 `occurred_at`，项目支出仅在新事件首次入账时更新。
 - 同一请求重试产生多个 provider 调用时，每个调用有独立 usage_event_id，不合并。
 - 月度供应商账单对账差异超过 1% 或绝对金额阈值时告警。
 
@@ -318,6 +318,8 @@ WHERE tenant_id = :tenant
 - 流式中断在 `finally` 中结算已报告 token；请求失败释放未使用预留，已发生费用不退回。
 - 迟到用量按 `occurred_period` 归属、按 `posted_period` 入账；供应商账单差异追加更正/退款条目，不修改原始账目。
 - `/admin/budget` 提供周期快照、账本、对账、更正和过期端点；生产环境必须配置 Gateway 管理凭据。
+- `HttpUsageProjector` 持久化待投影事件并按 `usage_event_id` 去重；ControlPlane 幂等写成本账本、审计和项目支出，投影响应 204 后 Gateway 才删除队列项。
+- 生产必须显式配置 `Gateway:ControlPlaneUrl`、`Gateway:MeteringToken` 和 ControlPlane `Metering:Token`；内部端点使用 `X-Regent-Metering-Token`。
 - 当前持久化实现面向本地单进程；生产多 Worker 原子预留仍需 Postgres 条件更新，见 15/49。
 
 ## 7. 成本异常

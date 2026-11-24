@@ -21,7 +21,9 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
     {
         if (resourceType.Equals("Tenant", StringComparison.OrdinalIgnoreCase))
         {
-            var tenant = db.Tenants.SingleOrDefault(x => x.Id == tenantId && x.Id.ToString() == resourceId);
+            if (!Guid.TryParse(resourceId, out var requestedTenant) || requestedTenant != tenantId)
+                throw new KeyNotFoundException("Tenant not found.");
+            var tenant = db.Tenants.SingleOrDefault(x => x.Id == tenantId);
             if (tenant is null) throw new KeyNotFoundException("Tenant not found.");
             tenant.Status = "SoftDeleted";
         }

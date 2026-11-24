@@ -394,6 +394,28 @@
         }
       }
     },
+    "/internal/metering/usage": {
+      "post": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelUsageProjection"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
     "/internal/tasks/claim": {
       "post": {
         "tags": [
@@ -12942,6 +12964,9 @@
           },
           "email": {
             "type": "string"
+          },
+          "sessionKind": {
+            "type": "string"
           }
         }
       },
@@ -15468,6 +15493,103 @@
               "string"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "ModelUsageProjection": {
+        "required": [
+          "usageEventId",
+          "tenantId",
+          "employeeId",
+          "taskId",
+          "provider",
+          "model",
+          "inputTokens",
+          "outputTokens",
+          "amountMinor",
+          "minorUnitFactor",
+          "currency",
+          "priceVersion",
+          "occurredAt",
+          "requestId",
+          "succeeded"
+        ],
+        "type": "object",
+        "properties": {
+          "usageEventId": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "employeeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "taskId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "inputTokens": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "outputTokens": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "amountMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "minorUnitFactor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "priceVersion": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requestId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "succeeded": {
+            "type": "boolean"
           }
         }
       },

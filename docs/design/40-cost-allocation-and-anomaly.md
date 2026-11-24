@@ -144,8 +144,9 @@ CostAnomaly:
 
 ## 9. 迟到费用与对账
 
-- 迟到 Usage 归入 `occurred_period`，记账记录 `posted_period`。
-- 未关闭周期直接入账并更新投影。
+- Gateway 用量先进入持久投影队列，异步投递 ControlPlane；失败按 `usage_event_id` 退避重试，成功响应后才删除队列项。
+- 迟到 Usage 归入 `occurred_period`，记账记录 `posted_period`，控制面保留 `occurred_at`。
+- 未关闭周期直接入账并更新投影；同一事件重放不重复入账，也不重复增加项目支出。
 - 已关闭周期的差异在当前开放周期生成更正条目，引用原条目。
 - 月度账单对账生成 `ReconciliationCase`，支持 matched、adjusted、disputed 和 unresolved。
 - 重复 `source_event_id` 去重，不生成异常费用。

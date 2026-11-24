@@ -50,8 +50,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRegentObservability(builder.Configuration);
 builder.Services.AddAgentIdentity(builder.Configuration);
 var runnerToken = builder.Configuration["Runner:Token"];
+var meteringToken = builder.Configuration["Metering:Token"];
 if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(runnerToken))
     throw new InvalidOperationException("Production ControlPlane requires Runner:Token.");
+if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(meteringToken))
+    throw new InvalidOperationException("Production ControlPlane requires Metering:Token.");
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
@@ -107,6 +110,7 @@ builder.Services.AddSingleton(new JsonDocumentStore<LocalizationSettings>("data/
 builder.Services.AddSingleton<LocalizationService>();
 builder.Services.AddSingleton(sp => new DeliveryService(
     new JsonDocumentStore<ProjectDeliveryState>("data/modules/project-delivery.json"), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddScoped<DeliveryRuntimeProjectionService>();
 builder.Services.AddSingleton(sp => new LocalArtifactSigner("data/security/tool-signing-key.pem"));
 builder.Services.AddSingleton(sp => new GovernanceService(
     new JsonDocumentStore<GovernanceState>("data/modules/governance.json"),
@@ -267,6 +271,7 @@ builder.Services.AddSingleton<ISubscriptionPaymentAdapter, LocalSubscriptionPaym
 builder.Services.AddSingleton(new JsonDocumentStore<BillingStateRecord>("data/modules/billing.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<DataExportDto>("data/modules/exports.json"));
 builder.Services.AddScoped<BillingService>();
+builder.Services.AddScoped<ITenantQuotaGuard>(provider => provider.GetRequiredService<BillingService>());
 builder.Services.AddScoped<DataExportService>();
 builder.Services.AddSingleton(new JsonDocumentStore<ButlerReport>("data/modules/butler-reports.json"));
 builder.Services.AddSingleton(new JsonDocumentStore<ReportSchedule>("data/modules/report-schedules.json"));
@@ -442,6 +447,16 @@ app.Use(async (context, next) =>
         {
             var identity = context.RequestServices.GetRequiredService<AgentAssignmentTokenValidator>()
                 .Validate(authorization["Bearer ".Length..].Trim());
+            var db = context.RequestServices.GetRequiredService<RegentDbContext>();
+            var employee = await db.Employees.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.TenantId == identity.TenantId && x.Id == identity.EmployeeId, context.RequestAborted);
+            var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == identity.TenantId, context.RequestAborted);
+            if (employee is null || employee.State == RegentAgent.Contracts.Enums.EmployeeState.Terminated
+                || tenant is null || tenant.Status != "Active")
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return;
+            }
             context.Items[AgentIdentityContext.Key] = identity;
             var claims = new List<Claim>
             {
@@ -463,8 +478,11 @@ app.Use(async (context, next) =>
     }
     if (app.Environment.IsProduction() && context.Request.Path.StartsWithSegments("/internal"))
     {
-        var provided = context.Request.Headers["X-Regent-Runner-Token"].ToString();
-        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(provided), Encoding.UTF8.GetBytes(runnerToken ?? string.Empty)))
+        var isMetering = context.Request.Path.StartsWithSegments("/internal/metering");
+        var header = isMetering ? "X-Regent-Metering-Token" : "X-Regent-Runner-Token";
+        var expected = isMetering ? meteringToken : runnerToken;
+        var provided = context.Request.Headers[header].ToString();
+        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(provided), Encoding.UTF8.GetBytes(expected ?? string.Empty)))
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
@@ -491,6 +509,20 @@ app.Use(async (context, next) =>
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
+        }
+        var db = context.RequestServices.GetRequiredService<RegentDbContext>();
+        var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == session.TenantId, context.RequestAborted);
+        if (tenant is null || tenant.Status != "Active")
+        {
+            var path = context.Request.Path.Value ?? string.Empty;
+            var restoreAllowed = context.Request.Method == HttpMethods.Post
+                && path.StartsWith("/v1/lifecycle/deletions/", StringComparison.Ordinal) && path.EndsWith("/restore", StringComparison.Ordinal);
+            var sessionManagementAllowed = path is "/auth/logout" or "/auth/sessions";
+            if (!restoreAllowed && !sessionManagementAllowed)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
         }
         session.LastActivityAt = now;
         await store.PutAsync(session.Id.ToString(), session, context.RequestAborted);
@@ -858,12 +890,9 @@ api.MapGet("/dashboard/summary", async (DashboardService service, CancellationTo
     Results.Ok(await service.GetAsync(cancellationToken)))
     .Produces<DashboardSummary>(StatusCodes.Status200OK).RequireAuthorization("DashboardRead").WithTags("Dashboard");
 
-api.MapPost("/projects", async (CreateProjectDto input, ProjectService service, BillingService billing,
-    ITenantContext tenantContext, CancellationToken cancellationToken) =>
-{
-    await billing.EnsureQuotaAsync(tenantContext.TenantId.Value, "projects", 1, cancellationToken);
-    return Results.Ok(await service.CreateAsync(input, cancellationToken));
-}).Produces<ProjectDetail>().WithTags("Projects");
+api.MapPost("/projects", async (CreateProjectDto input, ProjectService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.CreateAsync(input, cancellationToken)))
+    .Produces<ProjectDetail>().WithTags("Projects");
 api.MapGet("/projects", async (ProjectService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(cancellationToken)))
     .Produces<IReadOnlyList<ProjectSummary>>(StatusCodes.Status200OK).WithTags("Projects");
@@ -911,22 +940,42 @@ delivery.MapPost("/plans", async (Guid projectId, DecompositionPlan plan, HttpCo
     Results.Ok(await service.ProposePlanAsync(Guid.Parse(CurrentTenant(context)), projectId, plan, cancellationToken)))
     .Produces<DecompositionPlan>().WithTags("Delivery");
 delivery.MapPost("/plans/{planId:guid}/approve", async (Guid projectId, Guid planId, ApprovePlanRequest request,
-    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.ApprovePlanAsync(Guid.Parse(CurrentTenant(context)), projectId, planId,
-        request.Approver, request.ApprovalId, cancellationToken)))
-    .Produces<DecompositionPlan>().WithTags("Delivery");
+    HttpContext context, DeliveryService service, DeliveryRuntimeProjectionService projection,
+    CancellationToken cancellationToken) =>
+{
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    var approved = await service.ApprovePlanAsync(tenantId, projectId, planId,
+        request.Approver, request.ApprovalId, cancellationToken);
+    await projection.SyncApprovedPlanAsync(tenantId, projectId, approved, cancellationToken);
+    return Results.Ok(approved);
+}).Produces<DecompositionPlan>().WithTags("Delivery");
 delivery.MapPost("/tasks/{taskId:guid}/claim", async (Guid projectId, Guid taskId, ClaimTaskRequest request,
-    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.ClaimTaskAsync(Guid.Parse(CurrentTenant(context)), projectId, taskId, request.Assignee, cancellationToken)))
-    .Produces<DeliveryTask>().WithTags("Delivery");
+    HttpContext context, DeliveryService service, DeliveryRuntimeProjectionService projection,
+    CancellationToken cancellationToken) =>
+{
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    var task = await service.ClaimTaskAsync(tenantId, projectId, taskId, request.Assignee, cancellationToken);
+    await projection.SyncRuntimeStatusAsync(tenantId, taskId, "Assigned", task.Assignee ?? string.Empty, cancellationToken);
+    return Results.Ok(task);
+}).Produces<DeliveryTask>().WithTags("Delivery");
 delivery.MapPost("/tasks/{taskId:guid}/submit", async (Guid projectId, Guid taskId, SubmitTaskRequest request,
-    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.SubmitTaskAsync(Guid.Parse(CurrentTenant(context)), projectId, taskId, request.Author, cancellationToken)))
-    .Produces<DeliveryTask>().WithTags("Delivery");
+    HttpContext context, DeliveryService service, DeliveryRuntimeProjectionService projection,
+    CancellationToken cancellationToken) =>
+{
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    var task = await service.SubmitTaskAsync(tenantId, projectId, taskId, request.Author, cancellationToken);
+    await projection.SyncRuntimeStatusAsync(tenantId, taskId, "InReview", task.Assignee ?? string.Empty, cancellationToken);
+    return Results.Ok(task);
+}).Produces<DeliveryTask>().WithTags("Delivery");
 delivery.MapPost("/tasks/{taskId:guid}/complete", async (Guid projectId, Guid taskId, DoneEvidence evidence,
-    HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.CompleteTaskAsync(Guid.Parse(CurrentTenant(context)), projectId, taskId, evidence, cancellationToken)))
-    .Produces<DoneEvidence>().WithTags("Delivery");
+    HttpContext context, DeliveryService service, DeliveryRuntimeProjectionService projection,
+    CancellationToken cancellationToken) =>
+{
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    var completed = await service.CompleteTaskAsync(tenantId, projectId, taskId, evidence, cancellationToken);
+    await projection.SyncRuntimeStatusAsync(tenantId, taskId, "Done", string.Empty, cancellationToken);
+    return Results.Ok(completed);
+}).Produces<DoneEvidence>().WithTags("Delivery");
 delivery.MapPost("/defects", async (Guid projectId, Defect defect, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReportDefectAsync(Guid.Parse(CurrentTenant(context)), projectId, defect, cancellationToken)))
@@ -2104,6 +2153,58 @@ agentApi.MapPost("/conversations/{id}/messages", async (string id, SendMessageRe
     await hub.Clients.Group(identity.TenantId.ToString()).SendAsync("message.created", message, cancellationToken);
     return Results.Ok(message);
 }).WithTags("Agent Chat");
+
+app.MapPost("/internal/metering/usage", async (ModelUsageProjection projection,
+    RuntimePolicyService policy, RegentDbContext db, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+{
+    if (!Guid.TryParse(projection.TenantId, out var tenantId) || string.IsNullOrWhiteSpace(projection.UsageEventId)
+        || string.IsNullOrWhiteSpace(projection.Model) || projection.MinorUnitFactor <= 0 || projection.AmountMinor < 0
+        || string.IsNullOrWhiteSpace(projection.Currency) || projection.Currency.Length != 3
+        || projection.OccurredAt == default || !await db.Tenants.AnyAsync(x => x.Id == tenantId, cancellationToken))
+        throw new InvalidOperationException("Usage projection is invalid.");
+    Guid? employeeId = null;
+    if (!string.IsNullOrWhiteSpace(projection.EmployeeId))
+    {
+        if (!Guid.TryParse(projection.EmployeeId, out var parsedEmployee)
+            || !await db.Employees.AnyAsync(x => x.TenantId == tenantId && x.Id == parsedEmployee, cancellationToken))
+            throw new InvalidOperationException("Usage projection employee is invalid.");
+        employeeId = parsedEmployee;
+    }
+    Guid? taskId = null;
+    Guid? projectId = null;
+    if (!string.IsNullOrWhiteSpace(projection.TaskId))
+    {
+        if (!Guid.TryParse(projection.TaskId, out var parsedTask)) throw new InvalidOperationException("Usage projection task is invalid.");
+        projectId = await db.Tasks.Where(x => x.TenantId == tenantId && x.Id == parsedTask)
+            .Select(x => (Guid?)x.ProjectId).SingleOrDefaultAsync(cancellationToken);
+        if (projectId is null) throw new InvalidOperationException("Usage projection task is invalid.");
+        taskId = parsedTask;
+    }
+    var amount = (decimal)projection.AmountMinor / projection.MinorUnitFactor;
+    var (_, created) = await policy.RecordCostOnceAsync(tenantId, new CostEntry
+    {
+        SourceEventId = projection.UsageEventId, TaskId = taskId, ProjectId = projectId,
+        EmployeeId = employeeId, Model = projection.Model, Amount = amount, Currency = projection.Currency,
+        Category = "Model", AllocationStatus = projectId is null ? "Unallocated" : "Direct",
+        Reason = projection.RequestId, CreatedAt = projection.OccurredAt
+    }, cancellationToken);
+    if (created && projectId is { } projectKey)
+    {
+        var project = await db.Projects.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == projectKey, cancellationToken);
+        if (project is not null)
+        {
+            project.SpentMinor += projection.AmountMinor;
+            project.UpdatedAt = projection.OccurredAt;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
+    await audit.AppendAsync(tenantId, "model.usage.projected", "Gateway", new
+    {
+        usage_event_id = projection.UsageEventId, task_id = taskId, project_id = projectId,
+        amount_minor = projection.AmountMinor, currency = projection.Currency, replayed = !created
+    }, cancellationToken);
+    return Results.NoContent();
+}).AllowAnonymous();
 
 var runnerApi = app.MapGroup("/internal/runners").AllowAnonymous();
 runnerApi.MapPost("/register", (RunnerRegistration registration) => Results.Ok(new { runner_id = registration.RunnerId, status = "registered" }));

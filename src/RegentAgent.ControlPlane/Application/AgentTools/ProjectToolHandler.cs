@@ -1,10 +1,12 @@
 using System.Text.Json;
+using RegentAgent.ControlPlane.Application;
 using RegentAgent.Contracts.Projects;
 using RegentAgent.Projects;
 
 namespace RegentAgent.ControlPlane.Application.AgentTools;
 
-public sealed class ProjectToolHandler(ProjectService projects, DeliveryService delivery) : IAgentToolHandler
+public sealed class ProjectToolHandler(ProjectService projects, DeliveryService delivery,
+    DeliveryRuntimeProjectionService projection) : IAgentToolHandler
 {
     public string ToolName => "project";
     public string Version => "1.0.0";
@@ -25,14 +27,34 @@ public sealed class ProjectToolHandler(ProjectService projects, DeliveryService 
                 AgentToolArguments.OptionalString(arguments, "currency", "CNY")), cancellationToken),
             "add_finding" => await AddFindingAsync(context, arguments, cancellationToken),
             "create_requirement" => await CreateRequirementAsync(context, arguments, cancellationToken),
-            "claim_task" => await delivery.ClaimTaskAsync(context.Identity.TenantId,
-                AgentToolArguments.RequiredGuid(arguments, "projectId"),
-                AgentToolArguments.RequiredGuid(arguments, "taskId"), context.ActorName, cancellationToken),
-            "submit_task" => await delivery.SubmitTaskAsync(context.Identity.TenantId,
-                AgentToolArguments.RequiredGuid(arguments, "projectId"),
-                AgentToolArguments.RequiredGuid(arguments, "taskId"), context.ActorName, cancellationToken),
+            "claim_task" => await ClaimTaskAsync(context, arguments, cancellationToken),
+            "submit_task" => await SubmitTaskAsync(context, arguments, cancellationToken),
             _ => throw new InvalidOperationException("Unsupported project tool operation.")
         };
+    }
+
+    private async Task<object> ClaimTaskAsync(AgentToolContext context, JsonElement arguments,
+        CancellationToken cancellationToken)
+    {
+        var taskId = AgentToolArguments.RequiredGuid(arguments, "taskId");
+        if (context.Identity.TaskId != taskId) throw new UnauthorizedAccessException("Agent token is not scoped to this task.");
+        var task = await delivery.ClaimTaskAsync(context.Identity.TenantId,
+            AgentToolArguments.RequiredGuid(arguments, "projectId"), taskId, context.ActorName, cancellationToken);
+        await projection.SyncRuntimeStatusAsync(context.Identity.TenantId, taskId, "Assigned", task.Assignee ?? string.Empty,
+            cancellationToken);
+        return task;
+    }
+
+    private async Task<object> SubmitTaskAsync(AgentToolContext context, JsonElement arguments,
+        CancellationToken cancellationToken)
+    {
+        var taskId = AgentToolArguments.RequiredGuid(arguments, "taskId");
+        if (context.Identity.TaskId != taskId) throw new UnauthorizedAccessException("Agent token is not scoped to this task.");
+        var task = await delivery.SubmitTaskAsync(context.Identity.TenantId,
+            AgentToolArguments.RequiredGuid(arguments, "projectId"), taskId, context.ActorName, cancellationToken);
+        await projection.SyncRuntimeStatusAsync(context.Identity.TenantId, taskId, "InReview", task.Assignee ?? string.Empty,
+            cancellationToken);
+        return task;
     }
 
     private async Task<object> AddFindingAsync(AgentToolContext context, JsonElement arguments,

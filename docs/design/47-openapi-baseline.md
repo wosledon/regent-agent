@@ -64,6 +64,7 @@
 | `Accept-Language` | UI 和错误文案 locale |
 | `Content-Type` | JSON 请求类型 |
 | `X-CSRF-Token` | Cookie 会话写请求 |
+| `X-Regent-Metering-Token` | Gateway 用量投影服务凭据；生产 ControlPlane 必填 |
 
 - 响应始终返回 `X-Request-Id`。
 - 幂等键在同一租户、同一操作和同一资源范围内唯一。
@@ -150,6 +151,8 @@
 - 所有响应携带 `X-Request-Id`；错误体统一使用 `request_id` 与稳定 `error.code`。
 - 游标使用 HMAC 签名的不透明字符串，绑定租户、筛选条件、快照时间和排序键；跨租户、跨筛选、篡改或过期游标均拒绝。
 - Tenant Dashboard API Client 自动生成幂等键、请求 ID 和版本条件；Runner 完成任务使用稳定幂等键，支持安全重试。
+- `/internal/metering/usage` 使用独立服务凭据，按 `usage_event_id` 业务幂等；成功返回 204，重复事件不重复写成本或项目支出。
+- 紧急访问响应包含 `sessionKind=Emergency`，调用方无需额外查询会话即可识别受限恢复会话。
 
 ## 9. 限流与背压
 
@@ -168,7 +171,7 @@
 | 项目 | `/projects`、`/requirements`、`/tasks`、`/defects` | Projects |
 | 通信聊天 | `/conversations`、`/messages`、`/routes`、`/agent/v1/collaboration` | Communication/Chat |
 | Tool | `/tools/discover`、`/tools/{name}/invoke` | Tool Registry/PEP |
-| 预算账本 | `/budgets`、`/usage`、`/ledger` | ControlPlane Ledger |
+| 预算账本 | `/budgets`、`/usage`、`/ledger`、`/internal/metering/usage` | ControlPlane Ledger |
 | 评测 | `/benchmark-suites`、`/evaluations` | Evaluation |
 | 治理 | `/escalations`、`/compliance`、`/notifications` | Governance |
 | 模型管理 | `/admin/tenants/{tenant}/models` | Gateway Admin |

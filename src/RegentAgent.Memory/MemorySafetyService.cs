@@ -170,7 +170,8 @@ public sealed partial class MemorySafetyService(
             throw new InvalidOperationException("Correction still contains high-risk content or poisoned provenance.");
         var corrected = new MemoryClaim(Guid.NewGuid().ToString("N"), tenantId, current.Scope, task.ProposedContent,
             current.SourceRef, current.Confidence, current.Taint, "Active", current.Version + 1, current.Id,
-            Author: request.ReviewerId, Verified: true, VerifiedAt: clock.GetUtcNow(), CreatedAt: clock.GetUtcNow());
+            Author: current.Scope == "personal" ? current.Author : request.ReviewerId,
+            Verified: true, VerifiedAt: clock.GetUtcNow(), CreatedAt: clock.GetUtcNow());
         await claims.PutAsync(current.Id, current with { Status = "Superseded" }, cancellationToken);
         await claims.PutAsync(corrected.Id, corrected, cancellationToken);
         await index.ReplaceClaimAsync(tenantId, current.Id, corrected, cancellationToken);

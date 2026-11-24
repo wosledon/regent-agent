@@ -209,7 +209,7 @@ LLM 生成 DecompositionPlan，控制面校验：
 Draft → Proposed → Approved → Active → Revised
 ```
 
-Approved 冻结；重拆生成增量方案并保留旧 Task、权重和证据。Approved 后 Task 才进入 Ready，自动拆分不等于自动派工。
+Approved 冻结；重拆生成增量方案并保留旧 Task、权重和证据。Approved 后 Task 才进入 Ready，并通过幂等投影进入运行时任务表；自动拆分不等于自动派工。运行时认领和完成回写交付状态，提交、独立评审和 DoneEvidence 继续沿用同一任务 ID。
 
 ### 6.6 任务模板与工作台账
 
@@ -408,7 +408,8 @@ ReviewFinding 必须包含级别、类别、描述、证据、影响、建议和
 
 - Requirement 就绪、任务认领、提交评审、缺陷复测等事件通过 Outbox 投递。
 - 任务认领使用数据库事务和条件更新保证只有一个成功认领者。
-- 执行任务复用普通 Task lease/fencing，项目管理记录与运行时租约互相引用。
+- 执行任务复用普通 Task lease/fencing，项目管理记录与运行时租约通过同一 task_id 互相引用。
+- 计划批准创建运行时任务，运行时认领/完成回写 `Claimed`/`ReadyForReview`；HTTP 与 Agent `project.claim_task`/`project.submit_task` 使用同一运行时投影，重复投影不重复创建任务或审计。
 - 工作流步骤可以创建或推进 Task，但不能跳过 DoR、评审或验收门禁。
 - 项目定时报告由确定性查询生成，LLM 只负责摘要和风险解释。
 - 项目暂停、取消或成员离职时，在途任务按租约策略暂停、释放或重新分配。

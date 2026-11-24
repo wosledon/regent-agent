@@ -40,6 +40,32 @@ public sealed class DataLifecycleServiceTests
     }
 
     [Fact]
+    public async Task Tenant_soft_delete_accepts_lowercase_guid_and_restore_reactivates_it()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"lifecycle-soft-delete-{Guid.NewGuid():N}");
+        try
+        {
+            await using var db = CreateDb();
+            var tenantId = Guid.NewGuid();
+            db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "soft-delete", CompanyName = "Soft Delete Co" });
+            await db.SaveChangesAsync();
+            var service = new DataLifecycleService(
+                new JsonDocumentStore<DataLifecycleState>(Path.Combine(root, "lifecycle.json")),
+                new LocalFileObjectStore(Path.Combine(root, "objects")), db, TimeProvider.System,
+                new TenantPurgeService(db, new LocalFileObjectStore(Path.Combine(root, "objects")), []));
+
+            var request = await service.SoftDeleteAsync(tenantId, "Tenant", tenantId.ToString("D"), "Owner requested", CancellationToken.None);
+            Assert.Equal("SoftDeleted", (await db.Tenants.SingleAsync()).Status);
+            await service.RestoreAsync(tenantId, request.Id, CancellationToken.None);
+            Assert.Equal("Active", (await db.Tenants.SingleAsync()).Status);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public async Task Legal_hold_blocks_purge_until_released()
     {
         var root = Path.Combine(Path.GetTempPath(), $"lifecycle-{Guid.NewGuid():N}");

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using RegentAgent.ControlPlane.Application;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.ControlPlane.Identity;
+using RegentAgent.Contracts.Billing;
 using RegentAgent.Contracts.Enums;
 using RegentAgent.Contracts.Organization;
 using RegentAgent.Contracts.Primitives;
@@ -18,7 +19,7 @@ public sealed class OrganizationServiceTests
         var tenantId = Guid.NewGuid();
         db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "org-test", CompanyName = "Org Test" });
         await db.SaveChangesAsync();
-        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System);
+        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System, new TestQuotaGuard());
 
         var first = await service.StartCompanyAsync(CancellationToken.None);
         var second = await service.StartCompanyAsync(CancellationToken.None);
@@ -36,7 +37,7 @@ public sealed class OrganizationServiceTests
         var tenantId = Guid.NewGuid();
         db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "depth-test", CompanyName = "Depth Test" });
         await db.SaveChangesAsync();
-        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System);
+        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System, new TestQuotaGuard());
         await service.StartCompanyAsync(CancellationToken.None);
         var positions = await service.ListPositionsAsync(CancellationToken.None);
         Guid? parent = positions.Single().Id;
@@ -60,7 +61,7 @@ public sealed class OrganizationServiceTests
         var tenantId = Guid.NewGuid();
         db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "merge-test", CompanyName = "Merge Test" });
         await db.SaveChangesAsync();
-        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System);
+        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System, new TestQuotaGuard());
         await service.StartCompanyAsync(CancellationToken.None);
         var root = (await service.ListPositionsAsync(CancellationToken.None)).Single();
         var child = await service.CreatePositionAsync(new PositionDto(Guid.Empty, "Child", "Build", [], 0, root.Id, "Open", 1), CancellationToken.None);
@@ -79,7 +80,7 @@ public sealed class OrganizationServiceTests
         var tenantId = Guid.NewGuid();
         db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "offboard-test", CompanyName = "Offboard Test" });
         await db.SaveChangesAsync();
-        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System);
+        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System, new TestQuotaGuard());
         var controller = await service.StartCompanyAsync(CancellationToken.None);
         var approval = new ApprovalRecord
         {
@@ -102,7 +103,7 @@ public sealed class OrganizationServiceTests
         var tenantId = Guid.NewGuid();
         db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "rehire-test", CompanyName = "Rehire Test" });
         await db.SaveChangesAsync();
-        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System);
+        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System, new TestQuotaGuard());
         var controller = await service.StartCompanyAsync(CancellationToken.None);
         var employeeNo = controller.EmployeeNo;
         db.Approvals.Add(new ApprovalRecord
@@ -134,7 +135,7 @@ public sealed class OrganizationServiceTests
         var tenantId = Guid.NewGuid();
         db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "recruit-test", CompanyName = "Recruit Test" });
         await db.SaveChangesAsync();
-        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System);
+        var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System, new TestQuotaGuard());
         var templates = await service.ListCharterTemplatesAsync(CancellationToken.None);
         Assert.Contains(templates, template => template.Id == "regulated");
         var position = await service.CreatePositionAsync(new PositionDto(Guid.Empty, "Engineer", "Build software", [], 0, null, "Open", 1), CancellationToken.None);
@@ -150,6 +151,11 @@ public sealed class OrganizationServiceTests
         new DbContextOptionsBuilder<RegentDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options);
+
+    private sealed class TestQuotaGuard : ITenantQuotaGuard
+    {
+        public Task EnsureAsync(Guid tenantId, string resource, int increment, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
 
     private sealed class TestTenantContext(Guid tenantId) : ITenantContext
     {

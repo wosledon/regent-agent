@@ -24,7 +24,8 @@ Tenant:  Active ↔ Suspended
 ```
 
 - `Suspended` 保留数据且可恢复，不属于删除。
-- `SoftDeleted` 对普通用户和 Agent 不可见。
+- `SoftDeleted` 对普通用户和 Agent 不可见；现有 Cookie 会话和 Assignment Token 均 fail closed，仅保留恢复和会话管理路径。
+- 租户标识按 GUID 值比较，不依赖 SQLite/Postgres 格式化字符串的大小写。
 - `Purged` 表示物理清除完成。
 - 法律保留使用 `PurgedWithLegalHold` 或 `SoftDeletedWithLegalHold`。
 

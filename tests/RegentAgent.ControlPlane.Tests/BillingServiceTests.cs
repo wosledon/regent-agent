@@ -61,6 +61,30 @@ public sealed class BillingServiceTests
         finally { Delete(root); }
     }
 
+    [Fact]
+    public async Task Terminated_employees_do_not_consume_active_employee_quota()
+    {
+        var root = NewRoot();
+        try
+        {
+            await using var db = CreateDb();
+            var (tenant, user) = await SeedOwnerAsync(db);
+            for (var i = 0; i < 5; i++)
+                db.Employees.Add(new EmployeeRecord
+                {
+                    Id = Guid.NewGuid(), TenantId = tenant, EmployeeNo = $"EMP-{i:D4}", DisplayName = $"Employee {i}",
+                    Position = "Engineer", State = i == 4 ? EmployeeState.Terminated : EmployeeState.Active
+                });
+            await db.SaveChangesAsync();
+            var service = CreateService(db, root);
+
+            await service.EnsureQuotaAsync(tenant, "employees", 1, CancellationToken.None);
+            var summary = await service.GetSummaryAsync(user, tenant, CancellationToken.None);
+            Assert.Equal(4, summary.Quotas.Single(x => x.Resource == "employees").Used);
+        }
+        finally { Delete(root); }
+    }
+
     private static BillingService CreateService(RegentDbContext db, string root) => new(db,
         new JsonDocumentStore<BillingStateRecord>(Path.Combine(root, "billing.json")),
         new AuditIntegrityService(db, TimeProvider.System), new LocalSubscriptionPaymentAdapter(), TimeProvider.System);

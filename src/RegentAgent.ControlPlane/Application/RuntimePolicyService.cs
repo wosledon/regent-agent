@@ -11,14 +11,17 @@ public sealed class RuntimePolicyService(JsonDocumentStore<RuntimePolicyState> s
     public Task<RuntimePolicyState> GetAsync(Guid tenantId, CancellationToken cancellationToken) =>
         MutateAsync(tenantId, state => (false, state), cancellationToken);
 
-    public Task<CostEntry> RecordCostAsync(Guid tenantId, CostEntry cost, CancellationToken cancellationToken) =>
-        MutateAsync(tenantId, state =>
+    public async Task<CostEntry> RecordCostAsync(Guid tenantId, CostEntry cost, CancellationToken cancellationToken) =>
+        (await RecordCostOnceAsync(tenantId, cost, cancellationToken)).Entry;
+
+    public async Task<(CostEntry Entry, bool Created)> RecordCostOnceAsync(Guid tenantId, CostEntry cost,
+        CancellationToken cancellationToken) => await MutateAsync(tenantId, state =>
     {
         if (string.IsNullOrWhiteSpace(cost.SourceEventId)) throw new InvalidOperationException("Source event id is required.");
         var existing = state.Costs.FirstOrDefault(x => x.SourceEventId == cost.SourceEventId);
-        if (existing is not null) return (false, existing);
+        if (existing is not null) return (false, (existing, false));
         if (cost.Amount < 0 || cost.Currency.Length != 3) throw new InvalidOperationException("Amount or currency is invalid.");
-        cost.CreatedAt = clock.GetUtcNow();
+        cost.CreatedAt = cost.CreatedAt == default ? clock.GetUtcNow() : cost.CreatedAt;
         if (cost.ProjectId is null)
         {
             var rule = state.AllocationRules.FirstOrDefault(x => x.SourceCategory == cost.Category && x.Currency == cost.Currency);
@@ -31,7 +34,7 @@ public sealed class RuntimePolicyService(JsonDocumentStore<RuntimePolicyState> s
             else cost.AllocationStatus = "Unallocated";
         }
         state.Costs.Add(cost);
-        return (true, cost);
+        return (true, (cost, true));
     }, cancellationToken);
 
     public Task<CostEntry> CorrectCostAsync(Guid tenantId, Guid originalId, decimal delta, string reason,

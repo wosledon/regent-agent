@@ -9,6 +9,7 @@ using RegentAgent.Gateway.KeyVault;
 using RegentAgent.Gateway.Metering;
 using RegentAgent.Observability;
 using RegentAgent.Providers;
+using RegentAgent.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRegentObservability(builder.Configuration);
@@ -70,6 +71,23 @@ builder.Services.AddSingleton<IProviderClient>(provider => provider.GetRequiredS
 builder.Services.AddSingleton<IProviderRouter, ProviderRouter>();
 builder.Services.AddSingleton<IUsageJournal>(sp =>
     new JsonlUsageJournal(builder.Configuration["Gateway:UsagePath"] ?? "data/gateway-usage.jsonl"));
+var configuredControlPlaneUrl = builder.Configuration["Gateway:ControlPlaneUrl"];
+var controlPlaneUrl = string.IsNullOrWhiteSpace(configuredControlPlaneUrl) ? "http://localhost:5080" : configuredControlPlaneUrl;
+var meteringToken = builder.Configuration["Gateway:MeteringToken"];
+if (builder.Environment.IsProduction() && (string.IsNullOrWhiteSpace(meteringToken)
+    || string.IsNullOrWhiteSpace(configuredControlPlaneUrl)
+    || !Uri.TryCreate(configuredControlPlaneUrl, UriKind.Absolute, out _)))
+    throw new InvalidOperationException("Production Gateway requires Gateway:ControlPlaneUrl and Gateway:MeteringToken.");
+builder.Services.AddHttpClient("controlplane-metering", client =>
+{
+    client.BaseAddress = new Uri(controlPlaneUrl);
+    client.Timeout = TimeSpan.FromSeconds(5);
+    if (!string.IsNullOrWhiteSpace(meteringToken)) client.DefaultRequestHeaders.Add("X-Regent-Metering-Token", meteringToken);
+});
+builder.Services.AddSingleton(new JsonDocumentStore<UsageProjectionRecord>(
+    builder.Configuration["Gateway:UsageProjectionPath"] ?? "data/gateway-usage-projections.json"));
+builder.Services.AddSingleton<IUsageProjector, HttpUsageProjector>();
+builder.Services.AddHostedService<UsageProjectionWorker>();
 var keyVaultProvider = builder.Configuration["Gateway:KeyVault:Provider"] ?? "local";
 if (keyVaultProvider.Trim().ToLowerInvariant() is not ("local" or "postgres"))
     throw new InvalidOperationException("Gateway keyvault provider must be local or postgres.");
@@ -180,7 +198,7 @@ app.MapGet("/health/live", () => Results.Ok(new { status = "live" })).AllowAnony
 app.MapGet("/health/ready", () => Results.Ok(new { status = "ready", mode = providerMode })).AllowAnonymous();
 
 app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderRouter provider,
-    IKeyVault keyVault, IUsageJournal usage, LocalBudgetService budget, ModelPriceBook priceBook,
+    IKeyVault keyVault, IUsageJournal usage, IUsageProjector projector, LocalBudgetService budget, ModelPriceBook priceBook,
     ModelPricingService pricing, TimeProvider clock, CancellationToken cancellationToken) =>
 {
     var body = await ReadBodyAsync(context, cancellationToken);
@@ -194,12 +212,12 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderRouter 
     if (reservation is null) return BudgetLimitProblem();
     context.Response.Headers["X-Regent-Budget-Reservation-Id"] = reservation.Id.ToString();
     var request = new ProviderRequest("openai", model, "openai_chat_completions", prompt, maxOutput, key,
-        body?.ToJsonString(), (attempt, token) => ObserveAttemptAsync(usage, budget, pricing, clock, reservation, attempt, token));
+        body?.ToJsonString(), (attempt, token) => ObserveAttemptAsync(usage, projector, budget, pricing, clock, reservation, attempt, token));
     try
     {
         if (body?["stream"]?.GetValue<bool>() == true)
         {
-            await WriteProviderStreamAsync(context, provider, usage, budget, pricing, clock, reservation, request, cancellationToken);
+            await WriteProviderStreamAsync(context, provider, usage, projector, budget, pricing, clock, reservation, request, cancellationToken);
             await budget.CompleteAsync(reservation.Id, cancellationToken);
             return Results.Empty;
         }
@@ -222,7 +240,7 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderRouter 
 }).AllowAnonymous();
 
 app.MapPost("/v1/messages", async (HttpContext context, IProviderRouter provider,
-    IKeyVault keyVault, IUsageJournal usage, LocalBudgetService budget, ModelPriceBook priceBook,
+    IKeyVault keyVault, IUsageJournal usage, IUsageProjector projector, LocalBudgetService budget, ModelPriceBook priceBook,
     ModelPricingService pricing, TimeProvider clock, CancellationToken cancellationToken) =>
 {
     var body = await ReadBodyAsync(context, cancellationToken);
@@ -236,12 +254,12 @@ app.MapPost("/v1/messages", async (HttpContext context, IProviderRouter provider
     if (reservation is null) return BudgetLimitProblem();
     context.Response.Headers["X-Regent-Budget-Reservation-Id"] = reservation.Id.ToString();
     var request = new ProviderRequest("anthropic", model, "anthropic_messages", prompt, maxOutput, key,
-        body?.ToJsonString(), (attempt, token) => ObserveAttemptAsync(usage, budget, pricing, clock, reservation, attempt, token));
+        body?.ToJsonString(), (attempt, token) => ObserveAttemptAsync(usage, projector, budget, pricing, clock, reservation, attempt, token));
     try
     {
         if (body?["stream"]?.GetValue<bool>() == true)
         {
-            await WriteProviderStreamAsync(context, provider, usage, budget, pricing, clock, reservation, request, cancellationToken);
+            await WriteProviderStreamAsync(context, provider, usage, projector, budget, pricing, clock, reservation, request, cancellationToken);
             await budget.CompleteAsync(reservation.Id, cancellationToken);
             return Results.Empty;
         }
@@ -355,9 +373,9 @@ static async Task<BudgetReservationRecord?> ReserveBudgetAsync(HttpContext conte
         identity.EmployeeId.ToString(), identity.TaskId?.ToString(), provider, model, quote), cancellationToken);
 }
 
-static async Task ObserveAttemptAsync(IUsageJournal usage, LocalBudgetService budget, ModelPricingService pricing,
-    TimeProvider clock, BudgetReservationRecord reservation, ProviderAttemptRecord attempt,
-    CancellationToken cancellationToken)
+static async Task ObserveAttemptAsync(IUsageJournal usage, IUsageProjector projector, LocalBudgetService budget,
+    ModelPricingService pricing, TimeProvider clock, BudgetReservationRecord reservation,
+    ProviderAttemptRecord attempt, CancellationToken cancellationToken)
 {
     var quote = reservation.Quote ?? throw new InvalidOperationException("Reservation has no price snapshot.");
     var now = clock.GetUtcNow();
@@ -365,15 +383,18 @@ static async Task ObserveAttemptAsync(IUsageJournal usage, LocalBudgetService bu
     var usageEventId = Guid.NewGuid().ToString();
     await budget.RecordUsageAsync(new BudgetUsageRecord(reservation.Id, usageEventId, amount, now,
         attempt.ProviderRequestId, attempt.Attempt, attempt.Succeeded, attempt.ErrorCode), cancellationToken);
-    await usage.AppendAsync(new UsageRecord(now, reservation.TenantId, reservation.Provider, reservation.Model,
+    var record = new UsageRecord(now, reservation.TenantId, reservation.Provider, reservation.Model,
         attempt.InputTokens, attempt.OutputTokens, attempt.ProviderRequestId, reservation.EmployeeId, reservation.TaskId)
     {
         ReservationId = reservation.Id, UsageEventId = usageEventId, RequestId = reservation.RequestId,
         CachedInputTokens = attempt.CachedInputTokens, ReasoningTokens = attempt.ReasoningTokens,
-        AmountMinor = amount, Currency = quote.Currency, PriceVersion = quote.PriceVersion,
-        OccurredPeriod = ModelPricingService.Period(now), PostedPeriod = ModelPricingService.Period(now),
-        Status = attempt.Succeeded ? "Succeeded" : "Failed", Attempt = attempt.Attempt, ErrorCode = attempt.ErrorCode
-    }, cancellationToken);
+        AmountMinor = amount, MinorUnitFactor = quote.MinorUnitFactor, Currency = quote.Currency,
+        PriceVersion = quote.PriceVersion, OccurredPeriod = ModelPricingService.Period(now),
+        PostedPeriod = ModelPricingService.Period(now), Status = attempt.Succeeded ? "Succeeded" : "Failed",
+        Attempt = attempt.Attempt, ErrorCode = attempt.ErrorCode
+    };
+    await usage.AppendAsync(record, cancellationToken);
+    await projector.ProjectAsync(record, cancellationToken);
 }
 
 static IResult BudgetLimitProblem() => Results.Problem(statusCode: 429, title: "Budget limit reached.",
@@ -383,8 +404,8 @@ static IResult BudgetLimitProblem() => Results.Problem(statusCode: 429, title: "
     });
 
 static async Task WriteProviderStreamAsync(HttpContext context, IProviderRouter provider, IUsageJournal usage,
-    LocalBudgetService budget, ModelPricingService pricing, TimeProvider clock, BudgetReservationRecord reservation,
-    ProviderRequest request, CancellationToken cancellationToken)
+    IUsageProjector projector, LocalBudgetService budget, ModelPricingService pricing, TimeProvider clock,
+    BudgetReservationRecord reservation, ProviderRequest request, CancellationToken cancellationToken)
 {
     context.Response.ContentType = "text/event-stream";
     context.Response.Headers.CacheControl = "no-cache";
@@ -410,7 +431,7 @@ static async Task WriteProviderStreamAsync(HttpContext context, IProviderRouter 
     }
     finally
     {
-        await ObserveAttemptAsync(usage, budget, pricing, clock, reservation, new ProviderAttemptRecord(1,
+        await ObserveAttemptAsync(usage, projector, budget, pricing, clock, reservation, new ProviderAttemptRecord(1,
             requestId, inputTokens, cachedInputTokens, outputTokens, reasoningTokens, completed,
             completed ? null : "STREAM_INTERRUPTED"), cancellationToken);
     }

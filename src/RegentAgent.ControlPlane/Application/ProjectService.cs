@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using RegentAgent.Contracts.Billing;
 using RegentAgent.Contracts.Enums;
 using RegentAgent.Contracts.Primitives;
 using RegentAgent.Contracts.Projects;
@@ -7,7 +8,7 @@ using RegentAgent.ControlPlane.Identity;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class ProjectService(RegentDbContext db, ITenantContext tenant, TimeProvider clock)
+public sealed class ProjectService(RegentDbContext db, ITenantContext tenant, TimeProvider clock, ITenantQuotaGuard quotaGuard)
 {
     public async Task<IReadOnlyList<ProjectSummary>> ListAsync(CancellationToken cancellationToken)
     {
@@ -23,6 +24,7 @@ public sealed class ProjectService(RegentDbContext db, ITenantContext tenant, Ti
     {
         if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Owner) || input.TargetDays <= 0 || input.BudgetMinor < 0)
             throw new InvalidOperationException("Project name, owner, target and budget are required.");
+        await quotaGuard.EnsureAsync(tenant.TenantId.Value, "projects", 1, cancellationToken);
         var record = new ProjectRecord
         {
             Id = Guid.NewGuid(), TenantId = tenant.TenantId.Value, Name = input.Name, Mission = input.Mission,

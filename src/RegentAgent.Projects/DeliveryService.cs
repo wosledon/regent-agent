@@ -280,6 +280,30 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
             return (true, retrospective);
         }, cancellationToken);
 
+    public Task MarkRuntimeClaimedAsync(Guid tenantId, Guid projectId, Guid taskId, string assignee,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+    {
+        var task = Find(state.Tasks, tenantId, taskId);
+        if (task.Status is "Ready" or "Backlog")
+        {
+            task.Assignee = assignee;
+            task.Status = "Claimed";
+        }
+        return (true, task);
+    }, cancellationToken);
+
+    public Task MarkRuntimeCompletedAsync(Guid tenantId, Guid projectId, Guid taskId, string assignee,
+        CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+    {
+        var task = Find(state.Tasks, tenantId, taskId);
+        if (task.Status is "Ready" or "Backlog" or "Claimed")
+        {
+            task.Assignee = assignee;
+            task.Status = "ReadyForReview";
+        }
+        return (true, task);
+    }, cancellationToken);
+
     private async Task<T> MutateAsync<T>(Guid tenantId, Guid projectId,
         Func<ProjectDeliveryState, (bool Changed, T Result)> mutation, CancellationToken cancellationToken)
     {
