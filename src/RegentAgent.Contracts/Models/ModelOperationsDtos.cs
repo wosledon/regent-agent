@@ -5,6 +5,7 @@ public sealed record ModelSnapshot(string Id, DateOnly SnapshotDate, string Sour
     public string? RawJson { get; init; }
     public string? Checksum { get; init; }
     public DateTimeOffset? FetchedAt { get; init; }
+    public string Status { get; init; } = "Current";
 }
 
 public sealed class ModelCatalogEntry
@@ -73,4 +74,5 @@ public sealed class ModelPoolState
     public List<ModelTierAssignment> TierAssignments { get; set; } = [];
     public List<EmployeeModelBinding> Bindings { get; set; } = [];
     public List<ModelUnavailableEvent> UnavailableEvents { get; set; } = [];
+    public string? LastCatalogError { get; set; }
 }

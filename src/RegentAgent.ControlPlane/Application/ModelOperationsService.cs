@@ -22,13 +22,34 @@ public sealed class ModelOperationsService(JsonDocumentStore<ModelPoolState> sto
     public Task<ModelPoolState> GetAsync(Guid tenantId, CancellationToken cancellationToken) =>
         MutateAsync(tenantId, state => (false, state), cancellationToken);
 
-    public Task<ModelPoolState> RefreshSnapshotAsync(Guid tenantId, DateOnly date, CancellationToken cancellationToken) =>
-        MutateAsync(tenantId, async state =>
+    public async Task<ModelPoolState> RefreshSnapshotAsync(Guid tenantId, DateOnly date, CancellationToken cancellationToken)
     {
-        if (state.Snapshots.Any(x => x.SnapshotDate == date)) return (false, state);
-        ApplySnapshot(state, await catalog.FetchAsync(date, cancellationToken));
-        return (true, state);
-    }, cancellationToken);
+        try
+        {
+            return await MutateAsync(tenantId, async state =>
+            {
+                if (state.Snapshots.Any(x => x.SnapshotDate == date)) return (false, state);
+                ApplySnapshot(state, await catalog.FetchAsync(date, cancellationToken));
+                state.LastCatalogError = null;
+                return (true, state);
+            }, cancellationToken);
+        }
+        catch (ModelCatalogSourceException exception)
+        {
+            await MutateAsync(tenantId, state =>
+            {
+                var latest = state.Snapshots.LastOrDefault();
+                if (latest is not null)
+                {
+                    state.Snapshots[^1] = latest with { Status = "Stale" };
+                    state.LastCatalogError = exception.Message;
+                    return (true, state);
+                }
+                return (false, state);
+            }, cancellationToken);
+            throw;
+        }
+    }
 
     public Task<ModelCatalogEntry> AddModelAsync(Guid tenantId, ModelCatalogEntry entry,
         CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
@@ -171,11 +192,27 @@ public sealed class ModelOperationsService(JsonDocumentStore<ModelPoolState> sto
         {
             var entry = state.Catalog.FirstOrDefault(x => x.Provider == price.Provider && x.ModelId == price.ModelId);
             if (entry is null) continue;
-            entry.InputPricePerMillion = price.InputPricePerMillion;
-            entry.OutputPricePerMillion = price.OutputPricePerMillion;
-            entry.Currency = price.Currency;
-            entry.PriceState = "Priced";
-            entry.Source = "manual-price";
+            var filled = false;
+            if (entry.InputPricePerMillion is null)
+            {
+                entry.InputPricePerMillion = price.InputPricePerMillion;
+                filled = true;
+            }
+            if (entry.OutputPricePerMillion is null)
+            {
+                entry.OutputPricePerMillion = price.OutputPricePerMillion;
+                filled = true;
+            }
+            if (string.IsNullOrWhiteSpace(entry.Currency))
+            {
+                entry.Currency = price.Currency;
+                filled = true;
+            }
+            if (filled)
+            {
+                entry.PriceState = "Priced";
+                entry.Source = "manual-price";
+            }
         }
         foreach (var assignment in state.TierAssignments)
         {

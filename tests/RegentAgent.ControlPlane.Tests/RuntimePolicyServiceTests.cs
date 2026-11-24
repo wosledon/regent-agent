@@ -84,7 +84,7 @@ public sealed class RuntimePolicyServiceTests
     }
 
     [Fact]
-    public async Task Model_catalog_source_is_pluggable_and_manual_prices_survive_refresh()
+    public async Task Model_catalog_source_is_pluggable_and_remote_prices_override_manual_values()
     {
         var path = Path.Combine(Path.GetTempPath(), $"model-catalog-source-{Guid.NewGuid():N}.json");
         try
@@ -105,9 +105,38 @@ public sealed class RuntimePolicyServiceTests
             Assert.Equal(2, state.Snapshots.Count);
             Assert.All(state.Snapshots, snapshot => Assert.Equal("stub-catalog", snapshot.Source));
             var model = Assert.Single(state.Catalog);
-            Assert.Equal(0.4m, model.InputPricePerMillion);
-            Assert.Equal(0.8m, model.OutputPricePerMillion);
-            Assert.Equal("manual-price", model.Source);
+            Assert.Equal(1.2m, model.InputPricePerMillion);
+            Assert.Equal(2.4m, model.OutputPricePerMillion);
+            Assert.Equal("stub-catalog", model.Source);
+            Assert.Single(state.ManualPrices);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task Failed_catalog_refresh_keeps_last_snapshot_and_marks_it_stale()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"model-catalog-stale-{Guid.NewGuid():N}.json");
+        try
+        {
+            var source = new StubCatalogSource { Fail = true };
+            var service = new ModelOperationsService(new JsonDocumentStore<ModelPoolState>(path), TimeProvider.System, source);
+            var tenantId = Guid.NewGuid();
+            source.Fail = false;
+            await service.SeedAsync(tenantId, CancellationToken.None);
+            source.Fail = true;
+
+            await Assert.ThrowsAsync<ModelCatalogSourceException>(() => service.RefreshSnapshotAsync(
+                tenantId, new DateOnly(2026, 11, 26), CancellationToken.None));
+            var state = await service.GetAsync(tenantId, CancellationToken.None);
+
+            Assert.Single(state.Snapshots);
+            Assert.Equal("Stale", state.Snapshots[0].Status);
+            Assert.NotNull(state.LastCatalogError);
+            Assert.Single(state.Catalog);
         }
         finally
         {
@@ -149,14 +178,17 @@ public sealed class RuntimePolicyServiceTests
 
     private sealed class StubCatalogSource : IModelCatalogSource
     {
+        public bool Fail { get; set; }
         public string SourceId => "stub-catalog";
 
         public Task<ModelCatalogSnapshot> FetchAsync(DateOnly snapshotDate, CancellationToken cancellationToken)
         {
+            if (Fail) throw new ModelCatalogSourceException("Catalog unavailable.", retryable: true);
             var entry = new ModelCatalogEntry
             {
                 Provider = "OpenAI", ModelId = "custom", Version = "1", Protocol = "OpenAI",
-                PriceState = "Unpriced", Currency = "USD", Tier = "Unassigned", Source = SourceId
+                PriceState = "Priced", InputPricePerMillion = 1.2m, OutputPricePerMillion = 2.4m,
+                Currency = "USD", Tier = "Unassigned", Source = SourceId
             };
             var snapshot = new ModelSnapshot($"stub-{snapshotDate:yyyyMMdd}", snapshotDate, SourceId, true)
             {
