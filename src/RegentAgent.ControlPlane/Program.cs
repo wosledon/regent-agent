@@ -13,6 +13,7 @@ using RegentAgent.AgentIdentity;
 using RegentAgent.Agents;
 using RegentAgent.ControlPlane.Api;
 using RegentAgent.ControlPlane.Application;
+using RegentAgent.ControlPlane.Application.AgentTools;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.ControlPlane.Identity;
 using RegentAgent.ControlPlane.Infrastructure;
@@ -61,6 +62,15 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, TenantContext>();
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<CollaborationVisualizationService>();
+builder.Services.AddScoped<AgentToolCatalog>();
+builder.Services.AddScoped<AgentToolInvocationService>();
+builder.Services.AddScoped<IAgentToolHandler, ChatToolHandler>();
+builder.Services.AddScoped<IAgentToolHandler, TaskToolHandler>();
+builder.Services.AddScoped<IAgentToolHandler, MemoryToolHandler>();
+builder.Services.AddScoped<IAgentToolHandler, WorkflowToolHandler>();
+builder.Services.AddScoped<IAgentToolHandler, ProjectToolHandler>();
+builder.Services.AddScoped<IAgentToolHandler, OrganizationToolHandler>();
+builder.Services.AddScoped<IAgentToolHandler, ImprovementToolHandler>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<ApprovalService>();
@@ -398,6 +408,7 @@ app.Use(async (context, next) =>
             var claims = new List<Claim>
             {
                 new(ClaimTypes.NameIdentifier, identity.EmployeeId.ToString()),
+                new(ClaimTypes.Name, identity.EmployeeId.ToString()),
                 new("tenant_id", identity.TenantId.ToString()),
                 new("employee_id", identity.EmployeeId.ToString()),
                 new("actor_type", "Agent"),
@@ -545,7 +556,7 @@ app.MapPost("/auth/dev-agent-token", async (DevAgentTokenRequest request, Regent
         return Results.NotFound();
     if (request.TaskId is { } taskId && !await db.Tasks.AnyAsync(x => x.TenantId == request.TenantId && x.Id == taskId, cancellationToken))
         return Results.NotFound();
-    var scopes = request.Scopes is { Count: > 0 } ? request.Scopes : new[] { "tasks:execute", "chat:write", "infer:employee" };
+    var scopes = request.Scopes is { Count: > 0 } ? request.Scopes : AgentScopes.Baseline;
     var issued = tokens.Issue(new AgentAssignmentRequest(request.TenantId, request.EmployeeId, request.TaskId,
         request.RunnerId ?? "dev-runner", scopes));
     return Results.Ok(new { token = issued.Token, identity = issued.Identity });
@@ -1680,6 +1691,13 @@ evaluationQa.MapPost("/gate", async (EvaluationGateRequest request, HttpContext 
 
 var agentApi = app.MapGroup("/agent/v1").RequireAuthorization("Agent");
 agentApi.MapGet("/me", (HttpContext context) => Results.Ok(CurrentAgent(context))).WithTags("Agent");
+agentApi.MapGet("/tools/discover", async (HttpContext context, AgentToolInvocationService tools,
+    CancellationToken cancellationToken) => Results.Ok(await tools.DiscoverAsync(CurrentAgent(context), cancellationToken)))
+    .WithTags("Agent Tools");
+agentApi.MapPost("/tools/invoke", async (AgentToolInvocationRequest request, HttpContext context,
+    AgentToolInvocationService tools, CancellationToken cancellationToken) =>
+    Results.Ok(await tools.InvokeAsync(CurrentAgent(context), request, cancellationToken)))
+    .Produces<AgentToolInvocationResult>().WithTags("Agent Tools");
 agentApi.MapPost("/tasks/{id:guid}/checkpoint", async (Guid id, TaskCheckpoint checkpoint, HttpContext context,
     TaskExecutionService service, CancellationToken cancellationToken) =>
 {

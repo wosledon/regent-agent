@@ -81,6 +81,50 @@ test('employee Agent creates groups and the control plane observes the trace', a
   await page.screenshot({ path: '/tmp/regent-collaboration-group.png', fullPage: true });
 });
 
+test('employee Agent invokes governed tools with task-scoped identity', async ({ page }) => {
+  await page.goto('/login');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+  const employees = await (await page.request.get('/v1/employees')).json();
+  const engineering = employees.find((employee: { displayName: string }) => employee.displayName === 'Engineering Lead');
+  const timeline = await (await page.request.get(`/v1/employees/${engineering.id}/timeline`)).json();
+  const taskId = timeline.entries.find((entry: { taskId?: string }) => entry.taskId)?.taskId;
+  const tokenResponse = await page.request.post('/auth/dev-agent-token', {
+    data: { tenantId: '11111111-1111-1111-1111-111111111111', employeeId: engineering.id, taskId }
+  });
+  const token = (await tokenResponse.json()).token as string;
+  const headers = { Authorization: `Bearer ${token}` };
+  const discovered = await (await page.request.get('/agent/v1/tools/discover', { headers })).json();
+  expect(discovered.some((tool: { name: string }) => tool.name === 'memory.capture')).toBeTruthy();
+
+  const invoke = async (idempotencyKey: string) => page.request.post('/agent/v1/tools/invoke', {
+    headers,
+    data: {
+      toolName: 'memory.capture', version: '1.0.0', capability: 'memory.write',
+      taskGrant: '{"capabilities":["memory.write"]}', taint: 'Low', idempotencyKey,
+      argumentsJson: JSON.stringify({
+        operation: 'capture', scope: 'personal', content: 'Agent tool memory smoke evidence',
+        sourceRef: 'task:agent-tool-smoke', confidence: 0.8, taint: 'trusted'
+      })
+    }
+  });
+  const first = await (await invoke('agent-tool-smoke-1')).json();
+  const repeated = await (await invoke('agent-tool-smoke-1')).json();
+  expect(first.allowed).toBeTruthy();
+  expect(first.success).toBeTruthy();
+  expect(first.result.author).toBe('Engineering Lead');
+  expect(first.auditHash).toBeTruthy();
+  expect(repeated.auditHash).toBe(first.auditHash);
+
+  const denied = await page.request.post('/agent/v1/tools/invoke', {
+    headers,
+    data: {
+      toolName: 'organization.create_position', version: '1.0.0', capability: 'org.design',
+      taskGrant: '*', taint: 'Low', argumentsJson: JSON.stringify({ operation: 'create_position' })
+    }
+  });
+  expect(denied.status()).toBe(403);
+});
+
 test('collaboration office remains usable on a mobile viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/login');

@@ -45,10 +45,21 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
         task.Attempt += 1;
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
-        var scopes = new[] { "tasks:execute", "chat:write", "infer:employee" };
-        var assignment = assignmentTokens.Issue(new AgentAssignmentRequest(tenantId, employee.Id, task.Id, runnerId, scopes));
+        var scopes = new HashSet<string>(AgentScopes.Baseline, StringComparer.OrdinalIgnoreCase);
+        var period = await db.EmploymentPeriods.AsNoTracking().FirstOrDefaultAsync(
+            x => x.TenantId == tenantId && x.EmployeeId == employee.Id && x.EndedAt == null, cancellationToken);
+        if (period is not null)
+        {
+            var position = await db.Positions.AsNoTracking().SingleOrDefaultAsync(
+                x => x.TenantId == tenantId && x.Id == period.PositionId, cancellationToken);
+            if (position is not null)
+                foreach (var capability in JsonSerializer.Deserialize<string[]>(position.CapabilitiesJson) ?? [])
+                    scopes.Add(capability);
+        }
+        var scopeArray = scopes.ToArray();
+        var assignment = assignmentTokens.Issue(new AgentAssignmentRequest(tenantId, employee.Id, task.Id, runnerId, scopeArray));
         return new TaskClaim(task.Id, task.Title, task.TaskType, task.ProjectId, task.LeaseToken,
-            task.LeaseExpiresAt.Value, tenantId, employee.Id, assignment.Token, assignment.Identity.ExpiresAt, scopes, runnerId);
+            task.LeaseExpiresAt.Value, tenantId, employee.Id, assignment.Token, assignment.Identity.ExpiresAt, scopeArray, runnerId);
     }
 
     public async Task<bool> CheckpointAsync(Guid taskId, TaskCheckpoint checkpoint, Guid tenantId,
