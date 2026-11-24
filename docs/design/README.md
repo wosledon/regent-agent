@@ -57,6 +57,7 @@
 | [49 核心 ERD 与数据字典](./49-core-data-model-and-erd.md) | 核心实体关系、Schema 所有权、RLS、保留和数据字典 |
 | [50 可插拔外部适配与本地默认](./50-pluggable-adapters.md) | Provider、目录、存储、身份、可观测性、锚定、备份与部署适配 |
 | [设计一致性审计](../design-conformance-audit.md) | 01～50 逐模块实现证据、修复偏差与剩余生产边界 |
+| [Agent 优先理念审计](../agent-first-audit.md) | 控制面/数据面边界、员工身份、群聊与 Gateway 的 Agent 原生偏差 |
 | [ADR 架构决策记录](../adr/README.md) | 已接受技术决策、背景、结果、替代方案和关联设计 |
 
 ## 2. 设计缺口登记

@@ -9,7 +9,9 @@ public sealed record UsageRecord(
     string Model,
     int InputTokens,
     int OutputTokens,
-    string ProviderRequestId);
+    string ProviderRequestId,
+    string? EmployeeId = null,
+    string? TaskId = null);
 
 public interface IUsageJournal
 {

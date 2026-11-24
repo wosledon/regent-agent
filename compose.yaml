@@ -58,10 +58,13 @@ services:
       Runner__Token: "${Runner__Token:-}"
       Observability__Profile: "${Observability__Profile:-local}"
       Observability__OtlpEndpoint: "${Observability__OtlpEndpoint:-http://otel-collector:4317}"
+      AgentIdentity__KeyPath: "/data/secrets/agent-token.key"
       Frontend__Origins__0: "http://localhost:5173"
       Frontend__Origins__1: "http://localhost:4173"
     ports:
       - "5080:8080"
+    volumes:
+      - agent-identity-data:/data/secrets
 
   gateway:
     build:
@@ -78,8 +81,11 @@ services:
       Gateway__KeyVault__ConnectionString: "${Gateway__KeyVault__ConnectionString:-}"
       Observability__Profile: "${Observability__Profile:-local}"
       Observability__OtlpEndpoint: "${Observability__OtlpEndpoint:-http://otel-collector:4317}"
+      AgentIdentity__KeyPath: "/data/secrets/agent-token.key"
     ports:
       - "5081:8080"
+    volumes:
+      - agent-identity-data:/data/secrets
     depends_on:
       - controlplane
 
@@ -142,3 +148,4 @@ services:
 volumes:
   postgres-data:
   rustfs-data:
+  agent-identity-data:

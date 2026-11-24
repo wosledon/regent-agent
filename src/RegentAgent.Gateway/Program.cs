@@ -2,7 +2,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.IdentityModel.Tokens;
 using Npgsql;
+using RegentAgent.AgentIdentity;
 using RegentAgent.Gateway.KeyVault;
 using RegentAgent.Gateway.Metering;
 using RegentAgent.Observability;
@@ -10,15 +12,13 @@ using RegentAgent.Providers;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRegentObservability(builder.Configuration);
+builder.Services.AddAgentIdentity(builder.Configuration);
 builder.Services.AddOpenApi("v1");
 builder.Services.AddProblemDetails();
 var providerMode = builder.Configuration["Gateway:ProviderMode"] ?? "local";
 if (providerMode.Trim().ToLowerInvariant() is not ("local" or "remote"))
     throw new InvalidOperationException("Gateway provider mode must be local or remote.");
-var gatewayServiceToken = builder.Configuration["Gateway:ServiceToken"];
 var gatewayAdminToken = builder.Configuration["Gateway:AdminToken"];
-if (providerMode.Equals("remote", StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(gatewayServiceToken))
-    throw new InvalidOperationException("Remote Gateway mode requires Gateway:ServiceToken.");
 if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(gatewayAdminToken))
     throw new InvalidOperationException("Production Gateway requires Gateway:AdminToken.");
 var providerHttpOptions = new ProviderHttpOptions
@@ -136,11 +136,22 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 app.Use(async (context, next) =>
 {
     var path = context.Request.Path.Value ?? string.Empty;
-    if (providerMode.Equals("remote", StringComparison.OrdinalIgnoreCase) && path.StartsWith("/v1/", StringComparison.Ordinal))
+    if (path.StartsWith("/v1/", StringComparison.Ordinal))
     {
-        var expected = $"Bearer {gatewayServiceToken}";
-        if (!CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(context.Request.Headers.Authorization.ToString()),
-                Encoding.UTF8.GetBytes(expected)))
+        var authorization = context.Request.Headers.Authorization.ToString();
+        if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+        try
+        {
+            var identity = context.RequestServices.GetRequiredService<AgentAssignmentTokenValidator>()
+                .Validate(authorization["Bearer ".Length..].Trim(), "regent-gateway");
+            if (!identity.Scopes.Contains("infer:employee")) throw new SecurityTokenException("Employee inference scope is required.");
+            context.Items[AgentIdentityContext.Key] = identity;
+        }
+        catch (SecurityTokenException)
         {
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
@@ -164,11 +175,12 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderRouter 
 {
     var body = await ReadBodyAsync(context, cancellationToken);
     var model = Header(context, "X-Regent-Model") ?? body?["model"]?.GetValue<string>() ?? "local-cheap";
-    var tenant = Header(context, "X-Regent-Tenant") ?? "demo";
+    var identity = AgentIdentityContext.Required(context.Items);
+    var tenant = identity.TenantId.ToString();
     var prompt = ExtractOpenAiPrompt(body);
     var maxOutput = body?["max_tokens"]?.GetValue<int?>() ?? 512;
     var key = await ResolveKeyAsync(context, tenant, keyVault, cancellationToken);
-    if (!await budget.TryReserveAsync(Math.Max(1, maxOutput), cancellationToken))
+    if (!await budget.TryReserveAsync(tenant, Math.Max(1, maxOutput), cancellationToken))
     {
         return Results.Problem(statusCode: 429, title: "Budget limit reached.", extensions: new Dictionary<string, object?>
         {
@@ -177,13 +189,14 @@ app.MapPost("/v1/chat/completions", async (HttpContext context, IProviderRouter 
     }
     if (body?["stream"]?.GetValue<bool>() == true)
     {
-        await WriteProviderStreamAsync(context, provider, usage, tenant, "openai", "openai_chat_completions",
+        await WriteProviderStreamAsync(context, provider, usage, identity, "openai", "openai_chat_completions",
             model, prompt, maxOutput, key, body?.ToJsonString(), cancellationToken);
         return Results.Empty;
     }
     var response = await provider.CompleteAsync(new ProviderRequest("openai", model, "openai_chat_completions", prompt, maxOutput, key, body?.ToJsonString()), cancellationToken);
     await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, tenant, "openai", model,
-        response.InputTokens, response.OutputTokens, response.ProviderRequestId), cancellationToken);
+        response.InputTokens, response.OutputTokens, response.ProviderRequestId,
+        identity.EmployeeId.ToString(), identity.TaskId?.ToString()), cancellationToken);
     if (response.NativeResponseJson is { } nativeResponse) return Results.Content(nativeResponse, "application/json");
     return Results.Json(new
     {
@@ -201,11 +214,12 @@ app.MapPost("/v1/messages", async (HttpContext context, IProviderRouter provider
 {
     var body = await ReadBodyAsync(context, cancellationToken);
     var model = Header(context, "X-Regent-Model") ?? body?["model"]?.GetValue<string>() ?? "local-cheap";
-    var tenant = Header(context, "X-Regent-Tenant") ?? "demo";
+    var identity = AgentIdentityContext.Required(context.Items);
+    var tenant = identity.TenantId.ToString();
     var prompt = ExtractAnthropicPrompt(body);
     var maxOutput = body?["max_tokens"]?.GetValue<int?>() ?? 512;
     var key = await ResolveKeyAsync(context, tenant, keyVault, cancellationToken);
-    if (!await budget.TryReserveAsync(Math.Max(1, maxOutput), cancellationToken))
+    if (!await budget.TryReserveAsync(tenant, Math.Max(1, maxOutput), cancellationToken))
     {
         return Results.Problem(statusCode: 429, title: "Budget limit reached.", extensions: new Dictionary<string, object?>
         {
@@ -214,13 +228,14 @@ app.MapPost("/v1/messages", async (HttpContext context, IProviderRouter provider
     }
     if (body?["stream"]?.GetValue<bool>() == true)
     {
-        await WriteProviderStreamAsync(context, provider, usage, tenant, "anthropic", "anthropic_messages",
+        await WriteProviderStreamAsync(context, provider, usage, identity, "anthropic", "anthropic_messages",
             model, prompt, maxOutput, key, body?.ToJsonString(), cancellationToken);
         return Results.Empty;
     }
     var response = await provider.CompleteAsync(new ProviderRequest("anthropic", model, "anthropic_messages", prompt, maxOutput, key, body?.ToJsonString()), cancellationToken);
     await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, tenant, "anthropic", model,
-        response.InputTokens, response.OutputTokens, response.ProviderRequestId), cancellationToken);
+        response.InputTokens, response.OutputTokens, response.ProviderRequestId,
+        identity.EmployeeId.ToString(), identity.TaskId?.ToString()), cancellationToken);
     if (response.NativeResponseJson is { } nativeResponse) return Results.Content(nativeResponse, "application/json");
     return Results.Json(new
     {
@@ -288,7 +303,7 @@ static string ExtractAnthropicPrompt(JsonNode? body)
 }
 
 static async Task WriteProviderStreamAsync(HttpContext context, IProviderRouter provider, IUsageJournal usage,
-    string tenant, string providerName, string protocol, string model, string prompt, int maxOutput, string? key,
+    AgentIdentity identity, string providerName, string protocol, string model, string prompt, int maxOutput, string? key,
     string? nativeRequestJson, CancellationToken cancellationToken)
 {
     context.Response.ContentType = "text/event-stream";
@@ -311,8 +326,8 @@ static async Task WriteProviderStreamAsync(HttpContext context, IProviderRouter 
     }
     finally
     {
-        await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, tenant, providerName, model,
-            inputTokens, outputTokens, requestId), cancellationToken);
+        await usage.AppendAsync(new UsageRecord(DateTimeOffset.UtcNow, identity.TenantId.ToString(), providerName, model,
+            inputTokens, outputTokens, requestId, identity.EmployeeId.ToString(), identity.TaskId?.ToString()), cancellationToken);
     }
 }
 

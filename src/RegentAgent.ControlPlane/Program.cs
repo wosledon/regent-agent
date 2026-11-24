@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using RegentAgent.AgentIdentity;
 using RegentAgent.Agents;
 using RegentAgent.ControlPlane.Api;
 using RegentAgent.ControlPlane.Application;
@@ -43,6 +45,7 @@ using RegentAgent.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRegentObservability(builder.Configuration);
+builder.Services.AddAgentIdentity(builder.Configuration);
 var runnerToken = builder.Configuration["Runner:Token"];
 if (builder.Environment.IsProduction() && string.IsNullOrWhiteSpace(runnerToken))
     throw new InvalidOperationException("Production ControlPlane requires Runner:Token.");
@@ -318,6 +321,7 @@ builder.Services.AddAuthorization(options =>
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser().Build();
     options.AddPolicy("MemoryGovernor", policy => policy.RequireRole("Owner", "CoOwner"));
+    options.AddPolicy("Agent", policy => policy.RequireAuthenticatedUser().RequireClaim("employee_id"));
 });
 
 builder.Services.AddCors(options =>
@@ -376,9 +380,38 @@ else
 
 app.UseCors("frontend");
 app.UseAuthentication();
-app.UseAuthorization();
 app.Use(async (context, next) =>
 {
+    if (context.Request.Path.StartsWithSegments("/agent/v1"))
+    {
+        var authorization = context.Request.Headers.Authorization.ToString();
+        if (!authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+        try
+        {
+            var identity = context.RequestServices.GetRequiredService<AgentAssignmentTokenValidator>()
+                .Validate(authorization["Bearer ".Length..].Trim());
+            context.Items[AgentIdentityContext.Key] = identity;
+            var claims = new List<Claim>
+            {
+                new(ClaimTypes.NameIdentifier, identity.EmployeeId.ToString()),
+                new("tenant_id", identity.TenantId.ToString()),
+                new("employee_id", identity.EmployeeId.ToString()),
+                new("actor_type", "Agent"),
+                new("scopes", string.Join(' ', identity.Scopes))
+            };
+            if (identity.TaskId is { } taskId) claims.Add(new Claim("task_id", taskId.ToString()));
+            context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Agent"));
+        }
+        catch (SecurityTokenException)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+    }
     if (app.Environment.IsProduction() && context.Request.Path.StartsWithSegments("/internal"))
     {
         var provided = context.Request.Headers["X-Regent-Runner-Token"].ToString();
@@ -402,6 +435,7 @@ app.Use(async (context, next) =>
     }
     await next();
 });
+app.UseAuthorization();
 app.MapOpenApi("/openapi/{documentName}.json").AllowAnonymous();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" })).AllowAnonymous();
@@ -502,6 +536,20 @@ app.MapPost("/auth/logout", async (HttpContext context, IdentityService identity
     await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
     return Results.NoContent();
 }).RequireAuthorization();
+
+app.MapPost("/auth/dev-agent-token", async (DevAgentTokenRequest request, RegentDbContext db,
+    AgentAssignmentTokenService tokens, CancellationToken cancellationToken) =>
+{
+    if (!app.Environment.IsDevelopment()) return Results.NotFound();
+    if (!await db.Employees.AnyAsync(x => x.TenantId == request.TenantId && x.Id == request.EmployeeId, cancellationToken))
+        return Results.NotFound();
+    if (request.TaskId is { } taskId && !await db.Tasks.AnyAsync(x => x.TenantId == request.TenantId && x.Id == taskId, cancellationToken))
+        return Results.NotFound();
+    var scopes = request.Scopes is { Count: > 0 } ? request.Scopes : new[] { "tasks:execute", "chat:write", "infer:employee" };
+    var issued = tokens.Issue(new AgentAssignmentRequest(request.TenantId, request.EmployeeId, request.TaskId,
+        request.RunnerId ?? "dev-runner", scopes));
+    return Results.Ok(new { token = issued.Token, identity = issued.Identity });
+}).AllowAnonymous();
 
 app.MapPost("/auth/switch-tenant", async (SwitchTenantRequest request, RegentDbContext db, IdentityService identity,
     HttpContext context, CancellationToken cancellationToken) =>
@@ -1681,6 +1729,44 @@ evaluationQa.MapPost("/gate", async (EvaluationGateRequest request, HttpContext 
         request.BaselineSuccesses, request.DiscordantA, request.DiscordantB, request.CalibrationPassed, cancellationToken)))
     .Produces<EvaluationQaGate>().WithTags("Evaluation QA");
 
+var agentApi = app.MapGroup("/agent/v1").RequireAuthorization("Agent");
+agentApi.MapGet("/me", (HttpContext context) => Results.Ok(CurrentAgent(context))).WithTags("Agent");
+agentApi.MapPost("/tasks/{id:guid}/checkpoint", async (Guid id, TaskCheckpoint checkpoint, HttpContext context,
+    TaskExecutionService service, CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    if (identity.TaskId != id) throw new UnauthorizedAccessException("Agent token is not scoped to this task.");
+    return await service.CheckpointAsync(id, checkpoint, identity.TenantId, cancellationToken)
+        ? Results.NoContent() : Results.Conflict();
+}).WithTags("Agent");
+agentApi.MapPost("/tasks/{id:guid}/complete", async (Guid id, TaskCompletion completion, HttpContext context,
+    TaskExecutionService service, CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    if (identity.TaskId != id) throw new UnauthorizedAccessException("Agent token is not scoped to this task.");
+    return await service.CompleteAsync(id, completion, identity.TenantId, cancellationToken)
+        ? Results.NoContent() : Results.Conflict();
+}).WithTags("Agent");
+agentApi.MapPost("/agent-runtime/context", async (BuildContextRequest request, HttpContext context,
+    AgentRuntimeService service, CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    if (identity.TaskId != request.TaskId) throw new UnauthorizedAccessException("Agent token is not scoped to this task.");
+    return Results.Ok(await service.BuildContextAsync(request.TaskId, request.SystemPrefix, request.TenantMemory,
+        request.TaskGrantJson, request.ToolResultRefs, request.CheckpointJson, request.Compressed, cancellationToken));
+}).Produces<AgentContextSnapshot>().WithTags("Agent");
+agentApi.MapPost("/agent-runtime/tool-loop", async (ToolLoopRequest request, HttpContext context,
+    AgentRuntimeService service, CancellationToken cancellationToken) =>
+{
+    var identity = CurrentAgent(context);
+    RequireAgentScope(identity, "tasks:execute");
+    if (identity.TaskId != request.TaskId) throw new UnauthorizedAccessException("Agent token is not scoped to this task.");
+    return Results.Ok(await service.RunToolLoopAsync(request, cancellationToken));
+}).Produces<ToolLoopResult>().WithTags("Agent");
+
 var runnerApi = app.MapGroup("/internal/runners").AllowAnonymous();
 runnerApi.MapPost("/register", (RunnerRegistration registration) => Results.Ok(new { runner_id = registration.RunnerId, status = "registered" }));
 runnerApi.MapPost("/heartbeat", (RunnerHeartbeat heartbeat) => Results.Ok(new { runner_id = heartbeat.RunnerId, status = heartbeat.Status }));
@@ -1714,6 +1800,14 @@ app.MapPost("/internal/tasks/{id:guid}/complete", async (Guid id, TaskCompletion
 
 app.MapHub<TenantHub>("/hubs/tenant").RequireAuthorization();
 app.Run();
+
+static AgentIdentity CurrentAgent(HttpContext context) => AgentIdentityContext.Required(context.Items);
+
+static void RequireAgentScope(AgentIdentity identity, string scope)
+{
+    if (!identity.Scopes.Contains(scope, StringComparer.OrdinalIgnoreCase))
+        throw new UnauthorizedAccessException("Agent scope is insufficient.");
+}
 
 static string CurrentTenant(HttpContext context) =>
     context.User.FindFirstValue("tenant_id") ?? "11111111-1111-1111-1111-111111111111";
@@ -1758,6 +1852,8 @@ static async Task SignInTenantAsync(HttpContext context, Guid userId, Guid tenan
 
 public sealed record DevLoginRequest(string Email, Guid? TenantId = null);
 public sealed record SwitchTenantRequest(Guid TenantId);
+public sealed record DevAgentTokenRequest(Guid TenantId, Guid EmployeeId, Guid? TaskId = null,
+    string? RunnerId = null, IReadOnlyList<string>? Scopes = null);
 public sealed record CreateTenantRequest(string Name, string CompanyName);
 public sealed record AssignPositionRequest(Guid PositionId);
 public sealed record PositionStatusRequest(string Status);

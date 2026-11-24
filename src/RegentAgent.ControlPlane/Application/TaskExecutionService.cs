@@ -1,13 +1,15 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using RegentAgent.AgentIdentity;
 using RegentAgent.Contracts.Runtime;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class TaskExecutionService(RegentDbContext db, IObjectStore objects, TimeProvider clock, AuditIntegrityService audit)
+public sealed class TaskExecutionService(RegentDbContext db, IObjectStore objects, TimeProvider clock,
+    AuditIntegrityService audit, AgentAssignmentTokenService assignmentTokens)
 {
     public async Task<TaskClaim?> ClaimAsync(string runnerId, Guid tenantId, CancellationToken cancellationToken)
     {
@@ -24,6 +26,18 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
             return null;
         }
 
+        var employeeName = string.IsNullOrWhiteSpace(task.Assignee) ? "Local Agent" : task.Assignee;
+        var employee = await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.DisplayName == employeeName, cancellationToken);
+        if (employee is null)
+        {
+            employee = new EmployeeRecord
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, EmployeeNo = $"EMP-{Guid.NewGuid():N}"[..12],
+                DisplayName = employeeName, Position = "Runner", State = RegentAgent.Contracts.Enums.EmployeeState.Active
+            };
+            db.Employees.Add(employee);
+        }
+        task.Assignee = employee.DisplayName;
         task.Status = "Assigned";
         task.LeaseOwner = runnerId;
         task.LeaseToken = Guid.NewGuid().ToString("N");
@@ -31,7 +45,10 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
         task.Attempt += 1;
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
-        return new TaskClaim(task.Id, task.Title, task.TaskType, task.ProjectId, task.LeaseToken, task.LeaseExpiresAt.Value);
+        var scopes = new[] { "tasks:execute", "chat:write", "infer:employee" };
+        var assignment = assignmentTokens.Issue(new AgentAssignmentRequest(tenantId, employee.Id, task.Id, runnerId, scopes));
+        return new TaskClaim(task.Id, task.Title, task.TaskType, task.ProjectId, task.LeaseToken,
+            task.LeaseExpiresAt.Value, tenantId, employee.Id, assignment.Token, assignment.Identity.ExpiresAt, scopes, runnerId);
     }
 
     public async Task<bool> CheckpointAsync(Guid taskId, TaskCheckpoint checkpoint, Guid tenantId,

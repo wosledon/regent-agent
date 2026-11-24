@@ -20,20 +20,24 @@ public sealed class Worker(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var control = clients.CreateClient("controlplane");
-        await control.PostAsJsonAsync("/internal/runners/register",
-            new RunnerRegistration(runnerId, ["local", "documentation", "research"]), stoppingToken);
+        using (var register = CreateControlRequest(HttpMethod.Post, "/internal/runners/register"))
+        {
+            register.Content = JsonContent.Create(new RunnerRegistration(runnerId, ["local", "documentation", "research"]));
+            using var response = await control.SendAsync(register, stoppingToken);
+            response.EnsureSuccessStatusCode();
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await control.PostAsJsonAsync("/internal/runners/heartbeat",
-                    new RunnerHeartbeat(runnerId, "Active", 0), stoppingToken);
-                using var request = new HttpRequestMessage(HttpMethod.Post, "/internal/tasks/claim");
-                request.Headers.Add("X-Runner-Id", runnerId);
-                request.Headers.Add("X-Regent-Tenant", tenantId);
-                if (!string.IsNullOrWhiteSpace(configuration["Runner:Token"]))
-                    request.Headers.Add("X-Regent-Runner-Token", configuration["Runner:Token"]);
+                using (var heartbeat = CreateControlRequest(HttpMethod.Post, "/internal/runners/heartbeat"))
+                {
+                    heartbeat.Content = JsonContent.Create(new RunnerHeartbeat(runnerId, "Active", 0));
+                    using var heartbeatResponse = await control.SendAsync(heartbeat, stoppingToken);
+                    heartbeatResponse.EnsureSuccessStatusCode();
+                }
+                using var request = CreateControlRequest(HttpMethod.Post, "/internal/tasks/claim");
                 using var response = await control.SendAsync(request, stoppingToken);
                 if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
                 {
@@ -48,9 +52,12 @@ public sealed class Worker(
                 var sandboxResult = await sandbox.WriteAsync(new SandboxRequest(
                     Guid.Parse(tenantId), task.TaskId, "result.md", result.Output), stoppingToken);
                 var evidence = result.EvidenceRefs.Append($"sandbox:{sandboxResult.Sha256}").ToArray();
-                await control.PostAsJsonAsync($"/internal/tasks/{task.TaskId}/complete",
-                    new TaskCompletion(task.LeaseToken, result.Output, result.Status, evidence), stoppingToken);
-                logger.LogInformation("Completed task {TaskId} with local Runner.", task.TaskId);
+                using var completeRequest = new HttpRequestMessage(HttpMethod.Post, $"/agent/v1/tasks/{task.TaskId}/complete");
+                completeRequest.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", task.AssignmentToken);
+                completeRequest.Content = JsonContent.Create(new TaskCompletion(task.LeaseToken, result.Output, result.Status, evidence));
+                using var completeResponse = await control.SendAsync(completeRequest, stoppingToken);
+                completeResponse.EnsureSuccessStatusCode();
+                logger.LogInformation("Completed task {TaskId} as employee Agent {EmployeeId}.", task.TaskId, task.EmployeeId);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -62,5 +69,15 @@ public sealed class Worker(
                 await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
             }
         }
+    }
+
+    private HttpRequestMessage CreateControlRequest(HttpMethod method, string path)
+    {
+        var request = new HttpRequestMessage(method, path);
+        request.Headers.Add("X-Runner-Id", runnerId);
+        request.Headers.Add("X-Regent-Tenant", tenantId);
+        if (!string.IsNullOrWhiteSpace(configuration["Runner:Token"]))
+            request.Headers.Add("X-Regent-Runner-Token", configuration["Runner:Token"]);
+        return request;
     }
 }

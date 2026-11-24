@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/RegentAgent.AgentIdentity/RegentAgent.AgentIdentity.csproj" />
     <Project Path="src/RegentAgent.Agents/RegentAgent.Agents.csproj" />
     <Project Path="src/RegentAgent.Chat/RegentAgent.Chat.csproj" />
     <Project Path="src/RegentAgent.Communication/RegentAgent.Communication.csproj" />
