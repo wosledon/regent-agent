@@ -6,7 +6,7 @@
   },
   "servers": [
     {
-      "url": "http://127.0.0.1:5180/"
+      "url": "http://localhost:5080/"
     }
   ],
   "paths": {
@@ -4243,6 +4243,62 @@
         }
       }
     },
+    "/v1/collaboration/graph": {
+      "get": {
+        "tags": [
+          "Collaboration"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationGraphDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/collaboration/trace": {
+      "get": {
+        "tags": [
+          "Collaboration"
+        ],
+        "parameters": [
+          {
+            "name": "entityType",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollaborationTraceDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/communication/routes": {
       "get": {
         "tags": [
@@ -4260,6 +4316,26 @@
         "tags": [
           "Chat"
         ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "OK"
@@ -4307,6 +4383,38 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/SendMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/conversations/{id}/members": {
+      "post": {
+        "tags": [
+          "Chat"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddConversationMemberRequest"
               }
             }
           },
@@ -7557,6 +7665,17 @@
           }
         }
       },
+      "AddConversationMemberRequest": {
+        "required": [
+          "employeeId"
+        ],
+        "type": "object",
+        "properties": {
+          "employeeId": {
+            "type": "string"
+          }
+        }
+      },
       "AdjudicationTaskRecord": {
         "type": "object",
         "properties": {
@@ -8878,6 +8997,350 @@
           }
         }
       },
+      "CollaborationActivityDto": {
+        "required": [
+          "id",
+          "occurredAt",
+          "type",
+          "title",
+          "actor",
+          "sourceType",
+          "sourceId",
+          "employeeId",
+          "conversationId",
+          "projectId",
+          "taskId",
+          "evidenceRefs",
+          "auditHash"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "actor": {
+            "type": "string"
+          },
+          "sourceType": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "employeeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "conversationId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "projectId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "taskId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "auditHash": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "CollaborationEdgeDto": {
+        "required": [
+          "id",
+          "sourceId",
+          "targetId",
+          "kind",
+          "weight",
+          "label"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "sourceId": {
+            "type": "string"
+          },
+          "targetId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "weight": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "CollaborationGraphDto": {
+        "required": [
+          "nodes",
+          "edges",
+          "activities",
+          "summary",
+          "generatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollaborationNodeDto"
+            }
+          },
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollaborationEdgeDto"
+            }
+          },
+          "activities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollaborationActivityDto"
+            }
+          },
+          "summary": {
+            "$ref": "#/components/schemas/CollaborationSummaryDto"
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CollaborationNodeDto": {
+        "required": [
+          "id",
+          "type",
+          "label",
+          "subtitle",
+          "status",
+          "employeeId",
+          "conversationId",
+          "projectId",
+          "positionId",
+          "parentId",
+          "depth",
+          "x",
+          "y",
+          "memberEmployeeIds",
+          "activityCount"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "subtitle": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "employeeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "conversationId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "projectId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "positionId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "parentId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "depth": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "x": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "y": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "memberEmployeeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "activityCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "CollaborationSummaryDto": {
+        "required": [
+          "employeeCount",
+          "conversationCount",
+          "messageCount",
+          "collaborationCount",
+          "projectCount",
+          "activityCount"
+        ],
+        "type": "object",
+        "properties": {
+          "employeeCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "conversationCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "messageCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "collaborationCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "projectCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "activityCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          }
+        }
+      },
+      "CollaborationTraceDto": {
+        "required": [
+          "entityType",
+          "entityId",
+          "activities",
+          "generatedAt"
+        ],
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string"
+          },
+          "entityId": {
+            "type": "string"
+          },
+          "activities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CollaborationActivityDto"
+            }
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "ComplianceProfile": {
         "required": [
           "tenantId",
@@ -9280,6 +9743,38 @@
           },
           "jobDescription": {
             "type": "string"
+          }
+        }
+      },
+      "CreateConversationRequest": {
+        "required": [
+          "title",
+          "kind",
+          "memberEmployeeIds"
+        ],
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "memberEmployeeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "scopeType": {
+            "type": "string",
+            "default": "Topic"
+          },
+          "scopeId": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -14208,6 +14703,40 @@
           },
           "priority": {
             "type": "string"
+          },
+          "replyToMessageId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mentionedEmployeeIds": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "messageType": {
+            "type": "string",
+            "default": "Chat"
+          },
+          "evidenceRefs": {
+            "type": [
+              "null",
+              "array"
+            ],
+            "items": {
+              "type": "string"
+            }
+          },
+          "idempotencyKey": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -15200,6 +15729,9 @@
     },
     {
       "name": "Agent Evolution"
+    },
+    {
+      "name": "Collaboration"
     },
     {
       "name": "Communication"

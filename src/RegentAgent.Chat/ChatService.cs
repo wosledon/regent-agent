@@ -30,36 +30,49 @@ public sealed class ChatService(JsonDocumentStore<Conversation> conversations, J
 
     public async Task SeedAsync(IReadOnlyCollection<ChatEmployee> employees, CancellationToken cancellationToken)
     {
-        if ((await conversations.GetAllAsync(cancellationToken)).Count > 0) return;
         var tenantId = "11111111-1111-1111-1111-111111111111";
         var memberIds = employees.Select(x => x.Id).ToArray();
-        await conversations.PutAsync("general", new Conversation("general", tenantId, "Company", "Company HQ", "Active")
+        var existingConversations = await conversations.GetAllAsync(cancellationToken);
+        var existingMessages = await messages.GetAllAsync(cancellationToken);
+        var general = existingConversations.FirstOrDefault(x => x.Id == "general" && x.TenantId == tenantId);
+        if (general is null)
         {
-            MemberEmployeeIds = memberIds, ScopeType = "Company", CreatedBy = "Controller"
-        }, cancellationToken);
-        await messages.PutAsync("welcome", new ChatMessage("welcome", tenantId, "general", 1, "Controller",
-            "Company HQ is online. Use the collaboration workspace to inspect work, groups and conversations.",
-            "P2", DateTimeOffset.UtcNow) { EvidenceRefs = ["workspace:company-hq"] }, cancellationToken);
+            await conversations.PutAsync("general", new Conversation("general", tenantId, "Company", "Company HQ", "Active")
+            {
+                MemberEmployeeIds = memberIds, ScopeType = "Company", CreatedBy = "Controller"
+            }, cancellationToken);
+        }
+        else if (general.MemberEmployeeIds.Count == 0 && memberIds.Length > 0)
+        {
+            await conversations.PutAsync("general", general with { MemberEmployeeIds = memberIds }, cancellationToken);
+        }
+        if (!existingMessages.Any(x => x.Id == "welcome"))
+            await messages.PutAsync("welcome", new ChatMessage("welcome", tenantId, "general", 1, "Controller",
+                "Company HQ is online. Use the collaboration workspace to inspect work, groups and conversations.",
+                "P2", DateTimeOffset.UtcNow) { EvidenceRefs = ["workspace:company-hq"] }, cancellationToken);
 
         var deliveryMembers = employees.Where(x => x.Position is "Controller" or "Engineering" or "Quality")
             .Select(x => x.Id).ToArray();
         if (deliveryMembers.Length >= 2)
         {
-            await conversations.PutAsync("delivery-room", new Conversation("delivery-room", tenantId, "Project", "Delivery Room", "Active")
-            {
-                MemberEmployeeIds = deliveryMembers, OwnerEmployeeId = deliveryMembers[0], ScopeType = "Project",
-                ScopeId = "delivery", CreatedBy = "Controller"
-            }, cancellationToken);
-            await messages.PutAsync("delivery-kickoff", new ChatMessage("delivery-kickoff", tenantId, "delivery-room", 1,
-                "Engineering Lead", "Implementation checkpoint is ready for independent quality review.", "P1", DateTimeOffset.UtcNow)
-            {
-                MessageType = "ReviewRequest", MentionedEmployeeIds = deliveryMembers, EvidenceRefs = ["task:local-delivery"]
-            }, cancellationToken);
-            await messages.PutAsync("delivery-review", new ChatMessage("delivery-review", tenantId, "delivery-room", 2,
-                "Quality Reviewer", "Review accepted. Evidence is linked to the delivery timeline.", "P2", DateTimeOffset.UtcNow)
-            {
-                MessageType = "StatusUpdate", ReplyToMessageId = "delivery-kickoff", EvidenceRefs = ["review:local-delivery"]
-            }, cancellationToken);
+            if (!existingConversations.Any(x => x.Id == "delivery-room" && x.TenantId == tenantId))
+                await conversations.PutAsync("delivery-room", new Conversation("delivery-room", tenantId, "Project", "Delivery Room", "Active")
+                {
+                    MemberEmployeeIds = deliveryMembers, OwnerEmployeeId = deliveryMembers[0], ScopeType = "Project",
+                    ScopeId = "delivery", CreatedBy = "Controller"
+                }, cancellationToken);
+            if (!existingMessages.Any(x => x.Id == "delivery-kickoff"))
+                await messages.PutAsync("delivery-kickoff", new ChatMessage("delivery-kickoff", tenantId, "delivery-room", 1,
+                    "Engineering Lead", "Implementation checkpoint is ready for independent quality review.", "P1", DateTimeOffset.UtcNow)
+                {
+                    MessageType = "ReviewRequest", MentionedEmployeeIds = deliveryMembers, EvidenceRefs = ["task:local-delivery"]
+                }, cancellationToken);
+            if (!existingMessages.Any(x => x.Id == "delivery-review"))
+                await messages.PutAsync("delivery-review", new ChatMessage("delivery-review", tenantId, "delivery-room", 2,
+                    "Quality Reviewer", "Review accepted. Evidence is linked to the delivery timeline.", "P2", DateTimeOffset.UtcNow)
+                {
+                    MessageType = "StatusUpdate", ReplyToMessageId = "delivery-kickoff", EvidenceRefs = ["review:local-delivery"]
+                }, cancellationToken);
         }
     }
 
@@ -87,6 +100,8 @@ public sealed class ChatService(JsonDocumentStore<Conversation> conversations, J
         if (string.IsNullOrWhiteSpace(title) || title.Length > 120) throw new InvalidOperationException("Conversation title is invalid.");
         if (kind is not ("Direct" or "Project" or "Position" or "Topic" or "Company"))
             throw new InvalidOperationException("Conversation kind is invalid.");
+        if (scopeType is not ("Direct" or "Project" or "Position" or "Topic" or "Company"))
+            throw new InvalidOperationException("Conversation scope is invalid.");
         var members = memberEmployeeIds.Distinct().ToArray();
         if (members.Length == 0) throw new InvalidOperationException("At least one conversation member is required.");
         var conversation = new Conversation(Guid.NewGuid().ToString("N"), tenantId, kind, title.Trim(), "Active")
@@ -123,6 +138,9 @@ public sealed class ChatService(JsonDocumentStore<Conversation> conversations, J
         if (conversation.TenantId != tenantId) throw new UnauthorizedAccessException();
         if (string.IsNullOrWhiteSpace(body) || body.Length > 8000) throw new InvalidOperationException("Message body is invalid.");
         if (priority is not ("P0" or "P1" or "P2" or "P3")) throw new InvalidOperationException("Message priority is invalid.");
+        if (messageType is not ("Chat" or "TaskAssignment" or "DelegationRequest" or "HelpRequest" or "HandoffRequest"
+            or "ReviewRequest" or "DecisionRequest" or "Interrupt" or "StatusUpdate" or "Discussion" or "Ack" or "Reject" or "Complete"))
+            throw new InvalidOperationException("Message type is invalid.");
         var existing = await messages.GetAllAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(idempotencyKey))
         {

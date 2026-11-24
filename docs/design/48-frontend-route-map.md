@@ -63,6 +63,7 @@ flowchart TB
 | `/projects/:projectId/tasks` | 任务看板 | `task.read` | DetailLayout | TaskBoard、FilterBar |
 | `/projects/:projectId/releases` | 发布门禁 | `release.read` | DetailLayout | ReleaseChecklist、AuditTimeline |
 | `/organization` | 组织与员工 | `organization.read` | ListLayout | OrganizationTree、EmployeeStateBadge |
+| `/organization/collaboration` | 组织协作可视化 | `organization.read` | WorkspaceLayout | OfficeView、OrgChartView、NetworkView、ActivityTimeline、TracePanel |
 | `/organization/employees/:employeeId` | 员工详情 | `employee.read` | DetailLayout | EmployeeWorkTimeline、WorkLedgerTable |
 | `/organization/positions` | 岗位管理 | `position.read` | DetailLayout | 岗位树、能力矩阵 |
 | `/messages` | 消息列表 | `message.read` | SplitLayout | ConversationList、NotificationMenu |
@@ -123,6 +124,7 @@ flowchart TB
 | `SplitLayout` | 消息、支持工单 | 列表 + 详情 |
 | `SettingsLayout` | 租户和个人设置 | 设置导航 + 表单区 |
 | `GalleryLayout` | 组件页 | 分类 + 搜索 + Demo |
+| `WorkspaceLayout` | 组织协作可视化 | 视图切换 + 图/办公室/时间线 + 追溯抽屉 |
 
 ## 7. 路由与状态规则
 

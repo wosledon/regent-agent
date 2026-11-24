@@ -39,9 +39,12 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
             var depth = PositionDepth(position, positionById);
             var employeeTasks = tasks.Where(x => string.Equals(x.Assignee, employee.DisplayName, StringComparison.OrdinalIgnoreCase)).ToArray();
             var currentTask = employeeTasks.FirstOrDefault(x => x.Status is "InProgress" or "InReview" or "Blocked") ?? employeeTasks.FirstOrDefault();
+            var managerId = position?.ParentPositionId is { } parentPositionId
+                ? positionEmployee.GetValueOrDefault(parentPositionId)
+                : (Guid?)null;
             nodes.Add(new CollaborationNodeDto($"employee:{employee.Id}", "Employee", employee.DisplayName,
                 $"{employee.EmployeeNo} · {position?.Name ?? employee.Position}", employee.State.ToString(),
-                employee.Id.ToString(), null, currentTask?.ProjectId.ToString(), position?.Id.ToString(), null,
+                employee.Id.ToString(), null, currentTask?.ProjectId.ToString(), position?.Id.ToString(), managerId?.ToString(),
                 depth, 60 + (index % 4) * 230, 70 + (index / 4) * 150, [], 0));
         }
         for (var index = 0; index < conversations.Count; index++)

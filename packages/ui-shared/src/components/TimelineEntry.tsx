@@ -13,14 +13,21 @@ export interface TimelineEntryProps {
   status: string;
   nextAction?: string;
   tone?: ChipTone;
+  onClick?: () => void;
 }
 
-export function TimelineEntry({ timestamp, title, description, status, nextAction, tone = 'info' }: TimelineEntryProps) {
+export function TimelineEntry({ timestamp, title, description, status, nextAction, tone = 'info', onClick }: TimelineEntryProps) {
   return (
     <MuiTimelineItem>
       <TimelineOppositeContent variant="body2" color="text.secondary">{new Date(timestamp).toLocaleString()}</TimelineOppositeContent>
       <TimelineSeparator><TimelineDot color="primary" /></TimelineSeparator>
-      <TimelineContent>
+      <TimelineContent
+        onClick={onClick}
+        role={onClick ? 'button' : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        onKeyDown={onClick ? event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onClick(); } } : undefined}
+        sx={onClick ? { cursor: 'pointer', borderRadius: 1, '&:hover': { bgcolor: 'action.hover' } } : undefined}
+      >
         <Text variant="h3">{title}</Text>
         {description ? <Text variant="caption">{description}</Text> : null}
         <StatusChip tone={tone} label={status} />

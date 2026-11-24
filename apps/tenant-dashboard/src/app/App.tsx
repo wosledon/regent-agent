@@ -13,6 +13,7 @@ import { DeliveryPage } from '../features/projects/DeliveryPage';
 import { EmployeeListPage } from '../features/organization/EmployeeListPage';
 import { OrganizationPage } from '../features/organization/OrganizationPage';
 import { EmployeeDetailPage } from '../features/organization/EmployeeDetailPage';
+import { CollaborationPage } from '../features/collaboration/CollaborationPage';
 import { ApprovalListPage } from '../features/governance/ApprovalListPage';
 import { ApprovalPage } from '../features/governance/ApprovalPage';
 import { ActionCenterPage } from '../features/governance/ActionCenterPage';
@@ -52,6 +53,7 @@ export function App() {
           <Route path="projects/:projectId/delivery" element={<DeliveryPage />} />
           <Route path="organization" element={<EmployeeListPage />} />
           <Route path="organization/manage" element={<OrganizationPage />} />
+          <Route path="organization/collaboration" element={<CollaborationPage />} />
           <Route path="organization/employees/:employeeId" element={<EmployeeDetailPage />} />
           <Route path="governance/approvals" element={<ApprovalListPage />} />
           <Route path="governance/approvals/:approvalId" element={<ApprovalPage />} />

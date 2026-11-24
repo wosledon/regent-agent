@@ -1586,29 +1586,46 @@ api.MapGet("/conversations", async (HttpContext context, ChatService service,
 api.MapGet("/conversations/{id}/messages", async (string id, HttpContext context, ChatService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListMessagesAsync(id, CurrentTenant(context), cancellationToken))).WithTags("Chat");
 api.MapPost("/conversations", async (CreateConversationRequest request, HttpContext context,
-    ChatService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+    ChatService service, AuditIntegrityService audit, RegentDbContext db, CancellationToken cancellationToken) =>
 {
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    var memberIds = request.MemberEmployeeIds.Distinct().ToArray();
+    var tenantEmployeeIds = (await db.Employees.AsNoTracking().Where(x => x.TenantId == tenantId)
+        .Select(x => x.Id).ToListAsync(cancellationToken)).Select(x => x.ToString()).ToHashSet(StringComparer.Ordinal);
+    if (memberIds.Any(id => !Guid.TryParse(id, out _)) || memberIds.Any(id => !tenantEmployeeIds.Contains(id)))
+        throw new InvalidOperationException("Conversation members must belong to the current tenant.");
     var conversation = await service.CreateConversationAsync(CurrentTenant(context), request.Title, request.Kind,
-        request.MemberEmployeeIds, CurrentUser(context), request.ScopeType, request.ScopeId, cancellationToken);
-    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "chat.conversation.created", CurrentUser(context),
+        memberIds, CurrentUser(context), request.ScopeType, request.ScopeId, cancellationToken);
+    await audit.AppendAsync(tenantId, "chat.conversation.created", CurrentUser(context),
         new { conversation_id = conversation.Id, kind = conversation.Kind, member_count = conversation.MemberEmployeeIds.Count, scope_type = conversation.ScopeType }, cancellationToken);
     return Results.Ok(conversation);
 }).WithTags("Chat");
 api.MapPost("/conversations/{id}/members", async (string id, AddConversationMemberRequest request, HttpContext context,
-    ChatService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+    ChatService service, AuditIntegrityService audit, RegentDbContext db, CancellationToken cancellationToken) =>
 {
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    if (!Guid.TryParse(request.EmployeeId, out var employeeId)
+        || !await db.Employees.AnyAsync(x => x.TenantId == tenantId && x.Id == employeeId, cancellationToken))
+        throw new InvalidOperationException("Conversation member must belong to the current tenant.");
     var conversation = await service.AddMemberAsync(id, CurrentTenant(context), request.EmployeeId, cancellationToken);
-    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "chat.member.added", CurrentUser(context),
+    await audit.AppendAsync(tenantId, "chat.member.added", CurrentUser(context),
         new { conversation_id = id, employee_id = request.EmployeeId }, cancellationToken);
     return Results.Ok(conversation);
 }).WithTags("Chat");
 api.MapPost("/conversations/{id}/messages", async (string id, SendMessageRequest request, HttpContext context,
-    ChatService service, IHubContext<TenantHub> hub, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+    ChatService service, IHubContext<TenantHub> hub, AuditIntegrityService audit, RegentDbContext db,
+    CancellationToken cancellationToken) =>
 {
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    var mentions = request.MentionedEmployeeIds?.Distinct().ToArray() ?? [];
+    var tenantEmployeeIds = (await db.Employees.AsNoTracking().Where(x => x.TenantId == tenantId)
+        .Select(x => x.Id).ToListAsync(cancellationToken)).Select(x => x.ToString()).ToHashSet(StringComparer.Ordinal);
+    if (mentions.Any(value => !Guid.TryParse(value, out _)) || mentions.Any(value => !tenantEmployeeIds.Contains(value)))
+        throw new InvalidOperationException("Mentioned employees must belong to the current tenant.");
     var message = await service.SendAsync(id, CurrentTenant(context), CurrentUser(context), request.Body,
-        request.Priority, cancellationToken, request.ReplyToMessageId, request.MentionedEmployeeIds,
+        request.Priority, cancellationToken, request.ReplyToMessageId, mentions,
         request.MessageType, request.EvidenceRefs, request.IdempotencyKey);
-    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "chat.message.sent", CurrentUser(context),
+    await audit.AppendAsync(tenantId, "chat.message.sent", CurrentUser(context),
         new
         {
             message_id = message.Id, conversation_id = id, seq = message.Seq, message_type = message.MessageType,

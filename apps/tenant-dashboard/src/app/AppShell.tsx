@@ -12,6 +12,7 @@ const navigation = [
   { key: 'projects', path: '/projects', icon: 'evaluation' as const },
   { key: 'organization', path: '/organization', icon: 'organization' as const },
   { key: 'organizationManage', path: '/organization/manage', icon: 'organization' as const },
+  { key: 'collaboration', path: '/organization/collaboration', icon: 'organization' as const },
   { key: 'messages', path: '/messages', icon: 'notification' as const },
   { key: 'workflows', path: '/workflows', icon: 'evaluation' as const },
   { key: 'knowledge', path: '/knowledge', icon: 'evaluation' as const },
@@ -66,7 +67,7 @@ export function AppShell() {
           </List>
         </Box>
       </Drawer>
-      <Box component="main" sx={{ flexGrow: 1, p: 3, mt: 8 }}>
+      <Box component="main" sx={{ flexGrow: 1, minWidth: 0, p: 3, mt: 8 }}>
         <Text variant="caption">Signed in as {session?.displayName}</Text>
         <Outlet />
       </Box>

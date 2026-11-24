@@ -72,6 +72,10 @@ public sealed class CollaborationVisualizationServiceTests
             await Assert.ThrowsAsync<InvalidOperationException>(() => chat.CreateConversationAsync(
                 otherTenant.ToString(), "Empty", "Topic", [], "Owner", "Topic", null, CancellationToken.None));
             Assert.DoesNotContain(await chat.ListAsync(TenantId.ToString(), CancellationToken.None), x => x.Id == group.Id);
+            var graph = await new CollaborationVisualizationService(db, chat, TimeProvider.System)
+                .GetGraphAsync(otherTenant, CancellationToken.None);
+            Assert.DoesNotContain(graph.Nodes, node => node.Type == "Employee" || node.Type == "Project");
+            Assert.Contains(graph.Nodes, node => node.ConversationId == group.Id);
         }
         finally
         {

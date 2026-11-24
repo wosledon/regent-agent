@@ -36,7 +36,7 @@
 | 10 绩效与自我改进 | 改进审查、KPI、绩效动作、申诉反转 | 符合（本地） | 无 |
 | 11 项目管理 | 需求/任务/缺陷状态机、自动认领、评审、裁决 | 符合（本地） | 无 |
 | 12 通信与路由 | `CommunicationRouter`、管理链/专业链、项目覆盖 | 符合（本地） | 无 |
-| 13 Agent 聊天协作 | 会话、消息、委派、交接、加权召回 | 符合（本地） | 无 |
+| 13 Agent 聊天协作 | 会话、消息、群成员、回复/@、证据、可视化追溯 | 符合（本地） | 完整委派/交接 UI 仍未实现 |
 | 14 模型评测回归 | 版本化评测、密封/污染检测、回归计划 | 符合（本地） | 真实模型回归未执行 |
 | 15 数据 Schema 与事务 | SQLite/JSON/对象存储、Outbox、启动 SchemaVersion | 部分（生产） | 尚缺完整 Postgres 基线迁移和全部租户表 RLS SQL |
 | 16 部署升级迁移 | Compose Profile、生产启动校验、版本脚本 | 部分（生产） | Expand/Contract 与混版本回滚未在容器环境演练 |
@@ -58,7 +58,7 @@
 | 32 产出权利来源 | 权利声明、来源、第三方通知、发布门禁 | 符合（本地） | 无 |
 | 33 公平招聘 | JD、盲评、公平审计、候选人申诉 | 符合（本地） | 无 |
 | 34 开源许可分发 | Apache-2.0、NOTICE、DCO、SBOM 文件 | 符合（本地） | 自动许可门禁未接入 CI |
-| 35 仪表盘 IA | Boss 首屏、确定性健康、行动中心、下钻 | 符合（本地） | 无 |
+| 35 仪表盘 IA | Boss 首屏、确定性健康、行动中心、组织协作四视图与追溯 | 符合（本地） | 无 |
 | 36 审批委托缺席 | 分级、协商、委托、SLA、超时拒绝 | 符合（本地） | 无 |
 | 37 国际化本地化 | zh-CN/en-US、IANA 时区、ISO 币种、翻译回退 | 部分（生产） | WCAG 2.2 AA 按 G-52 明确后置 |
 | 38 作息调度 | 工作窗口、低价窗口、假期、紧急唤醒 | 符合（本地） | 无 |
@@ -71,16 +71,16 @@
 | 45 企业合规 | ComplianceProfile、fail closed、证据、支持边界 | 符合（本地） | 不宣称认证或商业 SLA |
 | 46 评测 QA | Judge 校准、污染检测、统计门槛、复测 | 符合（本地） | 无 |
 | 47 OpenAPI | OpenAPI 3.1、错误模型、TS 生成 | 部分（生产） | `Idempotency-Key`、`If-Match`、游标分页尚未全端点强制 |
-| 48 前端路由 | Tenant/Ops 独立应用、路由、权限、共享组件 | 符合（本地） | 无 |
+| 48 前端路由 | Tenant/Ops 独立应用、路由、权限、共享组件、协作工作台 | 符合（本地） | 无 |
 | 49 核心 ERD | 实体、租户字段、Schema 所有权、保留规则 | 部分（生产） | 生产迁移与 RLS 集成测试未执行 |
 | 50 可插拔适配 | Provider、目录、S3、KeyVault、身份、OTel、锚定、备份、Compose | 符合（适配） | 真实组件连通性按约束未调试 |
 
 ## 3. 验证结果
 
 - `dotnet build RegentAgent.slnx --no-restore`：通过，0 警告、0 错误。
-- `DOTNET_ROLL_FORWARD=Major dotnet test RegentAgent.slnx --no-build --no-restore`：86 项通过（Contracts 1、Gateway 12、ControlPlane 73）。
-- `corepack pnpm typecheck`、`corepack pnpm lint`、`corepack pnpm test`、`corepack pnpm build`：全部通过；Vitest 共 5 项通过。
-- `corepack pnpm test:e2e`：7 项 Playwright 全部通过。
+- `DOTNET_ROLL_FORWARD=Major dotnet test RegentAgent.slnx --no-build --no-restore`：88 项通过（Contracts 1、Gateway 12、ControlPlane 75）。
+- `corepack pnpm typecheck`、`corepack pnpm lint`、`corepack pnpm test`、`corepack pnpm build`：全部通过；Vitest 共 7 项通过。
+- `corepack pnpm test:e2e`：10 项 Playwright 全部通过，覆盖协作四视图、群聊创建、成员追溯和移动端。
 - OpenAPI 与 Tenant Dashboard TypeScript schema 已从当前 ControlPlane 重新生成。
 - 文档链接/围栏/表格/编号、Compose 与 Collector YAML、离线缓存前置检查：全部通过。
 - 容量基线：50 请求，P50 2.4ms、P95 11.8ms。

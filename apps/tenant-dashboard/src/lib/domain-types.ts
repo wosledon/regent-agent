@@ -44,19 +44,97 @@ export interface KpiSnapshot {
 
 export interface Conversation {
   id: string;
+  tenantId: string;
   kind: string;
   title: string;
   status: string;
+  memberEmployeeIds: string[];
+  ownerEmployeeId?: string | null;
+  scopeType: string;
+  scopeId?: string | null;
+  createdBy: string;
+  createdAt: string;
 }
 
 export interface ChatMessage {
   id: string;
+  tenantId: string;
   conversationId: string;
   seq: number;
   sender: string;
   body: string;
   priority: string;
   createdAt: string;
+  messageType: string;
+  replyToMessageId?: string | null;
+  mentionedEmployeeIds: string[];
+  evidenceRefs: string[];
+  idempotencyKey?: string | null;
+}
+
+export interface CollaborationNode {
+  id: string;
+  type: 'Employee' | 'Conversation' | 'Project';
+  label: string;
+  subtitle: string;
+  status: string;
+  employeeId?: string | null;
+  conversationId?: string | null;
+  projectId?: string | null;
+  positionId?: string | null;
+  parentId?: string | null;
+  depth: number;
+  x: number;
+  y: number;
+  memberEmployeeIds: string[];
+  activityCount: number;
+}
+
+export interface CollaborationEdge {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  kind: string;
+  weight: number;
+  label: string;
+}
+
+export interface CollaborationActivity {
+  id: string;
+  occurredAt: string;
+  type: string;
+  title: string;
+  actor: string;
+  sourceType: string;
+  sourceId: string;
+  employeeId?: string | null;
+  conversationId?: string | null;
+  projectId?: string | null;
+  taskId?: string | null;
+  evidenceRefs: string[];
+  auditHash?: string | null;
+}
+
+export interface CollaborationGraph {
+  nodes: CollaborationNode[];
+  edges: CollaborationEdge[];
+  activities: CollaborationActivity[];
+  summary: {
+    employeeCount: number;
+    conversationCount: number;
+    messageCount: number;
+    collaborationCount: number;
+    projectCount: number;
+    activityCount: number;
+  };
+  generatedAt: string;
+}
+
+export interface CollaborationTrace {
+  entityType: string;
+  entityId: string;
+  activities: CollaborationActivity[];
+  generatedAt: string;
 }
 
 export interface BenchmarkSuite {

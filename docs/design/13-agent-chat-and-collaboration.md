@@ -252,7 +252,10 @@ chat.open_attachment
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/conversations` | 创建私人或群组会话 |
+| POST | `/conversations/{id}/members` | 添加租户内成员并审计 |
 | GET | `/conversations/{id}/messages` | 按游标拉取消息 |
+| GET | `/collaboration/graph` | 组织、群聊、项目和互动关系只读投影 |
+| GET | `/collaboration/trace` | 按员工、群聊、项目、任务或消息追溯来源事件 |
 | POST | `/conversations/{id}/messages` | 发送消息 |
 | POST | `/messages/{id}/ack` | 确认收到 |
 | POST | `/messages/{id}/promote` | 提升为正式对象 |
@@ -260,6 +263,15 @@ chat.open_attachment
 | POST | `/collaboration/handoffs` | 发起交接 |
 
 所有写 API 幂等并审计；实时推送可用 SignalR，消息表仍是权威源。
+
+### 14.1 可视化与过程追溯
+
+- Tenant Dashboard 提供 `/organization/collaboration` 只读工作台，可在办公室、组织图、协作网络和过程时间线之间切换。
+- 办公室按岗位/项目房间展示员工状态、当前工作、会议群和项目；组织图展示汇报关系；协作网络展示共同消息、项目工作和群成员关系。
+- 员工、群聊和项目节点必须下钻到工作记录、消息、回复、@、证据引用和审计事件；审计事件显示哈希，不把投影当作权威状态。
+- 群聊创建和成员变更写审计；消息回复、@ 和证据引用进入统一可视化读模型。
+- 所有图查询先按租户过滤，再按节点类型和搜索条件过滤；URL 保存视图和选中对象，移动端使用单列办公室和全宽追溯抽屉。
+- 图数据是 WorkEntry、Conversation、Message 与 AuditRecord 的聚合投影，不新增第二套业务真相。
 
 ## 15. 度量
 

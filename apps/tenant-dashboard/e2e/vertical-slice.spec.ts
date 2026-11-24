@@ -29,7 +29,7 @@ test('workflows, messages, evaluations and compliance are available', async ({ p
   await expect(page.getByText('Current run')).toBeVisible();
 
   await page.goto('/messages');
-  await expect(page.getByText('Local workspace is ready. Create a task or review the dashboard.')).toBeVisible();
+  await expect(page.getByText(/Company HQ is online|Local workspace is ready/)).toBeVisible();
 
   await page.goto('/evaluations');
   await expect(page.getByText('Core Capability v1')).toBeVisible();

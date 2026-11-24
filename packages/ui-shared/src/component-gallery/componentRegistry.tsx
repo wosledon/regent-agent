@@ -1,3 +1,4 @@
+import { Avatar } from '../components/Avatar';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { DataTable } from '../components/DataTable';
@@ -6,10 +7,12 @@ import { ErrorState } from '../components/ErrorState';
 import { LoadingState } from '../components/LoadingState';
 import { FormField, Grid, PageHeader, Stack } from '../components/Layout';
 import { FreshnessBadge } from '../components/FreshnessBadge';
+import { GraphCanvas } from '../components/GraphCanvas';
 import { Icon } from '../components/Icon';
 import { SemanticLink } from '../components/Link';
 import { SemanticIconButton } from '../components/IconButton';
 import { Select } from '../components/Select';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { StatusChip } from '../components/StatusChip';
 import { Text } from '../components/Text';
 import { TextInput } from '../components/TextInput';
@@ -19,6 +22,9 @@ import { Tooltip } from '../components/Tooltip';
 import type { ComponentRegistryEntry } from './registry';
 
 export const componentRegistry: ComponentRegistryEntry[] = [
+  { id: 'avatar', name: 'Avatar', category: 'data', description: 'Employee initials with semantic state color.', tags: ['avatar', 'employee', 'status'], status: 'stable', demo: () => <Avatar name="Engineering Lead" status="Busy" /> },
+  { id: 'segmented-control', name: 'SegmentedControl', category: 'layout', description: 'Accessible switch between equivalent views.', tags: ['view', 'switch', 'navigation'], status: 'stable', demo: () => <SegmentedControl ariaLabel="Demo view" value="office" options={[{ value: 'office', label: 'Office' }, { value: 'org', label: 'Org chart' }]} onChange={() => undefined} /> },
+  { id: 'graph-canvas', name: 'GraphCanvas', category: 'data', description: 'Deterministic SVG graph with keyboard selection and zoom.', tags: ['graph', 'organization', 'network'], status: 'stable', demo: () => <GraphCanvas nodes={[{ id: 'employee:1', label: 'Controller', subtitle: 'Company lead', x: 80, y: 80, kind: 'Employee', status: 'Active' }, { id: 'conversation:1', label: 'Delivery Room', subtitle: '3 members', x: 420, y: 80, kind: 'Conversation', status: 'Active' }]} edges={[{ id: 'member:1', source: 'employee:1', target: 'conversation:1', kind: 'member_of', weight: 1, label: 'Member' }]} onSelect={() => undefined} height={280} /> },
   { id: 'button', name: 'Button', category: 'mui', description: 'Semantic action button.', tags: ['action', 'button'], status: 'stable', demo: () => <Button>Run task</Button> },
   { id: 'text', name: 'Text', category: 'mui', description: 'Single-line and heading text.', tags: ['text', 'typography'], status: 'stable', demo: () => <Text variant="h3">Company status</Text> },
   { id: 'icon', name: 'Icon', category: 'mui', description: 'Shared icon registry.', tags: ['icon'], status: 'stable', demo: () => <Icon name="dashboard" /> },

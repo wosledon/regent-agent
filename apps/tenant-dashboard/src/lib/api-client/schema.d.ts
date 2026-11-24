@@ -5386,6 +5386,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/collaboration/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollaborationGraphDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/collaboration/trace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query: {
+                    entityType: string;
+                    entityId: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CollaborationTraceDto"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/communication/routes": {
         parameters: {
             query?: never;
@@ -5445,7 +5518,28 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateConversationRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -5492,6 +5586,45 @@ export interface paths {
             requestBody: {
                 content: {
                     "application/json": components["schemas"]["SendMessageRequest"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AddConversationMemberRequest"];
                 };
             };
             responses: {
@@ -9244,6 +9377,9 @@ export interface components {
             nextAction: string;
             href: string;
         };
+        AddConversationMemberRequest: {
+            employeeId: string;
+        };
         AdjudicationTaskRecord: {
             /** Format: uuid */
             id?: string;
@@ -9622,6 +9758,81 @@ export interface components {
         CloseIncidentRequest: {
             retrospective: string;
         };
+        CollaborationActivityDto: {
+            id: string;
+            /** Format: date-time */
+            occurredAt: string;
+            type: string;
+            title: string;
+            actor: string;
+            sourceType: string;
+            sourceId: string;
+            employeeId: null | string;
+            conversationId: null | string;
+            projectId: null | string;
+            taskId: null | string;
+            evidenceRefs: string[];
+            auditHash: null | string;
+        };
+        CollaborationEdgeDto: {
+            id: string;
+            sourceId: string;
+            targetId: string;
+            kind: string;
+            /** Format: int32 */
+            weight: number | string;
+            label: string;
+        };
+        CollaborationGraphDto: {
+            nodes: components["schemas"]["CollaborationNodeDto"][];
+            edges: components["schemas"]["CollaborationEdgeDto"][];
+            activities: components["schemas"]["CollaborationActivityDto"][];
+            summary: components["schemas"]["CollaborationSummaryDto"];
+            /** Format: date-time */
+            generatedAt: string;
+        };
+        CollaborationNodeDto: {
+            id: string;
+            type: string;
+            label: string;
+            subtitle: string;
+            status: string;
+            employeeId: null | string;
+            conversationId: null | string;
+            projectId: null | string;
+            positionId: null | string;
+            parentId: null | string;
+            /** Format: int32 */
+            depth: number | string;
+            /** Format: int32 */
+            x: number | string;
+            /** Format: int32 */
+            y: number | string;
+            memberEmployeeIds: string[];
+            /** Format: int32 */
+            activityCount: number | string;
+        };
+        CollaborationSummaryDto: {
+            /** Format: int32 */
+            employeeCount: number | string;
+            /** Format: int32 */
+            conversationCount: number | string;
+            /** Format: int32 */
+            messageCount: number | string;
+            /** Format: int32 */
+            collaborationCount: number | string;
+            /** Format: int32 */
+            projectCount: number | string;
+            /** Format: int32 */
+            activityCount: number | string;
+        };
+        CollaborationTraceDto: {
+            entityType: string;
+            entityId: string;
+            activities: components["schemas"]["CollaborationActivityDto"][];
+            /** Format: date-time */
+            generatedAt: string;
+        };
         ComplianceProfile: {
             tenantId: string;
             preset: string;
@@ -9730,6 +9941,14 @@ export interface components {
             displayName: string;
             modelVersion: string;
             jobDescription: string;
+        };
+        CreateConversationRequest: {
+            title: string;
+            kind: string;
+            memberEmployeeIds: string[];
+            /** @default Topic */
+            scopeType: string;
+            scopeId?: null | string;
         };
         CreateDelegationRequest: {
             /** Format: uuid */
@@ -11126,6 +11345,12 @@ export interface components {
         SendMessageRequest: {
             body: string;
             priority: string;
+            replyToMessageId?: null | string;
+            mentionedEmployeeIds?: null | string[];
+            /** @default Chat */
+            messageType: string;
+            evidenceRefs?: null | string[];
+            idempotencyKey?: null | string;
         };
         SessionDto: {
             /** Format: uuid */

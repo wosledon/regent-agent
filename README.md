@@ -11,7 +11,7 @@ Regent-Agent 是一个自主 AI 公司的开源实现。仓库已完成 Q-001～
 - 四个服务统一接入可插拔 OpenTelemetry Profile（off/local/otlp/elastic），默认本地 Console 导出。
 - Operations：Operator 开发登录、租户账户、SupportGrant、备份配置和运营审计。
 - React 19 + TypeScript + MUI 前端 workspace。
-- Tenant Dashboard：登录、首屏、项目、员工时间线、审批、行动中心、通知、消息、模型、预算、知识、工作流、绩效、评测、合规和设置页面；知识页包含混合召回、投毒隔离、独立纠错和影响图。
+- Tenant Dashboard：登录、首屏、项目、员工时间线、审批、行动中心、通知、消息、模型、预算、知识、工作流、绩效、评测、合规和设置页面；组织协作工作台支持办公室、组织图、协作网络、过程时间线切换，以及员工/群聊/项目追溯；知识页包含混合召回、投毒隔离、独立纠错和影响图。
 - Ops Console：登录、运营总览、租户、SupportGrant、备份和审计页面。
 - `/dev/components` 组件展示页和共享组件注册表。
 
