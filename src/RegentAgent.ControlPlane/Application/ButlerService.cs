@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using RegentAgent.Contracts.Enums;
 using RegentAgent.Contracts.Operations;
 using RegentAgent.ControlPlane.Data;
+using RegentAgent.ControlPlane.Infrastructure;
 using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
@@ -10,7 +11,7 @@ namespace RegentAgent.ControlPlane.Application;
 public sealed class ButlerService(RegentDbContext db,
     JsonDocumentStore<ButlerReport> reports,
     JsonDocumentStore<ReportSchedule> schedules,
-    TimeProvider clock, GovernanceService? governance = null)
+    TimeProvider clock, TenantRlsScope rlsScope, GovernanceService? governance = null)
 {
     public async Task<ButlerAnswer> AskAsync(Guid tenantId, string question, CancellationToken cancellationToken)
     {
@@ -103,7 +104,8 @@ public sealed class ButlerService(RegentDbContext db,
         {
             try
             {
-                await GenerateReportAsync(schedule.TenantId, schedule.Kind, cancellationToken);
+                await rlsScope.ExecuteAsync(schedule.TenantId, null,
+                    token => GenerateReportAsync(schedule.TenantId, schedule.Kind, token), cancellationToken);
                 schedule.LastRunAt = now;
                 schedule.LastError = null;
             }

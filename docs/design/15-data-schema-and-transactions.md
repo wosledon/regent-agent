@@ -1,6 +1,6 @@
 # 15 数据 Schema 与事务边界
 
-- 版本：v0.2（Postgres 基线、强制 RLS 与迁移边界已生成；真实数据库未连接）
+- 版本：v0.3（schema 4 已生成；本地真实 Postgres/RustFS 容器冒烟已验证）
 - 范围：Postgres Schema、RLS、RustFS、本地工作区、事务、Outbox/Saga、分区和状态类型
 - 对应需求：FR-057、BR-050、BR-051、BR-052、BR-166
 - 对应缺口：G-05、G-06、G-07、G-09、G-16
@@ -63,11 +63,12 @@ RLS 与复合约束必须由 Postgres 集成测试验证，SQLite 测试不能�
 ### 3.1 当前迁移基线
 
 - `deploy/sql/controlplane-003.sql` 从 EF Core Npgsql 模型生成完整业务表，并对 22 张含 `TenantId` 的表启用且强制 RLS。
+- `deploy/sql/controlplane-004.sql` 增加按 `app.user_id` 读取成员关系的策略，将当前 SchemaVersion 提升为 4，支持登录和租户列表。
 - 所有租户表策略同时约束 `USING` 与 `WITH CHECK`，只允许 `current_setting('app.tenant_id')` 匹配当前租户。
-- `TenantRlsConnectionInterceptor` 在已认证请求打开 Postgres 连接时设置租户上下文，连接关闭前重置；无身份连接不设置租户，RLS 默认拒绝。
+- `TenantRlsConnectionInterceptor` 在已认证请求打开 Postgres 连接时设置租户上下文，连接关闭前重置；`TenantRlsScope` 为身份、后台逐租户任务等显式流程在事务内设置租户和用户上下文；无身份连接不设置租户，RLS 默认拒绝。
 - `scripts/migrate-postgres.py` 校验迁移版本、SHA-256、事务和 RLS 声明；真实执行使用 advisory lock、`ON_ERROR_STOP` 和 SchemaVersion 检查。
 - 应用启动只校验 SchemaVersion 与 RLS，不执行 DDL；迁移角色与运行角色必须分离，运行角色不得拥有表或 `BYPASSRLS`。
-- 当前未连接真实 Postgres，生产 RLS、事务和并发集成测试仍为明确边界。
+- 本地已对真实 Postgres 应用 schema 4，验证非超级用户运行角色、22 表强制 RLS、API 与直接 SQL 租户隔离，并完成真实 RustFS 导出上传和校验；生产事务、并发、混沌和升级集成测试仍为明确边界。
 
 ## 4. 核心表族
 

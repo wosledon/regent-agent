@@ -37,6 +37,7 @@ public sealed class S3ObjectStoreTests
         Assert.Equal("hello", uploaded);
         Assert.Equal("tenant/artifact", captured!.Key);
         Assert.Equal("regent-artifacts", captured.BucketName);
+        Assert.False(captured.UseChunkEncoding);
         Assert.Equal(stored.Sha256, captured.Metadata["regent-sha256"]);
         Assert.Equal(64, stored.Sha256.Length);
     }

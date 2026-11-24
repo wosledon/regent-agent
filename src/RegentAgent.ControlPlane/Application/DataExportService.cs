@@ -79,10 +79,27 @@ public sealed class DataExportService(RegentDbContext db, JsonDocumentStore<Data
     {
         await RequireOwnerAsync(userId, tenantId, cancellationToken);
         var export = await LoadAsync(tenantId, exportId, cancellationToken);
+        var temporaryPath = Path.Combine(Path.GetTempPath(), $"regent-export-{Guid.NewGuid():N}.zip");
         try
         {
-            await using var stream = await objects.OpenReadAsync(export.ObjectKey, cancellationToken)
-                ?? throw new InvalidOperationException("Export package not found.");
+            var outputOptions = new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None,
+                Options = FileOptions.Asynchronous
+            };
+            if (!OperatingSystem.IsWindows())
+                outputOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            await using (var source = await objects.OpenReadAsync(export.ObjectKey, cancellationToken)
+                ?? throw new InvalidOperationException("Export package not found."))
+            await using (var output = new FileStream(temporaryPath, outputOptions))
+            {
+                await source.CopyToAsync(output, cancellationToken);
+            }
+            await using var stream = new FileStream(temporaryPath, new FileStreamOptions
+            {
+                Mode = FileMode.Open, Access = FileAccess.Read, Share = FileShare.Read,
+                Options = FileOptions.Asynchronous
+            });
             using var hash = SHA256.Create();
             var digest = Convert.ToHexString(await hash.ComputeHashAsync(stream, cancellationToken)).ToLowerInvariant();
             stream.Position = 0;
@@ -111,6 +128,10 @@ public sealed class DataExportService(RegentDbContext db, JsonDocumentStore<Data
             await exports.PutAsync(export.Id.ToString(), export, cancellationToken);
             return new DataExportValidationDto(export.Id, false, export.Sha256, export.TableCount, export.ModuleCount, clock.GetUtcNow(), exception.Message);
         }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
     }
 
     private async Task<Dictionary<string, List<Dictionary<string, object?>>>> ReadDatabaseAsync(Guid tenantId,
@@ -129,7 +150,7 @@ public sealed class DataExportService(RegentDbContext db, JsonDocumentStore<Data
                 command.CommandText = $"SELECT * FROM \"{table}\" WHERE \"TenantId\" = @tenant_id";
                 var parameter = command.CreateParameter();
                 parameter.ParameterName = "tenant_id";
-                parameter.Value = tenantId.ToString();
+                parameter.Value = tenantId;
                 command.Parameters.Add(parameter);
                 var rows = new List<Dictionary<string, object?>>();
                 await using var reader = await command.ExecuteReaderAsync(cancellationToken);

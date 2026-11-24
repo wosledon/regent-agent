@@ -21,7 +21,7 @@ public sealed class DataLifecycleServiceTests
             var objects = new LocalFileObjectStore(Path.Combine(root, "objects"));
             var service = new DataLifecycleService(
                 new JsonDocumentStore<DataLifecycleState>(Path.Combine(root, "lifecycle.json")),
-                objects, db, TimeProvider.System, new TenantPurgeService(db, objects, []));
+                objects, db, TimeProvider.System, new TenantPurgeService(db, objects, []), new TenantRlsScope(db));
             var tenantId = Guid.NewGuid();
             var archive = await service.ArchiveAsync(tenantId, "2026-11", "Archive", 42, CancellationToken.None);
             var restored = await service.RestoreArchiveAsync(tenantId, archive.Id, CancellationToken.None);
@@ -52,7 +52,7 @@ public sealed class DataLifecycleServiceTests
             var service = new DataLifecycleService(
                 new JsonDocumentStore<DataLifecycleState>(Path.Combine(root, "lifecycle.json")),
                 new LocalFileObjectStore(Path.Combine(root, "objects")), db, TimeProvider.System,
-                new TenantPurgeService(db, new LocalFileObjectStore(Path.Combine(root, "objects")), []));
+                new TenantPurgeService(db, new LocalFileObjectStore(Path.Combine(root, "objects")), []), new TenantRlsScope(db));
 
             var request = await service.SoftDeleteAsync(tenantId, "Tenant", tenantId.ToString("D"), "Owner requested", CancellationToken.None);
             Assert.Equal("SoftDeleted", (await db.Tenants.SingleAsync()).Status);
@@ -80,7 +80,7 @@ public sealed class DataLifecycleServiceTests
             await moduleStore.PutAsync("memory-1", new MemoryClaim("memory-1", tenantId.ToString(), "company", "purge me", "source", 1, "trusted", "Active", 1), CancellationToken.None);
             var service = new DataLifecycleService(
                 new JsonDocumentStore<DataLifecycleState>(Path.Combine(root, "lifecycle.json")),
-                objects, db, clock, new TenantPurgeService(db, objects, [moduleStore]));
+                objects, db, clock, new TenantPurgeService(db, objects, [moduleStore]), new TenantRlsScope(db));
             var request = await service.SoftDeleteAsync(tenantId, "Tenant", tenantId.ToString(), "Owner requested", CancellationToken.None);
             var hold = await service.CreateLegalHoldAsync(tenantId, new LegalHoldRecord
             {

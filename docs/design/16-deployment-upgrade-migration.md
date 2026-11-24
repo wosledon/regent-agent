@@ -181,6 +181,7 @@ ControlPlane
 - 回填记录进度、处理行数和校验和。
 - 数据迁移先 dry-run，再正式执行。
 - 迁移角色不用于日常运行。
+- 当前 Expand 基线为 `controlplane-003.sql` 与 `controlplane-004.sql`，SchemaVersion 为 4；`controlplane-004.sql` 增加身份查询所需的用户级 Membership RLS 策略。
 
 ## 8. 应用回滚
 

@@ -171,7 +171,7 @@ operator_id
 ### 11.1 当前自动门禁
 
 - CI supply-chain job 固定所有第三方 Action commit，执行 LicenseInventory/SBOM 一致性、NuGet/pnpm 漏洞、Expand/Contract dry-run、N/N-1 升级演练和 ReleaseManifest 校验。
-- CI 不构建或推送镜像；真实容器构建、本地镜像 ID 和 Compose 联调仍按用户约束未执行。
+- CI 不构建或推送镜像；本地已完成六个应用容器构建、Compose 联调和真实 Postgres/RustFS 冒烟，但未生成不可变版本 Tag 的生产构建记录。
 
 ## 12. 指标
 

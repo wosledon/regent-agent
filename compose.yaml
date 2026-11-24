@@ -143,6 +143,7 @@ services:
       args:
         APP: "@regent/ops-console"
         HTML_DIR: apps/ops-console/dist
+        NGINX_CONF: deploy/nginx-ops-spa.conf
     ports:
       - "4173:80"
     depends_on:

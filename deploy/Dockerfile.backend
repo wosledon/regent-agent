@@ -1,6 +1,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 COPY RegentAgent.slnx ./
+COPY Directory.Build.props ./
 COPY src/ ./src/
 ARG PROJECT=RegentAgent.ControlPlane
 RUN dotnet restore "src/${PROJECT}/${PROJECT}.csproj"

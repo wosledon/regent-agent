@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using RegentAgent.ControlPlane.Application;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.ControlPlane.Identity;
+using RegentAgent.ControlPlane.Infrastructure;
 using RegentAgent.Contracts.Identity;
 using RegentAgent.Storage;
 using Xunit;
@@ -284,5 +285,5 @@ public sealed class IdentityServiceTests
         new JsonDocumentStore<ExternalLoginTransactionRecord>(Path.Combine(root, "external-transactions.json")),
         new JsonDocumentStore<AuthenticationPolicyRecord>(Path.Combine(root, "authentication-policies.json")),
         new JsonDocumentStore<EmergencyAccessCredentialRecord>(Path.Combine(root, "emergency-access-credentials.json")),
-        new AuditIntegrityService(db, TimeProvider.System), resolver);
+        new AuditIntegrityService(db, TimeProvider.System), new TenantRlsScope(db), resolver);
 }

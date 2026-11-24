@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using RegentAgent.Contracts.Identity;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.ControlPlane.Identity;
+using RegentAgent.ControlPlane.Infrastructure;
 using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
@@ -24,7 +25,7 @@ public sealed partial class IdentityService(
     JsonDocumentStore<ExternalLoginTransactionRecord> externalTransactions,
     JsonDocumentStore<AuthenticationPolicyRecord> authenticationPolicies,
     JsonDocumentStore<EmergencyAccessCredentialRecord> emergencyCredentials,
-    AuditIntegrityService audit,
+    AuditIntegrityService audit, TenantRlsScope rlsScope,
     IExternalIdentityProviderResolver? externalProviders = null)
 {
     public async Task<AuthResult> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
@@ -37,15 +38,19 @@ public sealed partial class IdentityService(
             throw new InvalidOperationException("Email is already registered.");
         var userId = Guid.NewGuid();
         var tenantId = Guid.NewGuid();
-        db.Users.Add(new UserRecord { Id = userId, Email = email, DisplayName = request.DisplayName });
-        db.Tenants.Add(new TenantRecord { Id = tenantId, Name = email.Split('@')[0], CompanyName = request.CompanyName });
-        db.Memberships.Add(new MembershipRecord { Id = Guid.NewGuid(), TenantId = tenantId, UserId = userId, Role = "Owner" });
-        db.Charters.Add(new CharterRecord
+        await rlsScope.ExecuteAsync(tenantId, userId, async token =>
         {
-            TenantId = tenantId, Mission = "Build useful products autonomously.", MonthlyBudgetMinor = 1_000_000,
-            Currency = "CNY", Version = 1, UpdatedAt = clock.GetUtcNow()
-        });
-        await db.SaveChangesAsync(cancellationToken);
+            db.Users.Add(new UserRecord { Id = userId, Email = email, DisplayName = request.DisplayName });
+            db.Tenants.Add(new TenantRecord { Id = tenantId, Name = email.Split('@')[0], CompanyName = request.CompanyName });
+            db.Memberships.Add(new MembershipRecord { Id = Guid.NewGuid(), TenantId = tenantId, UserId = userId, Role = "Owner" });
+            db.Charters.Add(new CharterRecord
+            {
+                TenantId = tenantId, Mission = "Build useful products autonomously.", MonthlyBudgetMinor = 1_000_000,
+                Currency = "CNY", Version = 1, UpdatedAt = clock.GetUtcNow()
+            });
+            await db.SaveChangesAsync(token);
+            return true;
+        }, cancellationToken);
         await credentials.PutAsync(userId.ToString(), new CredentialRecord
         {
             UserId = userId, PasswordHash = HashPassword(request.Password), UpdatedAt = clock.GetUtcNow()
@@ -71,7 +76,8 @@ public sealed partial class IdentityService(
             credential.UpdatedAt = clock.GetUtcNow();
             await credentials.PutAsync(user.Id.ToString(), credential, cancellationToken);
         }
-        var memberships = await db.Memberships.AsNoTracking().Where(x => x.UserId == user.Id).ToListAsync(cancellationToken);
+        var memberships = await rlsScope.ExecuteAsync(null, user.Id,
+            token => db.Memberships.AsNoTracking().Where(x => x.UserId == user.Id).ToListAsync(token), cancellationToken);
         var membership = memberships.FirstOrDefault(x => request.TenantId is null || x.TenantId == request.TenantId)
             ?? memberships.FirstOrDefault() ?? throw new UnauthorizedAccessException("No tenant membership.");
         await EnsureLocalLoginAllowedAsync(membership.TenantId, cancellationToken);
@@ -132,13 +138,18 @@ public sealed partial class IdentityService(
         var external = await IdentityResolver().Resolve(provider).AuthenticateAsync(new ExternalIdentityRequest(
             transaction.TenantId, provider, identity.Issuer, null, null, null, callback.Code,
             CodeVerifier: transaction.CodeVerifier, Nonce: transaction.Nonce), ProviderConfiguration(identity), cancellationToken);
-        var user = await ResolveExternalUserAsync(transaction.TenantId, provider, external, false, cancellationToken);
-        var capabilities = await ApplyExternalPolicyAsync(transaction.TenantId, provider, external, user.Id, cancellationToken);
+        var (user, capabilities, role) = await rlsScope.ExecuteAsync(transaction.TenantId, null, async token =>
+        {
+            var resolved = await ResolveExternalUserAsync(transaction.TenantId, provider, external, false, token);
+            var granted = await ApplyExternalPolicyAsync(transaction.TenantId, provider, external, resolved.Id, token);
+            var membershipRole = await db.Memberships.AsNoTracking()
+                .Where(x => x.TenantId == transaction.TenantId && x.UserId == resolved.Id)
+                .Select(x => x.Role).SingleAsync(token);
+            return (resolved, granted, membershipRole);
+        }, cancellationToken);
         var session = await CreateSessionAsync(user.Id, transaction.TenantId, cancellationToken,
             TimeSpan.FromHours(8), provider);
         var displayName = await DisplayNameAsync(user.Id, transaction.TenantId, user.DisplayName, cancellationToken);
-        var role = await db.Memberships.AsNoTracking().Where(x => x.TenantId == transaction.TenantId && x.UserId == user.Id)
-            .Select(x => x.Role).SingleAsync(cancellationToken);
         return new AuthResult(user.Email, displayName, user.Id, transaction.TenantId, session.Id, role, [])
         {
             AuthMethod = provider, Capabilities = capabilities
@@ -162,14 +173,19 @@ public sealed partial class IdentityService(
         var external = await adapter.AuthenticateAsync(new ExternalIdentityRequest(
             request.TenantId, provider, request.Issuer, request.Subject, request.Email, request.DisplayName,
             request.Code, request.IdToken, request.CodeVerifier, request.Nonce), ProviderConfiguration(identity), cancellationToken);
-        var user = await ResolveExternalUserAsync(request.TenantId, provider, external,
-            policy.Mode != "required", cancellationToken);
-        var capabilities = await ApplyExternalPolicyAsync(request.TenantId, provider, external, user.Id, cancellationToken);
+        var (user, capabilities, role) = await rlsScope.ExecuteAsync(request.TenantId, null, async token =>
+        {
+            var resolved = await ResolveExternalUserAsync(request.TenantId, provider, external,
+                policy.Mode != "required", token);
+            var granted = await ApplyExternalPolicyAsync(request.TenantId, provider, external, resolved.Id, token);
+            var membershipRole = await db.Memberships.AsNoTracking()
+                .Where(x => x.TenantId == request.TenantId && x.UserId == resolved.Id)
+                .Select(x => x.Role).SingleAsync(token);
+            return (resolved, granted, membershipRole);
+        }, cancellationToken);
         var session = await CreateSessionAsync(user.Id, request.TenantId, cancellationToken,
             TimeSpan.FromHours(8), provider);
         var displayName = await DisplayNameAsync(user.Id, request.TenantId, user.DisplayName, cancellationToken);
-        var role = await db.Memberships.AsNoTracking().Where(x => x.TenantId == request.TenantId && x.UserId == user.Id)
-            .Select(x => x.Role).SingleAsync(cancellationToken);
         return new AuthResult(user.Email, displayName, user.Id, request.TenantId, session.Id, role, [])
         {
             AuthMethod = provider, Capabilities = capabilities

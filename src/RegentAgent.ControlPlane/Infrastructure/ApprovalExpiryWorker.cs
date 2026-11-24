@@ -1,4 +1,6 @@
+using Microsoft.EntityFrameworkCore;
 using RegentAgent.ControlPlane.Application;
+using RegentAgent.ControlPlane.Data;
 
 namespace RegentAgent.ControlPlane.Infrastructure;
 
@@ -13,7 +15,11 @@ public sealed class ApprovalExpiryWorker(IServiceScopeFactory scopeFactory, ILog
             try
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
-                await scope.ServiceProvider.GetRequiredService<ApprovalExpiryService>().ExpireDueAsync(stoppingToken);
+                var db = scope.ServiceProvider.GetRequiredService<RegentDbContext>();
+                var rls = scope.ServiceProvider.GetRequiredService<TenantRlsScope>();
+                var expiry = scope.ServiceProvider.GetRequiredService<ApprovalExpiryService>();
+                foreach (var tenantId in await db.Tenants.AsNoTracking().Select(x => x.Id).ToListAsync(stoppingToken))
+                    await rls.ExecuteAsync(tenantId, null, token => expiry.ExpireDueAsync(token), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception exception) { logger.LogError(exception, "Approval expiry worker failed."); }

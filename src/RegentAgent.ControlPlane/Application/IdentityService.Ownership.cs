@@ -41,14 +41,18 @@ public sealed partial class IdentityService
             ?? throw new KeyNotFoundException("User not found.");
         if (!string.Equals(user.Email, record.Email, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Invitation email does not match the signed-in account.");
-        if (!await db.Memberships.AnyAsync(x => x.TenantId == record.TenantId && x.UserId == userId, cancellationToken))
-            db.Memberships.Add(new MembershipRecord
-            {
-                Id = Guid.NewGuid(), TenantId = record.TenantId, UserId = userId, Role = record.Role
-            });
+        await rlsScope.ExecuteAsync(record.TenantId, userId, async token =>
+        {
+            if (!await db.Memberships.AnyAsync(x => x.TenantId == record.TenantId && x.UserId == userId, token))
+                db.Memberships.Add(new MembershipRecord
+                {
+                    Id = Guid.NewGuid(), TenantId = record.TenantId, UserId = userId, Role = record.Role
+                });
+            await db.SaveChangesAsync(token);
+            return true;
+        }, cancellationToken);
         record.Status = "Accepted";
         await invitations.PutAsync(record.Id.ToString(), record, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<OwnershipDelegationDto> CreateOwnershipDelegationAsync(Guid userId, Guid tenantId,

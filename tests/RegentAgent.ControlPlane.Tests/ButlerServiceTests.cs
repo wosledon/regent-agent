@@ -21,7 +21,8 @@ public sealed class ButlerServiceTests
             await DbInitializer.InitializeAsync(db, CancellationToken.None);
             var service = new ButlerService(db,
                 new JsonDocumentStore<ButlerReport>(Path.Combine(root, "reports.json")),
-                new JsonDocumentStore<ReportSchedule>(Path.Combine(root, "schedules.json")), TimeProvider.System);
+                new JsonDocumentStore<ReportSchedule>(Path.Combine(root, "schedules.json")), TimeProvider.System,
+                new TenantRlsScope(db));
             var tenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
             var answer = await service.AskAsync(tenantId, "What is the project status?", CancellationToken.None);
             var report = await service.GenerateReportAsync(tenantId, "Daily", CancellationToken.None);

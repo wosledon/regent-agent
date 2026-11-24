@@ -1,5 +1,6 @@
 using System.Net;
 using System.Security.Cryptography;
+using Amazon.Runtime;
 using Amazon.S3;
 using Amazon.S3.Model;
 
@@ -52,11 +53,14 @@ public sealed class S3ObjectStore(IAmazonS3 client, S3ObjectStoreOptions options
     public static IObjectStore Create(S3ObjectStoreOptions options)
     {
         options.Validate();
+        // AWSSDK v4 resolves RegionEndpoint ahead of a custom ServiceURL.
         var config = new AmazonS3Config
         {
             ServiceURL = options.ServiceUrl,
-            RegionEndpoint = Amazon.RegionEndpoint.GetBySystemName(options.Region),
+            AuthenticationRegion = options.Region,
             ForcePathStyle = options.ForcePathStyle,
+            RequestChecksumCalculation = RequestChecksumCalculation.WHEN_REQUIRED,
+            ResponseChecksumValidation = ResponseChecksumValidation.WHEN_REQUIRED,
             Timeout = TimeSpan.FromSeconds(options.TimeoutSeconds),
             MaxErrorRetry = options.MaxRetries
         };
@@ -85,7 +89,9 @@ public sealed class S3ObjectStore(IAmazonS3 client, S3ObjectStoreOptions options
                 Key = request.ObjectKey,
                 InputStream = input,
                 ContentType = request.ContentType,
-                AutoCloseStream = false
+                AutoCloseStream = false,
+                // RustFS rejects SigV4 aws-chunked payloads; normal payload signing remains enabled.
+                UseChunkEncoding = false
             };
             put.Metadata.Add(HashMetadataKey, checksum);
             await client.PutObjectAsync(put, cancellationToken);

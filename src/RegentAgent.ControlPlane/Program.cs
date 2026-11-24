@@ -338,6 +338,7 @@ RegisterTenantStore<ReportSchedule>(builder.Services, "data/modules/report-sched
 RegisterTenantStore<AgentEvolutionState>(builder.Services, "data/modules/agent-evolution.json");
 RegisterTenantStore<TaskGovernanceState>(builder.Services, "data/modules/task-governance.json");
 builder.Services.AddScoped<TenantPurgeService>();
+builder.Services.AddScoped<TenantRlsScope>();
 builder.Services.AddScoped<IdempotencyService>();
 builder.Services.AddSingleton(new CursorCodec(builder.Configuration["Api:CursorKey"] ?? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))));
 builder.Services.AddScoped<OutboxService>();
@@ -447,6 +448,7 @@ app.Use(async (context, next) =>
         {
             var identity = context.RequestServices.GetRequiredService<AgentAssignmentTokenValidator>()
                 .Validate(authorization["Bearer ".Length..].Trim());
+            context.Items["Regent.TenantId"] = identity.TenantId.ToString();
             var db = context.RequestServices.GetRequiredService<RegentDbContext>();
             var employee = await db.Employees.AsNoTracking().SingleOrDefaultAsync(x =>
                 x.TenantId == identity.TenantId && x.Id == identity.EmployeeId, context.RequestAborted);
@@ -541,7 +543,7 @@ app.MapGet("/health/ready", async (RegentDbContext db, CancellationToken cancell
 }).AllowAnonymous();
 
 app.MapPost("/auth/dev-login", async (DevLoginRequest request, RegentDbContext db, IdentityService identity,
-    HttpContext context, CancellationToken cancellationToken) =>
+    TenantRlsScope rlsScope, HttpContext context, CancellationToken cancellationToken) =>
 {
     if (!app.Environment.IsDevelopment())
     {
@@ -549,10 +551,12 @@ app.MapPost("/auth/dev-login", async (DevLoginRequest request, RegentDbContext d
     }
 
     var email = request.Email.Trim().ToLowerInvariant();
-    var memberships = await db.Memberships.AsNoTracking()
+    var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+    if (user is null) return ApiResults.Problem(RegentAgent.Contracts.Results.Error.Unauthorized("Unknown development user."), context.TraceIdentifier);
+    var memberships = await rlsScope.ExecuteAsync(null, user.Id, token => db.Memberships.AsNoTracking()
         .Join(db.Users.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new { m.TenantId, m.Role, u.Id, u.Email, u.DisplayName })
-        .Where(x => x.Email == email)
-        .ToListAsync(cancellationToken);
+        .Where(x => x.Id == user.Id)
+        .ToListAsync(token), cancellationToken);
     var membership = memberships.FirstOrDefault(x => request.TenantId is null || x.TenantId == request.TenantId)
         ?? memberships.FirstOrDefault();
     if (membership is null)
@@ -642,13 +646,15 @@ app.MapPost("/auth/logout", async (HttpContext context, IdentityService identity
 }).RequireAuthorization();
 
 app.MapPost("/auth/dev-agent-token", async (DevAgentTokenRequest request, RegentDbContext db,
-    AgentAssignmentTokenService tokens, CancellationToken cancellationToken) =>
+    AgentAssignmentTokenService tokens, TenantRlsScope rlsScope, CancellationToken cancellationToken) =>
 {
     if (!app.Environment.IsDevelopment()) return Results.NotFound();
-    if (!await db.Employees.AnyAsync(x => x.TenantId == request.TenantId && x.Id == request.EmployeeId, cancellationToken))
-        return Results.NotFound();
-    if (request.TaskId is { } taskId && !await db.Tasks.AnyAsync(x => x.TenantId == request.TenantId && x.Id == taskId, cancellationToken))
-        return Results.NotFound();
+    var valid = await rlsScope.ExecuteAsync(request.TenantId, null, async token =>
+    {
+        if (!await db.Employees.AnyAsync(x => x.TenantId == request.TenantId && x.Id == request.EmployeeId, token)) return false;
+        return request.TaskId is not { } taskId || await db.Tasks.AnyAsync(x => x.TenantId == request.TenantId && x.Id == taskId, token);
+    }, cancellationToken);
+    if (!valid) return Results.NotFound();
     var scopes = request.Scopes is { Count: > 0 } ? request.Scopes : AgentScopes.Baseline;
     var issued = tokens.Issue(new AgentAssignmentRequest(request.TenantId, request.EmployeeId, request.TaskId,
         request.RunnerId ?? "dev-runner", scopes));
@@ -656,12 +662,12 @@ app.MapPost("/auth/dev-agent-token", async (DevAgentTokenRequest request, Regent
 }).AllowAnonymous();
 
 app.MapPost("/auth/switch-tenant", async (SwitchTenantRequest request, RegentDbContext db, IdentityService identity,
-    HttpContext context, CancellationToken cancellationToken) =>
+    TenantRlsScope rlsScope, HttpContext context, CancellationToken cancellationToken) =>
 {
     var userId = Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!);
-    var membership = await db.Memberships.AsNoTracking()
+    var membership = await rlsScope.ExecuteAsync(request.TenantId, userId, token => db.Memberships.AsNoTracking()
         .Join(db.Users.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new { m.TenantId, m.Role, u.Id, u.DisplayName })
-        .SingleOrDefaultAsync(x => x.TenantId == request.TenantId && x.Id == userId, cancellationToken);
+        .SingleOrDefaultAsync(x => x.TenantId == request.TenantId && x.Id == userId, token), cancellationToken);
     if (membership is null) return Results.NotFound();
     if (Guid.TryParse(context.User.FindFirstValue("session_id"), out var previousSessionId))
         await identity.RevokeSessionAsync(userId, previousSessionId, cancellationToken);
@@ -2155,12 +2161,16 @@ agentApi.MapPost("/conversations/{id}/messages", async (string id, SendMessageRe
 }).WithTags("Agent Chat");
 
 app.MapPost("/internal/metering/usage", async (ModelUsageProjection projection,
-    RuntimePolicyService policy, RegentDbContext db, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+    RuntimePolicyService policy, RegentDbContext db, AuditIntegrityService audit, HttpContext context,
+    CancellationToken cancellationToken) =>
 {
     if (!Guid.TryParse(projection.TenantId, out var tenantId) || string.IsNullOrWhiteSpace(projection.UsageEventId)
         || string.IsNullOrWhiteSpace(projection.Model) || projection.MinorUnitFactor <= 0 || projection.AmountMinor < 0
         || string.IsNullOrWhiteSpace(projection.Currency) || projection.Currency.Length != 3
-        || projection.OccurredAt == default || !await db.Tenants.AnyAsync(x => x.Id == tenantId, cancellationToken))
+        || projection.OccurredAt == default)
+        throw new InvalidOperationException("Usage projection is invalid.");
+    context.Items["Regent.TenantId"] = tenantId.ToString();
+    if (!await db.Tenants.AnyAsync(x => x.Id == tenantId, cancellationToken))
         throw new InvalidOperationException("Usage projection is invalid.");
     Guid? employeeId = null;
     if (!string.IsNullOrWhiteSpace(projection.EmployeeId))
@@ -2217,6 +2227,7 @@ app.MapPost("/internal/tasks/claim", async (HttpContext context, TaskExecutionSe
     if (string.IsNullOrWhiteSpace(runnerId)) return Results.BadRequest("X-Runner-Id is required.");
     var tenantId = Guid.Parse(context.Request.Headers["X-Regent-Tenant"].FirstOrDefault()
         ?? "11111111-1111-1111-1111-111111111111");
+    context.Items["Regent.TenantId"] = tenantId.ToString();
     var task = await service.ClaimAsync(runnerId, tenantId, cancellationToken);
     return task is null ? Results.NoContent() : Results.Ok(task);
 }).AllowAnonymous();
@@ -2226,6 +2237,7 @@ app.MapPost("/internal/tasks/{id:guid}/checkpoint", async (Guid id, TaskCheckpoi
 {
     var tenantId = Guid.Parse(context.Request.Headers["X-Regent-Tenant"].FirstOrDefault()
         ?? "11111111-1111-1111-1111-111111111111");
+    context.Items["Regent.TenantId"] = tenantId.ToString();
     return await service.CheckpointAsync(id, checkpoint, tenantId, cancellationToken) ? Results.NoContent() : Results.Conflict();
 }).AllowAnonymous();
 
@@ -2234,6 +2246,7 @@ app.MapPost("/internal/tasks/{id:guid}/complete", async (Guid id, TaskCompletion
 {
     var tenantId = Guid.Parse(context.Request.Headers["X-Regent-Tenant"].FirstOrDefault()
         ?? "11111111-1111-1111-1111-111111111111");
+    context.Items["Regent.TenantId"] = tenantId.ToString();
     return await service.CompleteAsync(id, completion, tenantId, cancellationToken) ? Results.NoContent() : Results.Conflict();
 }).AllowAnonymous();
 
@@ -2308,9 +2321,10 @@ static async Task SignInTenantAsync(HttpContext context, Guid userId, Guid tenan
             claims.Add(new Claim("session_kind", session.SessionKind));
         }
     }
-    var capabilities = await context.RequestServices.GetRequiredService<RegentDbContext>().Memberships.AsNoTracking()
-        .Where(x => x.TenantId == tenantId && x.UserId == userId).Select(x => x.CapabilitiesJson)
-        .SingleOrDefaultAsync(cancellationToken);
+    var capabilities = await context.RequestServices.GetRequiredService<TenantRlsScope>().ExecuteAsync(tenantId, userId,
+        token => context.RequestServices.GetRequiredService<RegentDbContext>().Memberships.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.UserId == userId).Select(x => x.CapabilitiesJson)
+            .SingleOrDefaultAsync(token), cancellationToken);
     if (!string.IsNullOrWhiteSpace(capabilities))
         foreach (var capability in JsonSerializer.Deserialize<string[]>(capabilities) ?? [])
             claims.Add(new Claim("capability", capability));

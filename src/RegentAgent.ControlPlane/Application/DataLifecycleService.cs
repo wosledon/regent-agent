@@ -4,12 +4,13 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RegentAgent.Contracts.Governance;
 using RegentAgent.ControlPlane.Data;
+using RegentAgent.ControlPlane.Infrastructure;
 using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
 
 public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> store,
-    IObjectStore objects, RegentDbContext db, TimeProvider clock, TenantPurgeService tenantPurge)
+    IObjectStore objects, RegentDbContext db, TimeProvider clock, TenantPurgeService tenantPurge, TenantRlsScope rlsScope)
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -216,7 +217,8 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
                 var blocked = state.LegalHolds.Where(IsActiveHold).Any(x => x.ResourceRef == request.ResourceId
                     || x.ResourceRef == $"tenant:{request.ResourceId}" || x.ResourceRef == "*");
                 if (blocked) continue;
-                await PurgeAsync(state.TenantId, request.Id, "PURGE", cancellationToken);
+                await rlsScope.ExecuteAsync(state.TenantId, null,
+                    token => PurgeAsync(state.TenantId, request.Id, "PURGE", token), cancellationToken);
                 purged++;
             }
         }

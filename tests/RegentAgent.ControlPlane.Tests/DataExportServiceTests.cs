@@ -42,7 +42,8 @@ public sealed class DataExportServiceTests
                 "{\"" + tenant + "\":{\"token\":\"must-not-export\"}}");
             var service = new DataExportService(db,
                 new JsonDocumentStore<DataExportDto>(Path.Combine(root, "exports.json")),
-                new LocalFileObjectStore(Path.Combine(root, "objects")), new TestEnvironment(root), TimeProvider.System);
+                new NonSeekableObjectStore(new LocalFileObjectStore(Path.Combine(root, "objects"))),
+                new TestEnvironment(root), TimeProvider.System);
             var export = await service.CreateAsync(user, tenant, CancellationToken.None);
             Assert.True(export.TableCount > 0);
             Assert.NotEmpty(export.Sha256);
@@ -63,6 +64,42 @@ public sealed class DataExportServiceTests
 
     private static string NewRoot() => Path.Combine(Path.GetTempPath(), $"export-{Guid.NewGuid():N}");
     private static void Delete(string root) { if (Directory.Exists(root)) Directory.Delete(root, true); }
+
+    private sealed class NonSeekableObjectStore(IObjectStore inner) : IObjectStore
+    {
+        public Task<StoredObject> PutAsync(ObjectUploadRequest request, CancellationToken cancellationToken) =>
+            inner.PutAsync(request, cancellationToken);
+        public Task<StoredObject?> GetMetadataAsync(string objectKey, CancellationToken cancellationToken) =>
+            inner.GetMetadataAsync(objectKey, cancellationToken);
+        public async Task<Stream?> OpenReadAsync(string objectKey, CancellationToken cancellationToken)
+        {
+            var stream = await inner.OpenReadAsync(objectKey, cancellationToken);
+            return stream is null ? null : new NonSeekableStream(stream);
+        }
+        public Task<bool> DeleteAsync(string objectKey, CancellationToken cancellationToken) =>
+            inner.DeleteAsync(objectKey, cancellationToken);
+    }
+
+    private sealed class NonSeekableStream(Stream inner) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            inner.ReadAsync(buffer, cancellationToken);
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
 
     private sealed class TestEnvironment(string root) : IWebHostEnvironment
     {

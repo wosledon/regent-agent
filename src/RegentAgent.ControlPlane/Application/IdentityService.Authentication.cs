@@ -149,45 +149,48 @@ public sealed partial class IdentityService
                 ?? throw new UnauthorizedAccessException("Emergency access credential is invalid or expired.");
             var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == record.UserId, cancellationToken)
                 ?? throw new UnauthorizedAccessException("Emergency access account is unavailable.");
-            var role = await db.Memberships.AsNoTracking().Where(x => x.TenantId == request.TenantId && x.UserId == user.Id)
-                .Select(x => x.Role).SingleOrDefaultAsync() ?? throw new UnauthorizedAccessException("Emergency access account is not a tenant member.");
-            if (role is not ("Owner" or "CoOwner")) throw new UnauthorizedAccessException("Emergency access requires an existing owner account.");
-            record.Status = "Used";
-            record.UsedAt = now;
-            await emergencyCredentials.PutAsync(record.Id.ToString(), record, cancellationToken);
-            var rotatedCredential = UrlToken();
-            var replacement = new EmergencyAccessCredentialRecord
+            return await rlsScope.ExecuteAsync(request.TenantId, user.Id, async token =>
             {
-                TenantId = request.TenantId, CodeHash = HashToken(rotatedCredential),
-                CreatedAt = now, ExpiresAt = now.AddDays(90), CreatedBy = record.CreatedBy, UserId = record.UserId
-            };
-            await emergencyCredentials.PutAsync(replacement.Id.ToString(), replacement, cancellationToken);
-            var session = new AuthSessionRecord
-            {
-                UserId = user.Id, TenantId = request.TenantId, CreatedAt = now, LastActivityAt = now,
-                ExpiresAt = now.AddMinutes(15), AuthMethod = "Emergency", SessionKind = "Emergency",
-                AllowedActionsJson = JsonSerializer.Serialize(new[] { "sso.restore", "account.access" }, JsonOptions),
-                IdleTimeoutMinutes = 15
-            };
-            await sessions.PutAsync(session.Id.ToString(), session, cancellationToken);
-            var owners = await db.Memberships.AsNoTracking().Where(x => x.TenantId == request.TenantId && x.Role == "Owner")
-                .Select(x => x.UserId).ToListAsync(cancellationToken);
-            foreach (var ownerId in owners)
-                db.Notifications.Add(new NotificationRecord
+                var role = await db.Memberships.AsNoTracking().Where(x => x.TenantId == request.TenantId && x.UserId == user.Id)
+                    .Select(x => x.Role).SingleOrDefaultAsync(token) ?? throw new UnauthorizedAccessException("Emergency access account is not a tenant member.");
+                if (role is not ("Owner" or "CoOwner")) throw new UnauthorizedAccessException("Emergency access requires an existing owner account.");
+                record.Status = "Used";
+                record.UsedAt = now;
+                await emergencyCredentials.PutAsync(record.Id.ToString(), record, token);
+                var rotatedCredential = UrlToken();
+                var replacement = new EmergencyAccessCredentialRecord
                 {
-                    Id = Guid.NewGuid(), TenantId = request.TenantId, RecipientId = ownerId, Level = "Critical",
-                    Title = "Emergency access was used", Status = "Available", CreatedAt = now
-                });
-            await db.SaveChangesAsync(cancellationToken);
-            await audit.AppendAsync(request.TenantId, "auth.emergency_access.used", user.DisplayName, new
-            {
-                actor_type = "Human", user_id = user.Id, session_id = session.Id,
-                expires_at = session.ExpiresAt, purpose = request.Purpose, credential_rotated = true
+                    TenantId = request.TenantId, CodeHash = HashToken(rotatedCredential),
+                    CreatedAt = now, ExpiresAt = now.AddDays(90), CreatedBy = record.CreatedBy, UserId = record.UserId
+                };
+                await emergencyCredentials.PutAsync(replacement.Id.ToString(), replacement, token);
+                var session = new AuthSessionRecord
+                {
+                    UserId = user.Id, TenantId = request.TenantId, CreatedAt = now, LastActivityAt = now,
+                    ExpiresAt = now.AddMinutes(15), AuthMethod = "Emergency", SessionKind = "Emergency",
+                    AllowedActionsJson = JsonSerializer.Serialize(new[] { "sso.restore", "account.access" }, JsonOptions),
+                    IdleTimeoutMinutes = 15
+                };
+                await sessions.PutAsync(session.Id.ToString(), session, token);
+                var owners = await db.Memberships.AsNoTracking().Where(x => x.TenantId == request.TenantId && x.Role == "Owner")
+                    .Select(x => x.UserId).ToListAsync(token);
+                foreach (var ownerId in owners)
+                    db.Notifications.Add(new NotificationRecord
+                    {
+                        Id = Guid.NewGuid(), TenantId = request.TenantId, RecipientId = ownerId, Level = "Critical",
+                        Title = "Emergency access was used", Status = "Available", CreatedAt = now
+                    });
+                await db.SaveChangesAsync(token);
+                await audit.AppendAsync(request.TenantId, "auth.emergency_access.used", user.DisplayName, new
+                {
+                    actor_type = "Human", user_id = user.Id, session_id = session.Id,
+                    expires_at = session.ExpiresAt, purpose = request.Purpose, credential_rotated = true
+                }, token);
+                var capabilities = await LoadCapabilitiesAsync(request.TenantId, user.Id, token);
+                return new EmergencyAccessResult(user.Id, request.TenantId, session.Id, session.ExpiresAt,
+                    await DisplayNameAsync(user.Id, request.TenantId, user.DisplayName, token), role, capabilities,
+                    rotatedCredential) { Email = user.Email };
             }, cancellationToken);
-            var capabilities = await LoadCapabilitiesAsync(request.TenantId, user.Id, cancellationToken);
-            return new EmergencyAccessResult(user.Id, request.TenantId, session.Id, session.ExpiresAt,
-                await DisplayNameAsync(user.Id, request.TenantId, user.DisplayName, cancellationToken), role, capabilities,
-                rotatedCredential) { Email = user.Email };
         }
         finally { EmergencyAccessGate.Release(); }
     }
