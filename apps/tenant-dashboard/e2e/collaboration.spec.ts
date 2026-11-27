@@ -1,4 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { requireDevelopmentAuth } from './support/externalStack';
+
+requireDevelopmentAuth();
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('regent.ui.locale', 'en-US'));
+});
 
 test('collaboration workspace switches views and traces employee work', async ({ page }) => {
   await page.goto('/login');

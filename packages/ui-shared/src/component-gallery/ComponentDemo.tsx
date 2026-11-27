@@ -7,7 +7,7 @@ export interface ComponentDemoProps {
 export function ComponentDemo({ entry }: ComponentDemoProps) {
   const Demo = entry.demo;
   return (
-    <div data-component={entry.id} style={{ padding: 24, border: '1px dashed #c7cde0', borderRadius: 12 }}>
+    <div data-component={entry.id} style={{ padding: 24, border: '1px dashed var(--regent-border-default, #D8DEE9)', borderRadius: 8, maxWidth: '100%', overflowX: 'auto' }}>
       <Demo />
     </div>
   );

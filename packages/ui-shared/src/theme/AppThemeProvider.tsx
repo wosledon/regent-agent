@@ -1,10 +1,15 @@
-import type { PropsWithChildren } from 'react';
+import { useMemo, type PropsWithChildren } from 'react';
 import { CssBaseline, ThemeProvider } from '@mui/material';
-import { appTheme } from './theme';
+import { createAppTheme, type AppKind } from './theme';
 
-export function AppThemeProvider({ children }: PropsWithChildren) {
+export interface AppThemeProviderProps extends PropsWithChildren {
+  appKind?: AppKind;
+}
+
+export function AppThemeProvider({ children, appKind = 'tenant' }: AppThemeProviderProps) {
+  const theme = useMemo(() => createAppTheme(appKind), [appKind]);
   return (
-    <ThemeProvider theme={appTheme}>
+    <ThemeProvider theme={theme}>
       <CssBaseline />
       {children}
     </ThemeProvider>

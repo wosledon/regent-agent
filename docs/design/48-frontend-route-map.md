@@ -10,8 +10,10 @@
 - Tenant Dashboard 不包含运营页面。
 - Ops Console 不包含租户公司日常页面。
 - 路由守卫只改善体验，服务端 API 仍逐次鉴权。
+- 两个应用等待服务端 Cookie 会话引导完成后放行；未认证深链接仅保留经校验的同源相对 path/query/hash 返回目标，401 和退出失败清除本地认证外壳与查询缓存。403 保留 PermissionDenied，网络/5xx 保留可重试错误；Ops `/status` 的公开访问不受匿名引导或全局 401 导航影响。
 - 运营后台不进入租户导航。
-- 开发期组件页 `/dev/components` 不进入生产导航。
+- 开发期组件页 `/dev/components` 不进入生产导航；生产深链接显示仅开发可用提示。组件目录仅展示摘要，选中 Demo 单独挂载。
+- 两个应用共享路由无关的 `WorkspaceShell`：桌面为 248px 深墨蓝持久导航，移动端为 280px 临时抽屉；导航数据、权限过滤和用户操作仍由各应用提供。
 
 ## 2. Tenant Dashboard 站点地图
 
@@ -53,7 +55,7 @@ flowchart TB
 
 | 路由 | 页面 | 主要 Capability | 布局 | 核心组件 |
 |---|---|---|---|---|
-| `/login` | 登录 | 匿名 | AuthLayout | 登录表单、OIDC 按钮 |
+| `/login` | 登录 | 匿名 | AuthLayout | 认证方式表单、LocaleSwitch、恢复码/紧急凭据确认 |
 | `/auth/callback` | OIDC 回调 | 匿名 | 最小布局 | 状态提示、错误恢复 |
 | `/account/recovery` | 恢复码找回 | 匿名 | AuthLayout | 恢复码表单 |
 | `/` | Boss 首屏 | `dashboard.read` | AppShell | 七类首屏卡片 |
@@ -63,11 +65,11 @@ flowchart TB
 | `/projects/:projectId/tasks` | 任务看板 | `task.read` | DetailLayout | TaskBoard、FilterBar |
 | `/projects/:projectId/releases` | 发布门禁 | `release.read` | DetailLayout | ReleaseChecklist、AuditTimeline |
 | `/organization` | 组织与员工 | `organization.read` | ListLayout | OrganizationTree、EmployeeStateBadge |
-| `/organization/collaboration` | 组织协作可视化 | `organization.read` | WorkspaceLayout | OfficeView、OrgChartView、NetworkView、ActivityTimeline、CoordinationPanel、TracePanel |
+| `/organization/collaboration` | 组织协作可视化 | `effective_access.can_read_collaboration` | WorkspaceLayout | OfficeView、OrgChartView、NetworkView、ActivityTimeline、CoordinationPanel、TracePanel |
 | `/organization/employees/:employeeId` | 员工详情 | `employee.read` | DetailLayout | EmployeeWorkTimeline、WorkLedgerTable |
 | `/organization/positions` | 岗位管理 | `position.read` | DetailLayout | 岗位树、能力矩阵 |
-| `/messages` | Agent 消息只读列表 | `message.read` | SplitLayout | ConversationList、NotificationMenu、AgentActorBadge |
-| `/messages/:conversationId` | 会话详情 | `message.read` | SplitLayout | 消息流、委派/交接面板 |
+| `/messages` | Agent 消息只读列表 | `effective_access.can_read_chat` | SplitLayout | ConversationList、NotificationMenu、AgentActorBadge |
+| `/messages?conversation=:conversationId` | 会话详情 | `effective_access.can_read_chat` | SplitLayout | 消息流、委派/交接面板 |
 | `/models` | 模型池 | `models.read` | DetailLayout | ModelBindingCard、ProviderRegionSelect |
 | `/budget` | 预算与成本 | `budget.read` | DetailLayout | BudgetCostCard、CostBreakdownChart |
 | `/billing` | 套餐与计费 | Owner | DetailLayout | PlanQuotaTable、InvoiceTable、BillingLedgerTable |
@@ -88,7 +90,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    OpsLogin["Operator 登录 + MFA"] --> OpsShell["Ops AppShell"]
+    OpsLogin["Operator 本地演示登录"] --> OpsShell["Ops AppShell"]
     OpsShell --> Overview["运营总览"]
     OpsShell --> Tenants["租户账户"]
     OpsShell --> Resources["资源池"]
@@ -103,7 +105,7 @@ flowchart TB
 
 | 路由 | 页面 | 主要角色 | 布局 | 核心组件 |
 |---|---|---|---|---|
-| `/login` | Operator 登录 | 匿名 | AuthLayout | MFA、登录表单 |
+| `/login` | Operator 登录 | 匿名 | AuthLayout | 本地/demo Operator 入口、LocaleSwitch、安全错误反馈 |
 | `/` | 运营总览 | Ops Viewer | AppShell | 容量、事件、SLO 卡片 |
 | `/tenants` | 租户列表 | Tenant Admin | ListLayout | TenantAccountTable |
 | `/tenants/:tenantId` | 租户详情 | Tenant Admin | DetailLayout | 配额、状态、SupportGrant 历史 |
@@ -114,36 +116,45 @@ flowchart TB
 | `/audit` | 运营审计 | Security Auditor | ListLayout | OpsAuditTable |
 | `/settings` | 运营设置 | Operator Admin | SettingsLayout | 角色、策略和值班配置 |
 
+Ops Viewer 满足 `OperatorReader`，可读取全部 `/ops` GET 和 `/ops/auth/me`；所有 `/ops` 状态变更端点另要求 `OperatorWriter`，因此 Viewer 的写入由服务端返回 403。前端禁用或隐藏写入口只改善体验，不替代服务端授权。
+
+两个登录页的 demo 入口都要求服务端显式 opt-in：Tenant 使用默认 `false` 的 `Identity:AllowDemoLogin`，Ops 使用默认 `false` 的 `Operations:AllowDemoLogin`，且必须同时处于 `Development`。CI e2e 只对临时 Development 进程启用，生产配置不启用。
+
 ## 6. 页面布局类型
 
 | 布局 | 适用页面 | 结构 |
 |---|---|---|
-| `AuthLayout` | 登录、OIDC、找回 | 品牌区 + 表单 + 帮助 |
-| `AppShell` | 大多数业务页面 | 导航 + 顶栏 + 内容 |
+| `AuthLayout` | 登录、OIDC、找回 | 桌面品牌/营销侧栏 + 移动品牌 + 语言切换 + 表单 + 页脚 |
+| `WorkspaceShell` | 大多数业务页面 | 桌面深色侧栏/移动抽屉 + 顶栏 + ContentContainer |
 | `ListLayout` | 项目、员工、行动中心 | PageHeader + FilterBar + DataTable |
-| `DetailLayout` | 项目、员工、审批 | PageHeader + Tabs + Aside |
-| `SplitLayout` | 消息、支持工单 | 列表 + 详情 |
-| `SettingsLayout` | 租户和个人设置 | 设置导航 + 表单区 |
-| `GalleryLayout` | 组件页 | 分类 + 搜索 + Demo |
-| `WorkspaceLayout` | 组织协作可视化 | 视图切换 + 图/办公室/时间线 + 追溯抽屉 |
+| `DetailLayout` | 项目、员工、审批 | PageHeader + 状态条 + DetailList/证据区 + 操作区 |
+| `SplitLayout` | 消息、支持工单 | 响应式列表 → 详情 |
+| `SettingsLayout` | 租户和个人设置 | 分区卡片 + 紧凑表单/表格 |
+| `GalleryLayout` | 组件页 | 分类 + 搜索 + 摘要目录 + 选中 Demo |
+| `WorkspaceLayout` | 组织协作可视化 | 视图切换 + 图/办公室/时间线 + 追溯面板 |
 
 ## 7. 路由与状态规则
 
 - URL 保存可分享的筛选、分页、标签页和选中对象。
 - 下钻保留来源筛选和返回位置。
 - 页面刷新后恢复路由和 Query 状态。
-- 无权限页面显示 PermissionDenied，不泄露资源细节。
+- 无权限页面显示 PermissionDenied，不泄露资源细节；Ops API 403 清除能力相关写入口并显示只读指导。
 - 会话过期返回登录并保存安全的目标路径。
+- 两个登录页使用已保存展示偏好 → 浏览器语言 → `zh-CN` 的 locale 解析；切换语言持久化到 `regent.ui.locale` 并更新文档 lang，不改变认证或租户策略。
+- 登录页只显示本地化的状态与安全错误；Tenant 已登录状态提供 Continue/Logout，Ops 已登录状态继续按校验后的返回目标重定向。
 - 租户切换后清空旧租户 Query 缓存和 SignalR 订阅。
 - SignalR 重连后重新拉取当前页面快照。
 - 移动端优先支持首屏、告警确认和审批。
 
 ## 8. 导航与权限
 
-- 服务端返回可见导航和 Capability。
+- `/auth/me` 返回 `capabilities` 和 `effective_access`，Tenant Dashboard 客户端从这些值派生可见导航，并使用 `effective_access.can_read_chat`、`effective_access.can_read_collaboration` 与 `effective_access.collaboration_scope`（`none|participant|observer`）。
+- `/messages` 与 `/organization/collaboration` 必须同时过滤导航并守卫直接路由；缺失或损坏 `effective_access` 时按 `none` 拒绝，显示本地化 PermissionDenied。
+- `OwnerObserver` 只读展示 Company/Project/Topic 共享会话、图、trace 与消息，不显示私聊，也不显示发送、创建或成员管理指导；`EmployeeMember` 继续使用授权列表并保持成员范围。
+- 页面查询和跨链接按有效访问开关禁用；消息页只能从当前授权会话列表派生选中项，未知 URL 会话 ID 不得触发消息请求。租户切换或重新登录时清除访问相关 Query 缓存并刷新 `/auth/me`。
 - 前端只做展示过滤，不替代 API 鉴权。
-- 租户导航最多两级。
-- Ops Console 使用独立导航树。
+- 租户导航最多两级，当前分组为 Overview、Delivery、Organization & People、Communication、Models & Knowledge、Governance & Compliance、Settings；消息分组仅在 `canReadChat` 时出现。
+- Ops Console 使用独立导航树，当前分组为 Operate 与 Assure。
 - 个人绩效、私人记忆和秘密不进入通用导航。
 
 ## 9. 页面验收

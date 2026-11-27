@@ -4,6 +4,7 @@ export type Freshness = 'live' | 'fresh' | 'stale' | 'unknown';
 
 export interface FreshnessBadgeProps {
   freshness: Freshness;
+  label?: string;
 }
 
 const tone: Record<Freshness, ChipTone> = {
@@ -13,6 +14,6 @@ const tone: Record<Freshness, ChipTone> = {
   unknown: 'neutral'
 };
 
-export function FreshnessBadge({ freshness }: FreshnessBadgeProps) {
-  return <StatusChip tone={tone[freshness]} label={freshness} />;
+export function FreshnessBadge({ freshness, label }: FreshnessBadgeProps) {
+  return <StatusChip tone={tone[freshness]} label={label ?? freshness} />;
 }

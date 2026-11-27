@@ -1,4 +1,4 @@
-import { trackBrowserApiOutcome } from '@regent/ui-shared';
+import { createRequestScopedApi, createRequestSignal, createUuidV4, getActiveRequestSignal, trackBrowserApiOutcome } from '@regent/ui-shared';
 import type { components } from './schema';
 import type {
   BenchmarkSuite,
@@ -19,6 +19,11 @@ import type {
 
 type Schema = components['schemas'];
 
+export const TENANT_UNAUTHORIZED_EVENT = 'regent:tenant:unauthorized';
+export const TENANT_PERMISSION_DENIED_EVENT = 'regent:tenant:permission-denied';
+
+export type TenantSessionSummary = Schema['TenantSessionSummaryDto'];
+
 export class ApiError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string) {
     super(message);
@@ -26,25 +31,41 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const method = (init?.method ?? 'GET').toUpperCase();
-  const headers = new Headers(init?.headers);
-  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-  if (!headers.has('X-Request-Id')) headers.set('X-Request-Id', crypto.randomUUID());
-  if ((path.startsWith('/v1') || path.startsWith('/agent/v1')) && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    if (!headers.has('Idempotency-Key')) headers.set('Idempotency-Key', crypto.randomUUID());
-    if (['PUT', 'PATCH', 'DELETE'].includes(method) && !headers.has('If-Match')) {
-      let version: unknown;
-      try { version = typeof init?.body === 'string' ? JSON.parse(init.body).version : undefined; } catch { /* server validates JSON */ }
-      headers.set('If-Match', typeof version === 'number' ? `"${version}"` : '*');
+  const requestSignal = createRequestSignal([init?.signal, getActiveRequestSignal()]);
+  try {
+    const method = (init?.method ?? 'GET').toUpperCase();
+    const headers = new Headers(init?.headers);
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    if (!headers.has('X-Request-Id')) {
+      try { headers.set('X-Request-Id', createUuidV4()); } catch { /* The server can correlate requests without this optional header. */ }
     }
+    if ((path.startsWith('/v1') || path.startsWith('/agent/v1')) && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      if (!headers.has('Idempotency-Key')) headers.set('Idempotency-Key', createUuidV4());
+      if (['PUT', 'PATCH', 'DELETE'].includes(method) && !headers.has('If-Match')) {
+        let version: unknown;
+        try { version = typeof init?.body === 'string' ? JSON.parse(init.body).version : undefined; } catch { /* server validates JSON */ }
+        headers.set('If-Match', typeof version === 'number' ? `"${version}"` : '*');
+      }
+    }
+    const response = await fetch(path, { credentials: 'include', ...init, signal: requestSignal.signal, headers });
+    if (response.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(TENANT_UNAUTHORIZED_EVENT));
+    }
+    if (response.status === 403 && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(TENANT_PERMISSION_DENIED_EVENT));
+    }
+    trackBrowserApiOutcome(response.status, response.headers.get('X-Request-Id') ?? undefined);
+    if (!response.ok) {
+      const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string }; request_id?: string } | null;
+      throw new ApiError(response.status, body?.error?.code ?? 'UNKNOWN', body?.error?.message ?? response.statusText);
+    }
+    return response.status === 204 ? undefined as T : await response.json() as T;
+  } catch (error) {
+    if (requestSignal.timedOut()) throw new ApiError(0, 'TIMEOUT', 'Request timed out.');
+    throw error;
+  } finally {
+    requestSignal.dispose();
   }
-  const response = await fetch(path, { credentials: 'include', ...init, headers });
-  trackBrowserApiOutcome(response.status, response.headers.get('X-Request-Id') ?? undefined);
-  if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: { code?: string; message?: string }; request_id?: string } | null;
-    throw new ApiError(response.status, body?.error?.code ?? 'UNKNOWN', body?.error?.message ?? response.statusText);
-  }
-  return response.status === 204 ? undefined as T : await response.json() as T;
 }
 
 function post<T>(path: string, body?: unknown): Promise<T> {
@@ -68,9 +89,11 @@ export interface AuthResponse {
   capabilities?: string[];
 }
 
-export const api = {
+const apiMethods = {
+  session: () => request<TenantSessionSummary>('/auth/me'),
+  logout: () => post<void>('/auth/logout'),
   devLogin: (email: string) => request<{ email: string; display_name: string; tenant_id: string }>('/auth/dev-login', {
-    method: 'POST', body: JSON.stringify({ email } satisfies Schema['DevLoginRequest'])
+    method: 'POST', body: JSON.stringify({ email })
   }),
   passwordLogin: (email: string, password: string) => post<AuthResponse>('/auth/login', { email, password }),
   register: (email: string, password: string, displayName: string, companyName: string) =>
@@ -216,8 +239,8 @@ export const api = {
     post<Schema['ResearchFinding']>(`/v1/projects/${projectId}/delivery/findings`, finding),
   createBrief: (projectId: string, brief: Schema['ProductBrief']) =>
     post<Schema['ProductBrief']>(`/v1/projects/${projectId}/delivery/briefs`, brief),
-  decideBrief: (projectId: string, briefId: string, decision: string, rationale: string, evidenceIds: string[], reround: number, decider: string) =>
-    post<Schema['GoNoGoDecision']>(`/v1/projects/${projectId}/delivery/briefs/${briefId}/decision`, { decision, rationale, evidenceIds, reround, decider }),
+  decideBrief: (projectId: string, briefId: string, decision: string, rationale: string, evidenceIds: string[], reround: number) =>
+    post<Schema['GoNoGoDecision']>(`/v1/projects/${projectId}/delivery/briefs/${briefId}/decision`, { decision, rationale, evidenceIds, reround }),
   createRequirement: (projectId: string, requirement: Schema['DeliveryRequirement']) =>
     post<Schema['DeliveryRequirement']>(`/v1/projects/${projectId}/delivery/requirements`, requirement),
   readyRequirement: (projectId: string, requirementId: string, totalWeight: number) =>
@@ -225,12 +248,12 @@ export const api = {
   proposePlan: (projectId: string, plan: Schema['DecompositionPlan']) =>
     post<Schema['DecompositionPlan']>(`/v1/projects/${projectId}/delivery/plans`, plan),
   approvePlan: (projectId: string, planId: string) =>
-    post<Schema['DecompositionPlan']>(`/v1/projects/${projectId}/delivery/plans/${planId}/approve`, { approver: 'Controller' }),
+    post<Schema['DecompositionPlan']>(`/v1/projects/${projectId}/delivery/plans/${planId}/approve`, {}),
   reportDefect: (projectId: string, defect: Schema['Defect']) =>
     post<Schema['Defect']>(`/v1/projects/${projectId}/delivery/defects`, defect),
-  fixDefect: (projectId: string, defectId: string, fixer = 'Engineer') =>
+  fixDefect: (projectId: string, defectId: string) =>
     post<Schema['Defect']>(`/v1/projects/${projectId}/delivery/defects/${defectId}/fix`, {
-      fixer, evidence: { id: `fix:${defectId}`, kind: 'test', location: 'local:fix-evidence' }
+      evidence: { id: `fix:${defectId}`, kind: 'test', location: 'local:fix-evidence' }
     }),
   addReview: (projectId: string, review: Schema['Review']) =>
     post<Schema['Review']>(`/v1/projects/${projectId}/delivery/reviews`, review),
@@ -238,8 +261,8 @@ export const api = {
     post<Schema['AcceptanceReport']>(`/v1/projects/${projectId}/delivery/acceptance-reports`, report),
   releaseProject: (projectId: string, version: string, artifactRef: string) =>
     post<Schema['ReleaseRecord']>(`/v1/projects/${projectId}/delivery/releases`, { version, artifactRef }),
-  retestDefect: (projectId: string, defectId: string, passed: boolean, retester: string) =>
-    post<Schema['Defect']>(`/v1/projects/${projectId}/delivery/defects/${defectId}/retest`, { passed, retester }),
+  retestDefect: (projectId: string, defectId: string, passed: boolean) =>
+    post<Schema['Defect']>(`/v1/projects/${projectId}/delivery/defects/${defectId}/retest`, { passed }),
   observeRelease: (projectId: string, releaseId: string, healthy: boolean, metricsJson: string) =>
     post<Schema['ReleaseRecord']>(`/v1/projects/${projectId}/delivery/releases/${releaseId}/observe`, { healthy, metricsJson }),
   terminateProject: (projectId: string, retrospective: Schema['Retrospective']) =>
@@ -294,7 +317,7 @@ export const api = {
   recruitmentInterviews: (candidateId?: string) => request<Schema['InterviewStageDto'][]>(`/v1/recruitment/interviews${candidateId ? `?candidateId=${candidateId}` : ''}`),
   recordInterview: (stage: Schema['InterviewStageDto']) => post<Schema['InterviewStageDto']>('/v1/recruitment/interviews', stage),
   recruitmentAppeals: () => request<Schema['CandidateAppealDto'][]>('/v1/recruitment/appeals'),
-  createCandidateAppeal: (candidateId: string, reason: string) => post<Schema['CandidateAppealDto']>('/v1/recruitment/appeals', { id: crypto.randomUUID(), candidateId, reason }),
+  createCandidateAppeal: (candidateId: string, reason: string) => post<Schema['CandidateAppealDto']>('/v1/recruitment/appeals', { id: createUuidV4(), candidateId, reason }),
   resolveCandidateAppeal: (id: string, resolution: string) => post<Schema['CandidateAppealDto']>(`/v1/recruitment/appeals/${id}/resolve`, { resolution }),
   fairnessAudits: () => request<Schema['FairnessAuditDto'][]>('/v1/recruitment/fairness-audits'),
   runFairnessAudit: (positionId: string, period: string, sampleSize: number, selectionRateRatio: number) =>
@@ -336,10 +359,12 @@ export const api = {
     post<Schema['PublicAsset']>('/v1/agent-evolution/assets', { assetType, assetId, publisher: 'Owner' }),
   activatePrompt: (id: string) => post<Schema['PromptBundle']>(`/v1/agent-evolution/prompts/${id}/activate`),
   createSkill: (name: string, promptBundleId: string, configJson: string) => post<Schema['SkillDefinition']>('/v1/agent-evolution/skills', { name, promptBundleId, configJson }),
-  discloseTools: (capabilities: string[], restrictedActivated: boolean) => post<Schema['ToolDisclosureResult']>('/v1/agent-evolution/tools/disclose', { capabilities, restrictedActivated }),
+  discloseTools: () => post<Schema['ToolDisclosureResult']>('/v1/agent-evolution/tools/disclose', { capabilities: [], restrictedActivated: false }),
   activateSkill: (id: string) => post<Schema['SkillDefinition']>(`/v1/agent-evolution/skills/${id}/activate`),
   setToolPolicy: (policy: Schema['ToolDisclosurePolicy']) => post<Schema['ToolDisclosurePolicy']>('/v1/agent-evolution/tool-policies', policy),
   createDebate: (body: Schema['DebateTaskRecord']) => post<Schema['DebateTaskRecord']>('/v1/task-governance/debates', body),
   decideDebate: (id: string, decision: string) => post<Schema['DebateTaskRecord']>(`/v1/task-governance/debates/${id}/decide`, { decision }),
   adjudicate: (body: Schema['AdjudicationTaskRecord']) => post<Schema['AdjudicationTaskRecord']>('/v1/task-governance/adjudications', body)
 };
+
+export const api = createRequestScopedApi(apiMethods);

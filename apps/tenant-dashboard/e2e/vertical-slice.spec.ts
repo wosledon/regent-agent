@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
+import { opsUrl, requireDevelopmentAuth } from './support/externalStack';
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('regent.ui.locale', 'en-US'));
+});
 
 test('login, dashboard, project and employee timeline', async ({ page }) => {
+  requireDevelopmentAuth();
   await page.goto('/login');
   await page.getByPlaceholder('owner@example.test').fill('owner@example.test');
   await page.getByRole('button', { name: 'Sign in' }).click();
@@ -19,6 +25,7 @@ test('login, dashboard, project and employee timeline', async ({ page }) => {
 });
 
 test('workflows, messages, evaluations and compliance are available', async ({ page }) => {
+  requireDevelopmentAuth();
   await page.goto('/login');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Regent Autonomous Company' })).toBeVisible();
@@ -33,6 +40,8 @@ test('workflows, messages, evaluations and compliance are available', async ({ p
 
   await page.goto('/evaluations');
   await expect(page.getByText('Core Capability v1')).toBeVisible();
+  await page.getByRole('combobox', { name: 'Candidate employee' }).click();
+  await page.getByRole('option').nth(1).click();
   await page.getByRole('button', { name: 'Run evaluation' }).first().click();
   await expect(page.getByText('Approved').first()).toBeVisible();
 
@@ -49,29 +58,31 @@ test('workflows, messages, evaluations and compliance are available', async ({ p
 });
 
 test('operations console supports tenant and grant views', async ({ page }) => {
-  await page.goto('http://localhost:4173/status');
+  requireDevelopmentAuth();
+  await page.goto(`${opsUrl}/status`);
   await expect(page.getByRole('heading', { name: 'Platform status' })).toBeVisible();
-  await page.goto('http://localhost:4173/login');
-  await page.getByRole('button', { name: 'Sign in as Demo Operator' }).click();
+  await page.goto(`${opsUrl}/login`);
+  await page.getByRole('button', { name: 'Enter local demo Operator' }).click();
   await expect(page.getByRole('heading', { name: 'Operations Overview' })).toBeVisible();
   await page.screenshot({ path: '/tmp/regent-ops.png', fullPage: true });
-  await page.goto('http://localhost:4173/tenants');
+  await page.goto(`${opsUrl}/tenants`);
   await expect(page.getByRole('heading', { name: 'Tenants' })).toBeVisible();
   await expect(page.getByText('Regent Demo')).toBeVisible();
-  await page.goto('http://localhost:4173/support');
-  await expect(page.getByRole('heading', { name: 'Support Grants' })).toBeVisible();
+  await page.goto(`${opsUrl}/support`);
+  await expect(page.getByRole('heading', { name: 'Support Grants', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Request 30-minute read-only grant' }).click();
   await page.getByRole('button', { name: 'Approve' }).first().click();
   await expect(page.getByText('Active').first()).toBeVisible();
-  await page.goto('http://localhost:4173/platform');
+  await page.goto(`${opsUrl}/platform`);
   await expect(page.getByRole('heading', { name: 'Platform status' })).toBeVisible();
   await page.getByRole('button', { name: 'Refresh health' }).click();
   await expect(page.getByText('ControlPlane')).toBeVisible();
-  await page.goto('http://localhost:4173/observability');
+  await page.goto(`${opsUrl}/observability`);
   await expect(page.getByRole('heading', { name: 'Observability' })).toBeVisible();
 });
 
 test('organization, delivery, security, lifecycle and runtime pages work end to end', async ({ page }) => {
+  requireDevelopmentAuth();
   await page.goto('/login');
   await page.getByRole('button', { name: 'Sign in' }).click();
 
@@ -133,6 +144,7 @@ test('password registration issues recovery codes and session controls', async (
   await page.getByPlaceholder('Company name').fill('E2E Identity Company');
   await page.getByRole('button', { name: 'Create account' }).click();
   await expect(page.getByRole('heading', { name: 'Save recovery codes' })).toBeVisible();
+  await page.getByRole('checkbox', { name: 'I saved these recovery codes in a secure location.' }).check();
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: 'Sessions' })).toBeVisible();
@@ -140,6 +152,7 @@ test('password registration issues recovery codes and session controls', async (
 });
 
 test('memory hybrid recall detects poisoning and publishes an independent correction', async ({ page }) => {
+  requireDevelopmentAuth();
   await page.goto('/login');
   await page.getByRole('button', { name: 'Sign in' }).click();
   await expect(page.getByRole('heading', { name: 'Regent Autonomous Company' })).toBeVisible();
@@ -159,6 +172,7 @@ test('memory hybrid recall detects poisoning and publishes an independent correc
   await expect(page.getByText('No matching memory')).toBeVisible();
   await findingRow.getByRole('button', { name: 'Prepare correction' }).click();
   await page.getByPlaceholder('Corrected claim').fill(`Verified memory correction ${marker}`);
+  await page.getByPlaceholder('Reason for independent correction').fill(`Independent source verification for ${marker}`);
   await page.getByRole('button', { name: 'Create correction' }).click();
   const correctionRow = page.getByRole('row').filter({ hasText: `Verified memory correction ${marker}` });
   await expect(correctionRow).toBeVisible();
@@ -171,6 +185,7 @@ test('memory hybrid recall detects poisoning and publishes an independent correc
 });
 
 test('approval can be decided once', async ({ page }) => {
+  requireDevelopmentAuth();
   await page.goto('/login');
   await page.getByRole('button', { name: 'Sign in' }).click();
   const created = await page.request.post('/v1/approvals', {
@@ -183,7 +198,9 @@ test('approval can be decided once', async ({ page }) => {
   expect(created.ok()).toBeTruthy();
   const approval = await created.json() as { id: string };
   await page.goto(`/governance/approvals/${approval.id}`);
+  await page.getByPlaceholder('Decision reason').fill('Verified E2E evidence and rollback readiness.');
+  page.once('dialog', dialog => dialog.accept());
   await page.getByRole('button', { name: 'Approve' }).click();
-  await expect(page.getByText('approved')).toBeVisible();
+  await expect(page.getByText('Approved', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Approve' })).toBeDisabled();
 });

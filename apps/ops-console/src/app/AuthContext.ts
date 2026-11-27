@@ -1,7 +1,13 @@
 import { createContext } from 'react';
+import type { OperatorSession } from '../lib/api';
+
+export type AuthStatus = 'checking' | 'authenticated' | 'anonymous' | 'permission-denied' | 'error';
 
 export interface AuthValue {
-  user: string | null;
+  status: AuthStatus;
+  user: OperatorSession | null;
+  error: string | null;
+  retry: () => Promise<void>;
   login: () => Promise<void>;
   logout: () => Promise<void>;
 }

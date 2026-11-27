@@ -5,16 +5,17 @@
 - 读者：前端研发、设计、QA、架构
 - 关联文档：[后端技术文档](./Regent-Agent-后端技术文档.md)、[租户仪表盘信息架构](./design/35-tenant-dashboard-information-architecture.md)、[国际化与本地化](./design/37-internationalization-and-localization.md)、[内部通知中心](./design/41-internal-notification-center.md)、[前端页面与路由地图](./design/48-frontend-route-map.md)
 
-> 当前 React workspace、UI.Shared、组件展示页、Tenant Dashboard 主要页面和 Ops Console 主要页面已实现；完整无障碍、真实 Provider 状态和生产发布仍在后续阶段。
+> 当前 React workspace、UI.Shared、组件展示页、Tenant Dashboard 全部 32 个路由和 Ops Console 全部 8 个页面已完成 Regent Ledger 视觉与交互重设计；完整 WCAG 2.2 AA 审计、真实 Provider 状态和生产发布仍在后续阶段。
 
 ### 当前本地实现
 
 - Tenant Dashboard 已提供组织管理、项目交付闭环、管家问答与报告、安全治理、数据生命周期、模型池、成本调度、评测 QA、合规、通知、消息、工作流、记忆、绩效和设置页面。
-- `/organization/collaboration` 提供办公室、组织图、协作网络和过程时间线四种可切换视图；员工、群聊和项目可下钻到工作、消息、回复、@、证据与审计哈希，并只读展示委派、交接、求助和打断状态及检查点包。
-- 消息页只读展示 Agent 群成员、创建信息、回复、@ 和证据引用；群聊创建、成员管理和消息发送由员工 Agent 通过 `/agent/v1` 完成，控制面不代行。
+- `/organization/collaboration` 提供办公室、组织图、协作网络和过程时间线四种可切换视图；员工、群聊和项目可下钻到工作、消息、回复、@、证据与审计哈希，并只读展示委派、交接、求助和打断状态及检查点包。当前数据库 Owner/CoOwner 无 employee identity 时以 `observer` 范围只读观察 Company/Project/Topic 共享内容；Direct/private 内容不进入页面。
+- 消息页只读展示 Agent 群成员、创建信息、回复、@ 和证据引用；群聊创建、成员管理和消息发送由员工 Agent 通过 `/agent/v1` 完成，控制面不代行。消息选中项只能从当前授权会话列表派生，未知 URL 会话 ID 不触发消息请求。
 - Ops Console 已提供公开状态页、运营状态刷新、租户启停、支持访问审批/撤销、备份、审计和可观测性页面；可观测性页展示 Elasticsearch 集群健康、版本和数据流文档数。
 - Tenant Dashboard 已提供招聘面试/申诉/公平审计、绩效动作/员工改进、Agent 运行时、任务治理、Prompt/Skill 和 Tool 披露页面。
-- `UI.Shared` 已提供 `Stack`、`Grid`、`PageHeader`、`FormField` 以及按钮、文本、卡片、表格、输入、选择、状态、头像、分段视图控制器、SVG 图 canvas 和时间线组件，并进入组件注册表。
+- `UI.Shared` 已提供 `WorkspaceShell`、`ContentContainer`、`PageHeader`、`SectionHeader`、`Stack`、`Grid`、`FormField`、`Card`、`MetricCard`、`DetailList`、`DataTable`、`FilterBar`、`ConfirmDialog` 以及按钮、文本、输入、选择、状态、头像、分段视图控制器、SVG 图 canvas 和时间线组件，并进入组件注册表；`AuthLayout` 与 `LocaleSwitch` 作为 Candidate 组件提供可交互默认 Demo。
+- 两个应用使用同一套 Regent Ledger 设计令牌和 `createAppTheme({ appKind })` 主题工厂，但创建独立 Theme 实例；桌面共享深墨蓝持久导航，移动端共享临时抽屉，业务权限和导航数据仍由各应用提供。
 - API 类型从 `contracts/openapi/controlplane.json` 生成；新增页面使用 TanStack Query 和共享加载、错误、空状态组件。
 - Playwright 覆盖登录、项目、员工、工作流、消息、评测、合规、运营台、审批幂等，以及组织/交付/安全/生命周期/模型/成本页面；协作专项覆盖四种视图切换、员工下钻、Agent 建群/发消息、非成员拒绝和移动端无横向溢出。
 - 知识页提供 claim 捕获、混合召回分数、冲突/待复核提示、投毒 Finding、隔离/申诉/解封、独立纠错和影响图操作。
@@ -92,9 +93,9 @@ frontend/
 
 ### 3.2 Ops Console
 
-- 用户：Operator、SRE、Security Auditor、Break-glass Operator。
-- 内容：租户账户、资源池、事件、SupportGrant、备份和运营审计。
-- 认证：独立 Operator 身份、MFA/step-up。
+- 用户：Operator、SRE、Ops Viewer、Security Auditor、Billing Admin、Break-glass Operator。
+- 内容：租户账户、资源池、事件、SupportGrant、备份和运营审计；Ops Viewer 只能读取，服务端对所有 `/ops` 写入返回 403。
+- 认证：独立 Operator Cookie；本地 demo 不含 MFA，生产 SSO/MFA/step-up 仍后置。
 - API：Ops API。
 - 实时：SignalR 运营作用域 Hub。
 
@@ -157,43 +158,51 @@ flowchart TB
 
 ## 5. 视觉与交互设计
 
-### 5.1 Material Design 基线
+### 5.1 Regent Ledger 视觉基线
 
-- 使用 MUI 组件和默认 Material Design 交互作为基线。
-- 通过 ThemeProvider 定制颜色、字体、圆角、阴影和动效。
-- 页面不直接写散落的十六进制颜色和像素间距。
-- 状态不能只依赖颜色，同时提供图标和文本。
-- 危险动作使用明确的确认对话框，不靠悬停才能发现。
+- 使用 MUI 组件和交互作为实现基线，但视觉语言是“治理证据工作台”，不是通用后台模板。
+- 深墨蓝导航、瓷白表面、钴蓝主操作、发丝级分隔线、紧凑排版和最小阴影构成统一语言。
+- 信息层级优先暴露权威、新鲜度、责任人、证据和下一步动作；状态不能只依赖颜色，同时提供图标和文本。
+- 页面不直接写散落的十六进制颜色和像素间距，统一读取 `designTokens` 或 MUI 主题语义令牌。
+- 危险动作使用共享 `ConfirmDialog`，明确影响、范围和不可逆性，不靠悬停才能发现。
 
 ### 5.2 设计令牌
 
-| 令牌 | 示例 | 用途 |
+| 令牌 | 当前值/示例 | 用途 |
 |---|---|---|
-| `color.primary` | 品牌主色 | 主按钮、选中态、链接 |
-| `color.success` | 成功色 | OnTrack、通过、健康 |
-| `color.warning` | 警告色 | AtRisk、Stale、待处理 |
-| `color.error` | 错误色 | Blocked、Failed、违规 |
-| `color.info` | 信息色 | 提示、只读状态 |
-| `color.background` | 页面背景 | AppShell 内容区 |
-| `color.surface` | 卡片背景 | Paper、Dialog、Menu |
-| `text.primary/secondary` | 文本层级 | 标题、正文、辅助说明 |
-| `spacing` | 4/8/12/16/24/32 | 布局和组件间距 |
-| `radius` | 4/8/12/16 | 卡片、输入框、对话框 |
-| `typography` | h1～h6、body、caption | 标题和数据层级 |
-| `elevation` | 0～4 | 卡片、菜单、悬浮层 |
-| `motion` | 150/250/350ms | 悬停、展开、页面切换 |
+| `color.primary` | `#3157D5` | 主按钮、选中态、链接 |
+| `color.accent` | `#6D5BD0` | Agent/编排强调，不用于普通次级按钮 |
+| `color.success` | `#157347` | OnTrack、通过、健康 |
+| `color.warning` | `#9A5B00` | AtRisk、Stale、待处理 |
+| `color.error` | `#B42318` | Blocked、Failed、违规 |
+| `color.info` | `#175CD3` | 提示、只读状态 |
+| `color.background` | `#F4F6FA` | AppShell 内容区 |
+| `color.surface` | `#FFFFFF` | 卡片、表格、Dialog、Menu |
+| `color.navBackground` | `#111A2E` | 桌面导航和移动抽屉 |
+| `text.primary/secondary` | `#172033` / `#4B5568` | 标题、正文、辅助说明 |
+| `border.subtle/default` | `#E8ECF2` / `#D8DEE9` | 分隔线与控件边界 |
+| `spacing` | 2/4/6/8/12/16/20/24/32/40/48/64 | 布局和组件间距 |
+| `radius` | 4/6/8/12/999 | 状态、控件、卡片、对话框、胶囊 |
+| `typography` | pageTitle 28/36、sectionTitle 20/28、cardTitle 15/22、body 14/22 | 标题和数据层级 |
+| `layout.sidebarWidth` | 248px | 桌面持久导航宽度 |
+| `layout.contentMaxWidth` | 1440px | 默认内容最大宽度 |
+| `motion` | 100/160/220ms | 悬停、进入、抽屉和对话框 |
 
 ### 5.3 页面布局
 
 ```text
-AppShell
-├─ Navigation Rail / Drawer
+WorkspaceShell（UI.Shared，路由无关）
+├─ Desktop SideNavigation / Mobile Drawer
+│  ├─ 品牌
+│  ├─ 分组导航 + active indicator
+│  └─ 用户与环境上下文
 ├─ Top Bar
+│  ├─ 移动菜单
 │  ├─ 租户或运营上下文
-│  ├─ 全局搜索
-│  ├─ 通知
-│  └─ 用户菜单
-└─ Content
+│  ├─ 连接/新鲜度状态
+│  ├─ LocaleSwitch
+│  └─ 用户操作
+└─ ContentContainer
    ├─ PageHeader
    ├─ Page Content
    └─ Detail Drawer / Dialog
@@ -227,29 +236,32 @@ AppShell
 
 ### 5.5 响应式
 
-- 移动端支持首屏、告警确认和升级审批。
+- 移动端支持首屏、告警确认和升级审批；顶栏在窄屏隐藏次要上下文和连接文案，只保留菜单、品牌、语言和用户操作。
 - 复杂组织、项目和数据表编辑以桌面为主。
-- 断点使用 MUI 默认断点，不手写设备宽度判断。
-- 窄屏将 Navigation Rail 转为 Drawer。
-- 宽表格使用横向滚动或列选择，不压缩到不可读。
+- 断点使用 MUI 主题断点（`xs/sm/md/lg/xl`），不手写设备宽度判断。
+- `lg` 以下将持久导航转为 280px 临时 Drawer，导航后自动关闭。
+- 宽表格在容器内横向滚动，不压缩到不可读；页面本身不得出现横向溢出。
+- 移动端触控目标至少 44×44 CSS px，关键操作不能仅悬停出现。
 
 ## 6. 主题、国际化与格式化
 
 ### 6.1 MUI 主题
 
-- `ThemeProvider` 包裹每个应用。
-- `CssBaseline` 统一基础样式。
-- 主题按应用配置，不共享运行时 Theme 实例。
-- 字体、密度和圆角可通过租户或用户偏好覆盖。
-- 默认使用浅色主题；深色主题作为主题能力，不阻塞 MVP。
-- 组件优先使用 `sx` 和主题令牌，避免大面积全局 CSS。
+- `ThemeProvider` 包裹每个应用，`CssBaseline` 统一基础样式。
+- 两个应用共享 `designTokens` 和 `createAppTheme({ appKind })` 工厂，但各自创建独立 Theme 实例；Tenant 与 Ops 可在密度和组件覆盖上演进而不共享运行时状态。
+- 当前默认使用浅色主题；深色主题不在本次范围内。
+- 字体使用系统 sans 栈，ID、哈希和版本使用等宽字体；金额、数量和表格使用 tabular numerals。
+- 组件优先使用 `sx` 和主题语义令牌，避免大面积全局 CSS 和硬编码颜色。
 
 ### 6.2 国际化
 
 - 第一梯队支持 `zh-CN` 和 `en-US`。
-- 语言选择顺序：用户 → 租户 → 浏览器 → `zh-CN`。
-- 所有文案使用资源 key，不硬编码。
-- 缺失翻译回退源语言并记录，不显示资源 key。
+- 登录页当前按“已保存的展示偏好 `regent.ui.locale` → 浏览器语言 → `zh-CN`”解析；租户语言策略仍由服务端权威决定，语言切换只改变展示，不修改租户、权限、认证或 API 数据。
+- Tenant Dashboard 与 Ops Console 分别拥有 `auth.*` 资源；i18next 使用 `initialLocale()` 初始化，并通过 `languageChanged` 持久化偏好和更新 `document.documentElement.lang`。
+- 所有登录页文案使用资源 key，不硬编码；服务端错误仅按稳定 HTTP status/code 映射为安全本地化提示，不渲染原始异常文本。
+- 缺失翻译回退 `zh-CN`，不显示资源 key。
+- 可见数量使用 i18next `one`/`other` 资源和共享 `localizedCount`：原始数字用于复数选择，`Intl` 格式化后的值用于展示；多数量句拆分为独立复数片段。
+- 仪表盘卡片与行动项通过共享 `dashboardPresentation` 解析稳定 key、结构化金额/百分比/时间戳；公司名称、审批/项目标题和审计事件类型保持领域数据，未知 key 回退旧服务端文案。
 - 安全、法务、审批和合规文案必须人工复核。
 - 切换语言保留当前路由、筛选和返回位置。
 
@@ -272,23 +284,33 @@ AppShell
 - 路由守卫只负责体验，不替代服务端鉴权。
 - 无权限页面显示 PermissionDenied，不泄露资源是否存在。
 - 深链接恢复页面、筛选和返回位置。
-- 开发期组件页使用 `/dev/components`，由 feature flag 控制，不进入生产导航。
+- 开发期组件页使用 `/dev/components`，由 feature flag 控制，不进入生产导航；组件目录只显示摘要，选中项单独挂载 Demo，避免 Loading/Error 示例常驻影响页面就绪判断。
 
 ### 7.2 认证
 
 - 租户和运营会话使用 HttpOnly、Secure、SameSite Cookie。
 - 前端不把长期 Token 写入 localStorage。
+- Tenant AuthProvider 以 `GET /auth/me`、Ops AuthProvider 以 `GET /ops/auth/me` 为认证事实源，显式维护 checking/authenticated/anonymous/permission-denied/error；仅 401 视为匿名，403 保留 PermissionDenied，网络/5xx 保留可重试错误且登录后的重新认证不得把非 401 失败报告为成功。Tenant 会话摘要必须映射类型化的 `effectiveAccess.canReadChat`、`effectiveAccess.canReadCollaboration` 和 `effectiveAccess.collaborationScope`（`none|participant|observer`）；缺失、类型错误或语义不一致时fail closed 为全部拒绝。登录、租户切换和重新认证都会刷新 `/auth/me` 并清空 Query 缓存。完整刷新和新标签页都通过 Cookie 重新引导，sessionStorage 不作为认证依据。
+- API Client 对 401 分发独立应用事件，AuthProvider 清除本地摘要与 QueryClient 缓存并跳转登录；Ops 公共 `/status` 豁免该导航。403 分发 PermissionDenied 并清除缓存与写能力外壳；退出请求失败也在 finally 清理，避免残留已登录外壳和重定向循环。
+- 路由守卫等待引导完成，并仅保留同源相对 path/query/hash 返回目标；只有精确根路径 `/` 被省略，`/?tab=overview#summary` 等安全根 query/hash 目标会保留。绝对地址、protocol-relative、反斜杠、控制字符、跨源和归一化登录路径回环目标均拒绝。
+- Tenant AppShell 的打开导航、退出登录和已登录 caption，以及两个应用路由守卫的会话检查标签均使用 `zh-CN`/`en-US` 资源；显示名称、角色值和 API 标识不翻译。
+- `UI.Shared.createUuidV4()` 优先使用 `crypto.randomUUID`，否则用 `crypto.getRandomValues` 生成 RFC 4122 v4；没有 CSPRNG 时失败关闭，浏览器遥测不得因此抛异常。
+- 生产构建登录页默认 Password，不提供 Local development；开发构建可显示开发登录入口，但服务端仍要求显式 opt-in。
+- 两个登录页共用响应式 `AuthLayout`：桌面展示品牌/营销面板，移动端展示移动品牌、语言切换、表单和页脚；页面不在 `Paper` 内嵌套 `Card`，只使用共享组件。
+- Tenant 登录页覆盖会话检查、提交、已登录 Continue/Logout、密码、注册和紧急访问状态；注册恢复码与轮换后的紧急凭据必须先确认展示，再允许继续。两个 demo 登录开关都默认 `false`：Tenant 需 `Development` 加 `Identity:AllowDemoLogin=true`，Ops 需 `Development` 加 `Operations:AllowDemoLogin=true`，否则返回 404。CI e2e 只对临时 Development 进程显式启用；本地 Compose override 只启用 Operations demo，生产配置不启用。Ops 登录页不宣称生产 MFA。
 - OIDC 使用重定向流程，前端不接触 client secret。
 - 设置页提供 required SSO、Provider 激活、组能力映射/刷新和紧急凭据生命周期；登录页的紧急入口只展示轮换凭据并进入 15 分钟受限恢复会话。
 - 两个前端共享浏览器遥测 SDK，发送脱敏页面路径、Core Web Vitals、API 状态和匿名错误信号；生产摄入密钥只能由反向代理注入。
 - Tenant Dashboard 新增 `/billing` 套餐/配额/发票/账本页面；设置页提供 Owner 数据导出、下载和校验，不展示凭据或 KeyVault 内容。
 - CSRF Token 仅用于写请求，不进入日志。
-- SignalR 连接复用同一 Cookie 认证，并使用独立 Hub 权限校验。
+- SignalR 连接复用同一 Cookie 认证，并使用独立 Hub 权限校验；首次连接失败按有界指数退避重试，恢复后失效查询快照。
 
 ### 7.3 权限呈现
 
-- 服务端返回 Capability 和可见导航。
-- 前端根据 Capability 隐藏或禁用入口。
+- 服务端返回 Capability 和可见导航；Operations 的 `/ops` 读取统一要求 `OperatorReader`，所有写入另要求 `OperatorWriter`。
+- Tenant Dashboard 根据 `effective_access.can_read_chat` 隐藏 `/messages` 导航并守卫直接路由，根据 `effective_access.can_read_collaboration` 隐藏 `/organization/collaboration` 导航并守卫直接路由；拒绝状态使用 `zh-CN`/`en-US` 资源，不泄露资源细节。
+- `CollaborationPage`、`CoordinationPanel`、`TracePanel` 和 `MessagesPage` 的查询与跨链接必须受有效访问开关控制；Trace 的消息查询和消息链接还要求 `canReadChat`。观察者空状态说明共享范围与私聊边界，不出现发送、创建或成员管理指导。
+- 前端根据 Capability 隐藏或禁用入口；Ops Viewer 的只读边界由服务端强制，前端禁用写操作只改善体验。
 - 每次 API 调用仍由服务端重新鉴权。
 - 菜单隐藏不是安全边界。
 - 个人绩效、私人记忆和秘密不进入通用卡片。
@@ -418,26 +440,23 @@ AppShell
 
 | 组件 | 封装内容 | 关键属性/行为 |
 |---|---|---|
-| `AppShell` | 导航、顶栏、内容区和通知宿主 | `appKind`、`navigation`、`children` |
-| `NavigationRail` | MUI Drawer/List 的导航容器 | `items`、`collapsed`、`onNavigate` |
-| `TwoLevelNav` | 最多两级导航和 Capability 过滤 | `groups`、`capabilities` |
-| `TopBar` | 租户/运营上下文、搜索、通知、用户菜单 | `contextLabel`、`actions` |
-| `PageHeader` | 标题、说明、操作和返回 | `title`、`subtitle`、`actions` |
-| `DetailLayout` | 主内容、侧栏、标签页 | `tabs`、`aside`、`breadcrumbs` |
-| `SectionCard` | 统一 Paper 卡片 | `title`、`action`、`loading` |
-| `PageTransition` | 轻量页面动效 | 遵循 reduced motion |
+| `WorkspaceShell` | 路由无关的桌面侧栏、移动抽屉、顶栏和内容容器 | `brand`、`navigation`、`currentPath`、`onNavigate`、`user`、`headerActions`、`userActions` |
+| `ContentContainer` | 页面最大宽度、响应式 gutter 和垂直节奏 | `maxWidth`、`sx` |
+| `PageHeader` | 页面唯一 h1、说明、eyebrow、meta 和操作 | `title`、`description`、`eyebrow`、`meta`、`actions` |
+| `SectionHeader` | 分区标题、说明和行内操作 | `title`、`description`、`action` |
+| `Card` | 统一表面、标题、说明、状态 rail、页脚和语义标题级别 | `title`、`description`、`action`、`footer`、`tone`、`padding`、`headingLevel` |
+| `DetailList` | 只读键值详情，支持文本和复杂 ReactNode | `items`、`columns`、`dense` |
 
 ### 9.3 数据展示组件
 
 | 组件 | 封装内容 | 关键属性/行为 |
 |---|---|---|
-| `MetricCard` | 指标、趋势、单位、新鲜度和下钻 | `value`、`delta`、 `freshness`、`href` |
-| `StatusChip` | 状态颜色、图标和文本 | `status`、`size`、`variant` |
-| `SeverityBadge` | Critical/High/Medium/Low | `severity`、`label` |
-| `FreshnessBadge` | Live/Fresh/Stale/Unknown | `freshness`、`dataAt` |
-| `DataTable` | MUI Table + TanStack Table | `columns`、`query`、`rowActions` |
-| `FilterBar` | 搜索、筛选、排序和重置 | `filters`、`onChange` |
-| `KeyValueList` | 只读字段和复制操作 | `items`、`columns` |
+| `MetricCard` | 指标、提示、语义 tone、图标和操作 | `label`、`value`、`hint`、`icon`、`tone`、`action` |
+| `StatusChip` | 语义状态、图标和文本，默认 soft/outlined | `tone`、`soft`、`icon`、`label` |
+| `FreshnessBadge` | Live/Fresh/Stale/Unknown，可注入本地化 label | `freshness`、`label` |
+| `DataTable` | typed 表格、toolbar、density、loading/error/empty、sticky header | `rows`、`columns`、`getRowId`、`toolbar`、`density`、`loading`、`error` |
+| `FilterBar` | 搜索、筛选、排序和重置的响应式容器 | `children`、`action` |
+| `DetailList` | 只读字段和复杂状态值 | `items`、`columns`、`dense` |
 | `AuditTimeline` | 审计事件、操作者和证据 | `events`、`emptyText` |
 | `Timeline` | 通用时间线容器、顺序和密度 | `items`、`order`、`density` |
 | `TimelineItem` | 时间、标题、描述、状态、操作者和证据 | `timestamp`、`status`、`evidenceRefs` |
@@ -452,7 +471,7 @@ AppShell
 | 组件 | 封装内容 | 关键属性/行为 |
 |---|---|---|
 | `FormDialog` | MUI Dialog + 表单提交状态 | `open`、`title`、`onSubmit` |
-| `ConfirmDialog` | 危险动作二次确认 | `severity`、`confirmText` |
+| `ConfirmDialog` | 危险动作二次确认、pending 防重复、可选输入确认文本 | `open`、`title`、`description`、`confirmLabel`、`cancelLabel`、`tone`、`loading`、`requireText` |
 | `ApprovalPanel` | 审批选项、影响、SLA 和证据 | `approval`、`onDecision` |
 | `SecretRefInput` | 只输入 `secret_ref` | `value`、`onChange` |
 | `ProviderRegionSelect` | Provider/模型/区域选择 | `providers`、`allowedRegions` |
@@ -532,8 +551,8 @@ AppShell
 | `ComponentGalleryPage` | 组件目录路由、分类、搜索和预览 |
 | `ComponentCategoryNav` | 按 MUI、布局、数据、表单、租户、运营、项目分类 |
 | `ComponentSearch` | 按名称、描述和标签搜索 |
-| `ComponentCatalog` | 从注册表渲染组件卡片和状态 |
-| `ComponentDemo` | 挂载真实组件并展示默认示例 |
+| `ComponentCatalog` | 从注册表渲染组件摘要卡片和状态，不重复挂载所有 Demo |
+| `ComponentDemo` | 挂载选中的真实组件并展示默认示例，宽内容在容器内横向滚动 |
 | `ComponentStateMatrix` | 展示 loading、empty、error、disabled、Stale 等状态 |
 | `ComponentPropsPlayground` | 仅调整安全的纯 UI 属性 |
 | `ComponentStatusBadge` | Stable、Candidate、Deprecated 状态 |
@@ -739,6 +758,13 @@ interface ComponentRegistryEntry {
 - `tenant`：租户业务组件。
 - `operations`：运营组件。
 - `project-employee`：项目、员工和时间线组件。
+
+当前认证相关注册项：
+
+| ID | 状态 | Demo |
+|---|---|---|
+| `auth-layout` | Candidate | 可切换语言的分屏登录布局 |
+| `locale-switch` | Candidate | zh-CN/en-US 受控语言切换 |
 
 ### 15.4 页面结构
 

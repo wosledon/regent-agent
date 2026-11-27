@@ -11,7 +11,7 @@ import type { ComponentCategory } from './registry';
 export function ComponentGalleryPage() {
   const [category, setCategory] = useState<ComponentCategory | 'all'>('all');
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState(componentRegistry[0]?.id ?? '');
+  const [selected, setSelected] = useState(componentRegistry.find(entry => entry.id === 'card')?.id ?? componentRegistry[0]?.id ?? '');
   const entries = useMemo(() => componentRegistry.filter(entry =>
     (category === 'all' || entry.category === category) &&
     `${entry.name} ${entry.description} ${entry.tags.join(' ')}`.toLowerCase().includes(search.toLowerCase())

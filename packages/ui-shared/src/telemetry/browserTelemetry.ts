@@ -1,3 +1,5 @@
+import { createUuidV4 } from '../utils/uuid';
+
 export interface BrowserTelemetrySample {
   metric: string;
   value: number;
@@ -75,22 +77,38 @@ class BrowserTelemetry {
   track(metric: string, value: number, success: boolean, traceId?: string, detail?: string) {
     if (this.disposed || Math.random() > (this.config.sampleRate ?? 1) || !Number.isFinite(value)) return;
     if (!/^[a-z0-9_.:-]{1,128}$/i.test(metric)) return;
-    this.queue.push({ metric, value, success, traceId: traceId ?? crypto.randomUUID(), ...(detail ? { detail } : {}) });
-    if (this.queue.length > 50) this.queue.splice(0, this.queue.length - 50);
-    if (!this.flushTimer) this.flushTimer = setTimeout(() => this.flush(), 2000);
+    try {
+      let generatedTraceId = traceId;
+      if (!generatedTraceId) {
+        try { generatedTraceId = createUuidV4(); } catch { /* Telemetry must not break page or error handlers. */ }
+      }
+      this.queue.push({ metric, value, success, ...(generatedTraceId ? { traceId: generatedTraceId } : {}), ...(detail ? { detail } : {}) });
+      if (this.queue.length > 50) this.queue.splice(0, this.queue.length - 50);
+      if (!this.flushTimer) this.flushTimer = setTimeout(() => this.flush(), 2000);
+    } catch { /* Telemetry is non-critical and must never escape an event handler. */ }
   }
 
   flush() {
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = null;
     if (this.disposed || this.queue.length === 0) return;
-    const payload = JSON.stringify({
-      serviceName: this.config.serviceName,
-      release: this.config.release,
-      samples: this.queue.splice(0, 50)
-    });
-    if (navigator.sendBeacon) navigator.sendBeacon(this.config.endpoint, new Blob([payload], { type: 'application/json' }));
-    else void fetch(this.config.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true }).catch(() => undefined);
+    try {
+      const payload = JSON.stringify({
+        serviceName: this.config.serviceName,
+        release: this.config.release,
+        samples: this.queue.splice(0, 50)
+      });
+      try {
+        if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+          navigator.sendBeacon(this.config.endpoint, new Blob([payload], { type: 'application/json' }));
+          return;
+        }
+      } catch { /* Try keepalive fetch when beacon delivery is unavailable or fails. */ }
+      try {
+        void fetch(this.config.endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true })
+          .catch(() => undefined);
+      } catch { /* Transport failures must not escape pagehide or error handlers. */ }
+    } catch { /* Serialization and telemetry queue failures are non-critical. */ }
   }
 
   dispose() {

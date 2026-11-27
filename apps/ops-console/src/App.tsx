@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react';
-import { Navigate, NavLink, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { AppBar, Box, Drawer, List, ListItemButton, ListItemText, Toolbar } from '@mui/material';
-import { Button, Card, Icon, SemanticIconButton, Text, trackBrowserPageView } from '@regent/ui-shared';
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { LoadingState, buildLoginPath } from '@regent/ui-shared';
+import { LocalizedErrorState } from './components/LocalizedStates';
 import { AuthProvider } from './app/AuthProvider';
+import { AppShell } from './app/AppShell';
 import { useAuth } from './app/useAuth';
+import { canWriteOperations } from './lib/operationsPermissions';
 import { AuditPage } from './pages/AuditPage';
 import { BackupsPage } from './pages/BackupsPage';
+import { LoginPage } from './pages/LoginPage';
 import { OverviewPage } from './pages/OverviewPage';
 import { ObservabilityPage } from './pages/ObservabilityPage';
 import { StatusPage } from './pages/StatusPage';
@@ -13,49 +16,42 @@ import { SupportPage } from './pages/SupportPage';
 import { TenantsPage } from './pages/TenantsPage';
 
 export function App() {
-  return <AuthProvider><Routes>
-    <Route path="/login" element={<Login />} />
+  return <AuthProvider><OperationsRoutes /></AuthProvider>;
+}
+
+function OperationsRoutes() {
+  const { user } = useAuth();
+  const canWrite = canWriteOperations(user);
+  return <Routes>
+    <Route path="/login" element={<LoginPage />} />
     <Route path="/status" element={<StatusPage />} />
     <Route element={<Protected />}>
-      <Route element={<Shell />}>
+      <Route element={<AppShell />}>
         <Route index element={<OverviewPage />} />
-        <Route path="tenants" element={<TenantsPage />} />
-        <Route path="support" element={<SupportPage />} />
-        <Route path="backups" element={<BackupsPage />} />
+        <Route path="tenants" element={<TenantsPage canWrite={canWrite} />} />
+        <Route path="support" element={<SupportPage canWrite={canWrite} />} />
+        <Route path="backups" element={<BackupsPage canWrite={canWrite} />} />
         <Route path="audit" element={<AuditPage />} />
-        <Route path="platform" element={<StatusPage operational />} />
-        <Route path="observability" element={<ObservabilityPage />} />
+        <Route path="platform" element={<StatusPage operational canWrite={canWrite} />} />
+        <Route path="observability" element={<ObservabilityPage canWrite={canWrite} />} />
       </Route>
     </Route>
     <Route path="*" element={<Navigate to="/" replace />} />
-  </Routes></AuthProvider>;
+  </Routes>;
 }
 
 function Protected() {
-  const { user } = useAuth();
-  return user ? <Outlet /> : <Navigate to="/login" replace />;
-}
-
-function Login() {
-  const { login, user } = useAuth();
-  const navigate = useNavigate();
-  if (user) return <Navigate to="/" replace />;
-  return <Card title="Operations sign in"><Button onClick={async () => { await login(); navigate('/'); }}>Sign in as Demo Operator</Button></Card>;
-}
-
-function Shell() {
-  const [open, setOpen] = useState(false);
+  const { status, retry } = useAuth();
+  const { t } = useTranslation();
   const location = useLocation();
-  const { user, logout } = useAuth();
-  useEffect(() => { trackBrowserPageView(location.pathname); }, [location.pathname]);
-  const links = [
-    ['/', 'Overview'], ['/tenants', 'Tenants'], ['/support', 'Support grants'],
-    ['/backups', 'Backups'], ['/audit', 'Audit'], ['/platform', 'Platform status'], ['/observability', 'Observability'], ['/status', 'Public status']
-  ];
-  return <Box sx={{ display: 'flex' }}>
-    <AppBar position="fixed"><Toolbar><SemanticIconButton label="Open navigation" color="inherit" onClick={() => setOpen(true)}><Icon name="dashboard" /></SemanticIconButton><Text variant="h2" sx={{ flexGrow: 1, color: 'inherit' }}>Regent Operations</Text><Button tone="neutral" onClick={logout}>Logout</Button></Toolbar></AppBar>
-    <Drawer open={open} onClose={() => setOpen(false)}><Box sx={{ width: 260 }}><Toolbar /><List>{links.map(([to, label]) =>
-      <ListItemButton key={to} component={NavLink} to={to}><ListItemText primary={label} /></ListItemButton>)}</List></Box></Drawer>
-    <Box component="main" sx={{ p: 3, mt: 8, width: '100%' }}><Text variant="caption">{user}</Text><Outlet /></Box>
-  </Box>;
+  if (status === 'checking') return <LoadingState label={t('auth.loading.checking')} />;
+  if (status === 'permission-denied' || status === 'error') {
+    const message = status === 'permission-denied' ? t('common.errors.permissionDenied') : t('common.errors.sessionVerification');
+    return <LocalizedErrorState message={message} onRetry={() => void retry().catch(() => undefined)} />;
+  }
+  if (status === 'anonymous') {
+    const target = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to={buildLoginPath(target)} replace />;
+  }
+  return <Outlet />;
 }

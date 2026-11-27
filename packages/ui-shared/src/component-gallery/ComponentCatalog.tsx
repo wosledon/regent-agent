@@ -1,7 +1,6 @@
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { Text } from '../components/Text';
-import { ComponentDemo } from './ComponentDemo';
 import { ComponentStatusBadge } from './ComponentStatusBadge';
 import type { ComponentRegistryEntry } from './registry';
 
@@ -16,7 +15,6 @@ export function ComponentCatalog({ entries, onSelect }: ComponentCatalogProps) {
       {entries.map(entry => (
         <Card key={entry.id} title={entry.name} action={<ComponentStatusBadge status={entry.status} />}>
           <Text variant="caption">{entry.description}</Text>
-          <ComponentDemo entry={entry} />
           <Button tone="neutral" onClick={() => onSelect(entry.id)}>Open demo</Button>
         </Card>
       ))}

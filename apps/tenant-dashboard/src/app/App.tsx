@@ -1,8 +1,9 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { AuthProvider } from './AuthProvider';
 import { useAuth } from './useAuth';
 import { AppShell } from './AppShell';
-import { ComponentGalleryPage } from '@regent/ui-shared';
+import { ComponentGalleryPage, EmptyState, ErrorState, LoadingState, buildLoginPath } from '@regent/ui-shared';
 import { LoginPage } from '../pages/LoginPage';
 import { SettingsPage } from '../pages/SettingsPage';
 import { DashboardPage } from '../features/dashboard/DashboardPage';
@@ -36,9 +37,34 @@ import { RuntimePolicyPage } from '../features/budget/RuntimePolicyPage';
 import { ModelsPage } from '../features/models/ModelsPage';
 import { JournalPage } from '../features/journal/JournalPage';
 
-function ProtectedShell() {
+function ReadAccessDenied() {
+  const { t } = useTranslation();
+  return <EmptyState title={t('access.permissionDenied.title')} description={t('access.permissionDenied.description')} />;
+}
+
+function CollaborationRoute() {
   const { session } = useAuth();
-  return session ? <AppShell /> : <Navigate to="/login" replace />;
+  return session?.effectiveAccess?.canReadCollaboration === true ? <CollaborationPage /> : <ReadAccessDenied />;
+}
+
+function MessagesRoute() {
+  const { session } = useAuth();
+  return session?.effectiveAccess?.canReadChat === true ? <MessagesPage /> : <ReadAccessDenied />;
+}
+
+function ProtectedShell() {
+  const { status, error, retry } = useAuth();
+  const { t } = useTranslation();
+  const location = useLocation();
+  if (status === 'checking') return <LoadingState label={t('auth.loading.checking')} />;
+  if (status === 'permission-denied' || status === 'error') {
+    return <ErrorState message={error ?? 'Session verification failed.'} onRetry={() => void retry().catch(() => undefined)} />;
+  }
+  if (status === 'anonymous') {
+    const target = `${location.pathname}${location.search}${location.hash}`;
+    return <Navigate to={buildLoginPath(target)} replace />;
+  }
+  return <AppShell />;
 }
 
 export function App() {
@@ -54,7 +80,7 @@ export function App() {
           <Route path="projects/:projectId/delivery" element={<DeliveryPage />} />
           <Route path="organization" element={<EmployeeListPage />} />
           <Route path="organization/manage" element={<OrganizationPage />} />
-          <Route path="organization/collaboration" element={<CollaborationPage />} />
+          <Route path="organization/collaboration" element={<CollaborationRoute />} />
           <Route path="organization/employees/:employeeId" element={<EmployeeDetailPage />} />
           <Route path="governance/approvals" element={<ApprovalListPage />} />
           <Route path="governance/approvals/:approvalId" element={<ApprovalPage />} />
@@ -63,9 +89,8 @@ export function App() {
           <Route path="governance/incidents" element={<IncidentsPage />} />
           <Route path="governance/compliance" element={<CompliancePage />} />
           <Route path="governance/security" element={<GovernancePage />} />
-          <Route path="governance/incidents" element={<GovernancePage />} />
           <Route path="governance/lifecycle" element={<LifecyclePage />} />
-          <Route path="messages" element={<MessagesPage />} />
+          <Route path="messages" element={<MessagesRoute />} />
           <Route path="workflows" element={<WorkflowsPage />} />
           <Route path="knowledge" element={<MemoryPage />} />
           <Route path="performance" element={<PerformancePage />} />
@@ -79,8 +104,11 @@ export function App() {
           <Route path="models" element={<ModelsPage />} />
           <Route path="journal" element={<JournalPage />} />
           <Route path="settings" element={<SettingsPage />} />
-          <Route path="dev/components" element={<ComponentGalleryPage />} />
+          {import.meta.env.DEV ? <Route path="dev/components" element={<ComponentGalleryPage />} /> : null}
         </Route>
+        {!import.meta.env.DEV ? <Route path="dev/components" element={
+          <EmptyState title="Component gallery unavailable" description="This gallery is available only in development builds." />
+        } /> : null}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AuthProvider>

@@ -13,5 +13,5 @@ export function Avatar({ name, status = 'Active', size = 'medium' }: AvatarProps
     : status === 'Busy' || status === 'RateLimited' || status === 'Degraded'
       ? 'warning'
       : 'primary';
-  return <MuiAvatar sx={{ bgcolor: `${color}.main`, width: size === 'large' ? 56 : size === 'small' ? 28 : 40, height: size === 'large' ? 56 : size === 'small' ? 28 : 40 }}>{initials}</MuiAvatar>;
+  return <MuiAvatar sx={{ bgcolor: theme => theme.palette[color].main, width: size === 'large' ? 56 : size === 'small' ? 28 : 40, height: size === 'large' ? 56 : size === 'small' ? 28 : 40, fontWeight: 600, fontSize: size === 'small' ? '.75rem' : '.875rem' }}>{initials}</MuiAvatar>;
 }

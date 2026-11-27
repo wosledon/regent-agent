@@ -1,14 +1,21 @@
-import { GraphCanvas, type GraphCanvasEdge, type GraphCanvasNode } from '@regent/ui-shared';
+import { Card, EmptyState, StatusChip, type GraphCanvasEdge } from '@regent/ui-shared';
+import { useTranslation } from 'react-i18next';
+import { LocalizedGraphCanvas, type LocalizedGraphCanvasNode } from './LocalizedGraphCanvas';
 import type { CollaborationEdge, CollaborationNode } from '../../lib/domain-types';
+import type { CollaborationDisplayNode } from './localizedCollaboration';
+import { useTenantFormatting } from '../../hooks/useTenantFormatting';
+import { localizedCount } from '../../lib/localizedCount';
 
 interface OrgChartViewProps {
-  nodes: CollaborationNode[];
+  nodes: CollaborationDisplayNode[];
   edges: CollaborationEdge[];
   selectedId?: string | null;
   onSelect: (node: CollaborationNode) => void;
 }
 
 export function OrgChartView({ nodes, edges, selectedId, onSelect }: OrgChartViewProps) {
+  const { t } = useTranslation();
+  const format = useTenantFormatting();
   const employees = nodes.filter(node => node.type === 'Employee');
   const byId = new Map(employees.map(node => [node.id, node]));
   const children = new Map<string, CollaborationNode[]>();
@@ -40,10 +47,11 @@ export function OrgChartView({ nodes, edges, selectedId, onSelect }: OrgChartVie
   roots.forEach(root => place(root, 0));
   employees.filter(node => !visited.has(node.id)).forEach(node => place(node, 0));
 
-  const canvasNodes: GraphCanvasNode[] = employees.map(node => ({
+  const canvasNodes: LocalizedGraphCanvasNode[] = employees.map(node => ({
     id: node.id,
     label: node.label,
     subtitle: node.subtitle,
+    sourceSubtitle: node.sourceSubtitle,
     status: node.status,
     kind: 'Employee',
     ...(positions.get(node.id) ?? { x: node.x, y: node.y })
@@ -51,16 +59,28 @@ export function OrgChartView({ nodes, edges, selectedId, onSelect }: OrgChartVie
   const canvasEdges: GraphCanvasEdge[] = edges.filter(edge => edge.kind === 'reports_to').map(edge => ({
     id: edge.id, source: edge.sourceId, target: edge.targetId, kind: edge.kind, weight: edge.weight, label: edge.label
   }));
+  if (!employees.length) {
+    return <Card><EmptyState title={t('collaborationPage.noEmployeesYet')} description={t('collaborationPage.startTheCompanyToOpenTheOffice')} /></Card>;
+  }
+
   return (
-    <GraphCanvas
-      nodes={canvasNodes}
-      edges={canvasEdges}
-      selectedId={selectedId}
-      onSelect={canvasNode => {
-        const node = employees.find(employee => employee.id === canvasNode.id);
-        if (node) onSelect(node);
-      }}
-      height={Math.max(480, (roots.length + leaf) * 120)}
-    />
+    <Card
+      title={t('collaborationPage.orgChart')}
+      description={t('collaborationPage.reportingAndProjectWork')}
+      headingLevel="h2"
+      action={<StatusChip label={localizedCount(t, format, 'collaborationPage.employeeCount', employees.length)} tone="info" />}
+      padding="small"
+    >
+      <LocalizedGraphCanvas
+        nodes={canvasNodes}
+        edges={canvasEdges}
+        selectedId={selectedId}
+        onSelect={canvasNode => {
+          const node = employees.find(employee => employee.id === canvasNode.id);
+          if (node) onSelect(node);
+        }}
+        height={Math.max(480, (roots.length + leaf) * 120)}
+      />
+    </Card>
   );
 }

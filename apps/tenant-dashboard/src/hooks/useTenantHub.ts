@@ -17,11 +17,15 @@ export function useTenantHub(enabled: boolean) {
       .configureLogging(LogLevel.Warning)
       .build();
     connectionRef.current = connection;
+    let stopped = false;
+    let initialAttempts = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     connection.on('approval.changed', () => {
       void queryClient.invalidateQueries({ queryKey: ['dashboard'] });
       void queryClient.invalidateQueries({ queryKey: ['approvals'] });
     });
     connection.on('message.created', () => {
+      void queryClient.invalidateQueries({ queryKey: ['conversations'] });
       void queryClient.invalidateQueries({ queryKey: ['messages'] });
       void queryClient.invalidateQueries({ queryKey: ['notifications'] });
       void queryClient.invalidateQueries({ queryKey: ['collaboration'] });
@@ -31,12 +35,29 @@ export function useTenantHub(enabled: boolean) {
     });
     connection.onreconnecting(() => setState('reconnecting'));
     connection.onreconnected(() => {
+      initialAttempts = 0;
       setState('connected');
       void queryClient.invalidateQueries();
     });
-    connection.onclose(() => setState('disconnected'));
-    void connection.start().then(() => setState('connected')).catch(() => setState('disconnected'));
+    connection.onclose(() => { if (!stopped) setState('disconnected'); });
+    const startInitialConnection = () => {
+      initialAttempts += 1;
+      void connection.start().then(() => {
+        if (stopped) return;
+        initialAttempts = 0;
+        setState('connected');
+      }).catch(() => {
+        if (stopped) return;
+        setState('disconnected');
+        if (initialAttempts >= 4) return;
+        retryTimer = setTimeout(startInitialConnection, 1000 * (2 ** (initialAttempts - 1)));
+      });
+    };
+    const startTimer = setTimeout(startInitialConnection, 0);
     return () => {
+      stopped = true;
+      clearTimeout(startTimer);
+      if (retryTimer) clearTimeout(retryTimer);
       void connection.stop();
       connectionRef.current = null;
     };

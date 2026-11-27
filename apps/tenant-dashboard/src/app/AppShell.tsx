@@ -1,78 +1,50 @@
-import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { AppBar, Box, Drawer, List, ListItemButton, ListItemText, Toolbar } from '@mui/material';
+import { useEffect } from 'react';
+import { Box } from '@mui/material';
+import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Button, Icon, SemanticIconButton, StatusChip, Text, trackBrowserPageView } from '@regent/ui-shared';
+import { Button, Icon, LocaleSwitch, Text, WorkspaceShell, resolveLocale, trackBrowserPageView } from '@regent/ui-shared';
 import { useAuth } from './useAuth';
+import { isRestrictedSessionKind } from './AuthContext';
 import { useTenantHub } from '../hooks/useTenantHub';
-
-const navigation = [
-  { key: 'dashboard', path: '/', icon: 'dashboard' as const },
-  { key: 'butler', path: '/butler', icon: 'dashboard' as const },
-  { key: 'projects', path: '/projects', icon: 'evaluation' as const },
-  { key: 'organization', path: '/organization', icon: 'organization' as const },
-  { key: 'organizationManage', path: '/organization/manage', icon: 'organization' as const },
-  { key: 'collaboration', path: '/organization/collaboration', icon: 'organization' as const },
-  { key: 'messages', path: '/messages', icon: 'notification' as const },
-  { key: 'workflows', path: '/workflows', icon: 'evaluation' as const },
-  { key: 'knowledge', path: '/knowledge', icon: 'evaluation' as const },
-  { key: 'journal', path: '/journal', icon: 'evaluation' as const },
-  { key: 'performance', path: '/performance', icon: 'evaluation' as const },
-  { key: 'performanceActions', path: '/performance/actions', icon: 'evaluation' as const },
-  { key: 'recruitment', path: '/recruitment', icon: 'organization' as const },
-  { key: 'agentGovernance', path: '/agent-governance', icon: 'evaluation' as const },
-  { key: 'evaluations', path: '/evaluations', icon: 'evaluation' as const },
-  { key: 'models', path: '/models', icon: 'evaluation' as const },
-  { key: 'budget', path: '/budget', icon: 'evaluation' as const },
-  { key: 'billing', path: '/billing', icon: 'evaluation' as const },
-  { key: 'runtimePolicy', path: '/budget/runtime', icon: 'evaluation' as const },
-  { key: 'governance', path: '/governance/approvals', icon: 'notification' as const },
-  { key: 'actionCenter', path: '/governance/action-center', icon: 'notification' as const },
-  { key: 'notifications', path: '/governance/notifications', icon: 'notification' as const },
-  { key: 'security', path: '/governance/security', icon: 'notification' as const },
-  { key: 'lifecycle', path: '/governance/lifecycle', icon: 'notification' as const },
-  { key: 'compliance', path: '/governance/compliance', icon: 'notification' as const },
-  { key: 'settings', path: '/settings', icon: 'settings' as const },
-  { key: 'components', path: '/dev/components', icon: 'dashboard' as const }
-];
+import { buildTenantNavigation } from './navigation';
 
 export function AppShell() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { session, logout } = useAuth();
-  const hubState = useTenantHub(Boolean(session));
-  const [open, setOpen] = useState(false);
+  const restricted = isRestrictedSessionKind(session?.sessionKind);
+  const hubState = useTenantHub(Boolean(session) && !restricted);
   const location = useLocation();
+  const navigate = useNavigate();
   useEffect(() => { trackBrowserPageView(location.pathname); }, [location.pathname]);
 
+  const canReadChat = !restricted && session?.effectiveAccess?.canReadChat === true;
+  const canReadCollaboration = !restricted && session?.effectiveAccess?.canReadCollaboration === true;
+  const navigation = buildTenantNavigation({
+    translate: key => t(key),
+    canReadChat,
+    canReadCollaboration,
+    development: import.meta.env.DEV
+  });
+  const connectionTone = hubState === 'connected' ? 'success' : hubState === 'reconnecting' ? 'warning' : 'error';
+  const connectionKey = hubState;
+
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-      <AppBar position="fixed" sx={{ zIndex: theme => theme.zIndex.drawer + 1 }}>
-        <Toolbar>
-          <SemanticIconButton label="Open navigation" color="inherit" onClick={() => setOpen(true)}>
-            <Icon name="dashboard" />
-          </SemanticIconButton>
-          <Text variant="h2" sx={{ flexGrow: 1, color: 'inherit' }}>Regent Agent</Text>
-          <StatusChip tone={hubState === 'connected' ? 'success' : 'warning'} label={hubState} />
-          <Button tone="neutral" onClick={() => void logout()}>Logout</Button>
-        </Toolbar>
-      </AppBar>
-      <Drawer open={open} onClose={() => setOpen(false)}>
-        <Box sx={{ width: 260 }} role="presentation" onClick={() => setOpen(false)}>
-          <Toolbar />
-          <List>
-            {navigation.map(item => (
-              <ListItemButton key={item.path} component={NavLink} to={item.path} selected={location.pathname === item.path}>
-                <Icon name={item.icon} />
-                <ListItemText primary={t(item.key)} sx={{ ml: 2 }} />
-              </ListItemButton>
-            ))}
-          </List>
-        </Box>
-      </Drawer>
-      <Box component="main" sx={{ flexGrow: 1, minWidth: 0, p: 3, mt: 8 }}>
-        <Text variant="caption">Signed in as {session?.displayName}</Text>
-        <Outlet />
-      </Box>
-    </Box>
+    <WorkspaceShell
+      brand="Regent Agent"
+      navigation={navigation}
+      currentPath={location.pathname}
+      onNavigate={navigate}
+      navigationLabel={t('shell.navigationLabel')}
+      openNavigationLabel={t('shell.openNavigation')}
+      closeNavigationLabel={t('shell.closeNavigation')}
+      skipNavigationLabel={t('shell.skipNavigation')}
+      connection={{ label: t(`shell.connection.${connectionKey}`), tone: connectionTone }}
+      context={<Text variant="caption" color="text.secondary" sx={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('shell.signedInAs', { name: session?.displayName ?? '' })}</Text>}
+      headerActions={<LocaleSwitch value={resolveLocale(i18n.resolvedLanguage ?? i18n.language)} onChange={language => void i18n.changeLanguage(language)} label={t('auth.localeLabel')} />}
+      user={{ name: session?.displayName ?? '', secondary: session?.role }}
+      userActions={<Button tone="neutral" startIcon={<Icon name="logout" />} aria-label={t('shell.logout')} onClick={() => void logout()} sx={{ minWidth: { xs: 36, sm: 96 }, px: { xs: 1, sm: 1.75 } }}><Box component="span" sx={{ display: { xs: 'none', sm: 'inline' } }}>{t('shell.logout')}</Box></Button>}
+    >
+      <Outlet />
+    </WorkspaceShell>
   );
 }

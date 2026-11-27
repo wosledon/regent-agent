@@ -1,15 +1,46 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Button, Card, FormField, Select, Stack, Text, TextInput } from '@regent/ui-shared';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import {
+  AuthLayout,
+  Button,
+  Card,
+  ErrorState,
+  FormField,
+  Grid,
+  Icon,
+  LoadingState,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  resolveLocale,
+  validateReturnTarget,
+  type AppLocale
+} from '@regent/ui-shared';
 import { useAuth } from '../app/useAuth';
+import { authErrorKey, type AuthErrorKey } from '../lib/authErrors';
+import i18n from '../lib/i18n';
+import { authenticationModes, defaultAuthMode, type AuthMode } from './authModes';
+import { EmergencyRecovery, RegistrationRecovery } from './auth/RecoveryMaterial';
 
-type AuthMode = 'dev' | 'password' | 'register' | 'emergency';
+const submitKeyByMode: Record<AuthMode, string> = {
+  dev: 'auth.submit.signIn',
+  password: 'auth.submit.signIn',
+  register: 'auth.submit.createAccount',
+  emergency: 'auth.submit.emergency'
+};
 
 export function LoginPage() {
-  const { login, passwordLogin, register, emergencyLogin, session } = useAuth();
+  const { t } = useTranslation();
+  const { login, passwordLogin, register, emergencyLogin, logout, status, session, error, retry } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<AuthMode>('dev');
-  const [email, setEmail] = useState('owner@example.test');
+  const location = useLocation();
+  const returnTarget = validateReturnTarget(new URLSearchParams(location.search).get('returnTo')) ?? '/';
+  const locale = resolveLocale(i18n.resolvedLanguage ?? i18n.language);
+  const production = import.meta.env.PROD;
+  const [mode, setMode] = useState<AuthMode>(() => defaultAuthMode(production));
+  const [email, setEmail] = useState(() => t('auth.emailPlaceholder'));
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [companyName, setCompanyName] = useState('');
@@ -18,68 +49,236 @@ export function LoginPage() {
   const [purpose, setPurpose] = useState('');
   const [rotatedCredential, setRotatedCredential] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [errorKey, setErrorKey] = useState<AuthErrorKey | null>(null);
   const [loading, setLoading] = useState(false);
+  const [logoutLoading, setLogoutLoading] = useState(false);
+
+  const changeLocale = (next: AppLocale) => { void i18n.changeLanguage(next); };
+  const modeOptions = authenticationModes(production).map(value => ({ value, label: t(`auth.modes.${value}`) }));
+  const submitLabel = t(submitKeyByMode[mode]);
+  const layout = {
+    audience: t('auth.audience'),
+    headline: t('auth.headline'),
+    description: t('auth.description'),
+    highlights: [
+      { icon: 'organization' as const, title: t('auth.highlightDeliveryTitle'), description: t('auth.highlightDeliveryDescription') },
+      { icon: 'success' as const, title: t('auth.highlightGovernanceTitle'), description: t('auth.highlightGovernanceDescription') },
+      { icon: 'evaluation' as const, title: t('auth.highlightKnowledgeTitle'), description: t('auth.highlightKnowledgeDescription') }
+    ],
+    footer: t('auth.footer'),
+    locale,
+    onLocaleChange: changeLocale,
+    localeLabel: t('auth.localeLabel')
+  };
+
+  function changeMode(next: AuthMode) {
+    setMode(next);
+    setErrorKey(null);
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (loading) return;
     setLoading(true);
-    setError(null);
+    setErrorKey(null);
     try {
       if (mode === 'dev') await login(email);
       else if (mode === 'password') await passwordLogin(email, password);
       else if (mode === 'emergency') setRotatedCredential(await emergencyLogin(tenantId, credential, purpose));
       else setRecoveryCodes(await register(email, password, displayName, companyName));
-      if (mode === 'dev' || mode === 'password') navigate('/');
+      if (mode === 'dev' || mode === 'password') navigate(returnTarget, { replace: true });
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Authentication failed.');
+      setErrorKey(authErrorKey(cause, mode));
     } finally {
       setLoading(false);
     }
   }
 
-  if (session && recoveryCodes.length === 0 && !rotatedCredential) return <Text variant="h2">Already signed in as {session.displayName}</Text>;
-  return (
-    <Card title="Sign in to Regent Agent">
-      <form onSubmit={submit}>
-        <Stack spacing={2}>
-          <Select label="Authentication mode" value={mode} onChange={value => setMode(value as AuthMode)} options={[
-            { value: 'dev', label: 'Local development' },
-            { value: 'password', label: 'Password' },
-            { value: 'register', label: 'Create account' },
-            { value: 'emergency', label: 'Emergency access' }
-          ]} />
-          {mode === 'emergency' ? <>
-            <FormField label="Tenant ID"><TextInput value={tenantId} onChange={setTenantId} /></FormField>
-            <FormField label="Emergency credential"><TextInput value={credential} onChange={setCredential} type="password" /></FormField>
-            <FormField label="Purpose"><TextInput value={purpose} onChange={setPurpose} placeholder="Restore unavailable identity provider" /></FormField>
-          </> : <>
-            <FormField label="Email"><TextInput value={email} onChange={setEmail} placeholder="owner@example.test" /></FormField>
-            {mode !== 'dev' ? <FormField label="Password"><TextInput value={password} onChange={setPassword} type="password" placeholder="At least 10 characters" /></FormField> : null}
-          </>}
-          {mode === 'register' ? <>
-            <FormField label="Display name"><TextInput value={displayName} onChange={setDisplayName} placeholder="Display name" /></FormField>
-            <FormField label="Company name"><TextInput value={companyName} onChange={setCompanyName} placeholder="Company name" /></FormField>
-          </> : null}
-          {error ? <Text color="error">{error}</Text> : null}
-          <Button type="submit" loading={loading} disabled={
+  async function signOut() {
+    if (logoutLoading) return;
+    setLogoutLoading(true);
+    setErrorKey(null);
+    try {
+      await logout();
+    } catch {
+      setErrorKey('auth.errors.unexpected');
+    } finally {
+      setLogoutLoading(false);
+    }
+  }
+
+  if (recoveryCodes.length > 0) {
+    return <AuthLayout {...layout}>
+      <RegistrationRecovery
+        codes={recoveryCodes}
+        title={t('auth.recovery.title')}
+        description={t('auth.recovery.description')}
+        continueLabel={t('auth.recovery.continue')}
+        onContinue={() => navigate(returnTarget, { replace: true })}
+      />
+    </AuthLayout>;
+  }
+
+  if (rotatedCredential) {
+    return <AuthLayout {...layout}>
+      <EmergencyRecovery
+        credential={rotatedCredential}
+        title={t('auth.emergencyResult.title')}
+        description={t('auth.emergencyResult.description')}
+        continueLabel={t('auth.emergencyResult.continue')}
+        onContinue={() => navigate('/settings')}
+      />
+    </AuthLayout>;
+  }
+
+  if (status === 'checking') {
+    return <AuthLayout {...layout}><LoadingState label={t('auth.loading.checking')} /></AuthLayout>;
+  }
+
+  if (status === 'permission-denied' || status === 'error') {
+    return <AuthLayout {...layout}><Stack spacing={2}>
+      <ErrorState message={error ?? t('auth.errors.unexpected')} />
+      <Button tone="neutral" onClick={() => void retry().catch(() => undefined)}>{t('common.retry')}</Button>
+    </Stack></AuthLayout>;
+  }
+
+  if (session) {
+    return <AuthLayout {...layout}>
+      <Stack spacing={2.5}>
+        <Stack direction="row" spacing={1.5} alignItems="center">
+          <Icon name="success" sx={{ color: 'success.main' }} />
+          <Text variant="h2">{t('auth.signedIn.title', { name: session.displayName })}</Text>
+        </Stack>
+        <Text color="text.secondary">{t('auth.signedIn.description')}</Text>
+        {errorKey ? <ErrorState message={t(errorKey)} /> : null}
+        <Stack direction="row" spacing={1.5} wrap>
+          <Button onClick={() => navigate(returnTarget, { replace: true })}>{t('auth.signedIn.continue')}</Button>
+          <Button tone="neutral" loading={logoutLoading} aria-label={t('auth.signedIn.logout')} onClick={signOut}>{t('auth.signedIn.logout')}</Button>
+        </Stack>
+        {logoutLoading ? <Text role="status">{t('auth.loading.loggingOut')}</Text> : null}
+      </Stack>
+    </AuthLayout>;
+  }
+
+  return <AuthLayout {...layout}>
+    <form onSubmit={submit}>
+      <Stack spacing={2.5}>
+        <Stack spacing={0.75}>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Icon name="security" sx={{ color: 'primary.main' }} />
+            <Text variant="h2">{t('auth.title')}</Text>
+          </Stack>
+          <Text color="text.secondary">{t('auth.intro')}</Text>
+        </Stack>
+        <Select
+          label={t('auth.modeLabel')}
+          value={mode}
+          options={modeOptions}
+          onChange={changeMode}
+          disabled={loading}
+        />
+        {mode === 'dev' ? <Card tone="warning" padding="small"><Text color="warning.main">{t('auth.devNotice')}</Text></Card> : null}
+        {mode === 'emergency' ? <Card tone="warning" padding="small">
+          <Stack spacing={2}>
+            <FormField label={t('auth.tenantId')} required>
+              <TextInput
+                value={tenantId}
+                onChange={setTenantId}
+                placeholder={t('auth.tenantIdPlaceholder')}
+                disabled={loading}
+                required
+                inputProps={{ 'aria-label': t('auth.tenantId'), autoComplete: 'off' }}
+              />
+            </FormField>
+            <FormField label={t('auth.emergencyCredential')} required>
+              <TextInput
+                value={credential}
+                onChange={setCredential}
+                type="password"
+                disabled={loading}
+                required
+                inputProps={{ 'aria-label': t('auth.emergencyCredential'), autoComplete: 'off' }}
+              />
+            </FormField>
+            <FormField label={t('auth.purpose')} required>
+              <TextInput
+                value={purpose}
+                onChange={setPurpose}
+                placeholder={t('auth.purposePlaceholder')}
+                disabled={loading}
+                required
+                multiline
+                minRows={2}
+                inputProps={{ 'aria-label': t('auth.purpose'), autoComplete: 'off' }}
+              />
+            </FormField>
+          </Stack>
+        </Card> : <>
+          <FormField label={t('auth.email')} required>
+            <TextInput
+              value={email}
+              onChange={setEmail}
+              type="email"
+              placeholder={t('auth.emailPlaceholder')}
+              disabled={loading}
+              required
+              inputProps={{ 'aria-label': t('auth.email'), autoComplete: 'email' }}
+            />
+          </FormField>
+          {mode !== 'dev' ? <FormField label={t('auth.password')} hint={mode === 'register' ? t('auth.passwordPlaceholder') : undefined} required>
+            <TextInput
+              value={password}
+              onChange={setPassword}
+              type="password"
+              placeholder={t('auth.passwordPlaceholder')}
+              disabled={loading}
+              required
+              inputProps={{
+                'aria-label': t('auth.password'),
+                autoComplete: mode === 'register' ? 'new-password' : 'current-password',
+                minLength: mode === 'register' ? 10 : undefined
+              }}
+            />
+          </FormField> : null}
+        </>}
+        {mode === 'register' ? <Grid columns={2}>
+          <FormField label={t('auth.displayName')} required>
+            <TextInput
+              value={displayName}
+              onChange={setDisplayName}
+              placeholder={t('auth.displayNamePlaceholder')}
+              disabled={loading}
+              required
+              inputProps={{ 'aria-label': t('auth.displayName'), autoComplete: 'name' }}
+            />
+          </FormField>
+          <FormField label={t('auth.companyName')} required>
+            <TextInput
+              value={companyName}
+              onChange={setCompanyName}
+              placeholder={t('auth.companyNamePlaceholder')}
+              disabled={loading}
+              required
+              inputProps={{ 'aria-label': t('auth.companyName'), autoComplete: 'organization' }}
+            />
+          </FormField>
+        </Grid> : null}
+        {errorKey ? <ErrorState message={t(errorKey)} /> : null}
+        <Button
+          type="submit"
+          size="large"
+          loading={loading}
+          aria-label={submitLabel}
+          sx={{ width: '100%' }}
+          disabled={
             (mode === 'register' && (!displayName || !companyName || password.length < 10))
             || (mode === 'emergency' && (!tenantId || !credential || !purpose))
-          }>
-            {mode === 'register' ? 'Create account' : mode === 'emergency' ? 'Use emergency access' : 'Sign in'}
-          </Button>
-          {rotatedCredential ? <Card title="Store the rotated emergency credential">
-            <Text>The emergency session is restricted to SSO recovery and account access for 15 minutes.</Text>
-            <Text component="pre" sx={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{rotatedCredential}</Text>
-            <Button type="button" onClick={() => navigate('/settings')}>Continue to recovery settings</Button>
-          </Card> : null}
-          {recoveryCodes.length > 0 ? <Card title="Save recovery codes">
-            <Text>These codes are shown once. Store them in a secure password manager.</Text>
-            {recoveryCodes.map(code => <Text key={code} variant="caption">{code}</Text>)}
-            <Button type="button" tone="secondary" onClick={() => navigate('/')}>Continue</Button>
-          </Card> : null}
-        </Stack>
-      </form>
-    </Card>
-  );
+          }
+        >
+          {submitLabel}
+        </Button>
+        {loading ? <Text role="status">{t('auth.loading.submitting')}</Text> : null}
+      </Stack>
+    </form>
+  </AuthLayout>;
 }

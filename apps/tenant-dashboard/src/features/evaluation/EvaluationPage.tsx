@@ -1,17 +1,33 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  Button, Card, DataTable, ErrorState, FormField, Grid, LoadingState,
-  PageHeader, Stack, StatusChip, Text, TextInput
+  Button, Card, ContentContainer, FormField, Grid, MetricCard,
+  PageHeader, Select, Stack, StatusChip, Text, TextInput
 } from '@regent/ui-shared';
+import { LocalizedDataTable } from '../common/LocalizedDataTable';
+import { useTranslation } from 'react-i18next';
+import { useTenantFormatting } from '../../hooks/useTenantFormatting';
+import { LocalizedErrorState } from '../common/LocalizedErrorState';
+import { LocalizedLoadingState } from '../common/LocalizedLoadingState';
+import { LocalizedMutationFeedback } from '../common/LocalizedMutationFeedback';
 import { api } from '../../lib/api-client/api';
+import { localizedIntegerRangeError, localizedPositiveIntegerError } from '../../lib/localizedValidation';
+import { useDomainLabels } from '../../lib/domainLabels';
+import { stableOccurrenceKeys } from '../../lib/stableKeys';
+import { toFiniteNumber } from '../../lib/formatting';
+import { localizedCount } from '../../lib/localizedCount';
 
 export function EvaluationPage() {
+  const format = useTenantFormatting();
+  const { t } = useTranslation();
+  const domainLabel = useDomainLabels();
   const queryClient = useQueryClient();
   const suites = useQuery({ queryKey: ['evaluation-suites'], queryFn: api.evaluationSuites });
   const runs = useQuery({ queryKey: ['evaluations'], queryFn: api.evaluations });
   const qa = useQuery({ queryKey: ['evaluation-qa'], queryFn: api.evaluationQa });
-  const [candidateEmployeeId, setCandidateEmployeeId] = useState('11111111-1111-1111-1111-111111111112');
+  const employees = useQuery({ queryKey: ['employees'], queryFn: api.employees });
+  const [candidateEmployeeId, setCandidateEmployeeId] = useState('');
+  const [suiteId, setSuiteId] = useState('');
   const [repeats, setRepeats] = useState('3');
   const [sampleCount, setSampleCount] = useState('100');
   const [successes, setSuccesses] = useState('92');
@@ -20,76 +36,112 @@ export function EvaluationPage() {
   const [discordantB, setDiscordantB] = useState('2');
   const [calibrationPassed, setCalibrationPassed] = useState('true');
   const run = useMutation({
-    mutationFn: (suiteId: string) => api.runEvaluation(suiteId, candidateEmployeeId),
+    mutationFn: ({ suiteId: selectedSuiteId, candidateEmployeeId: employeeId }: { suiteId: string; candidateEmployeeId: string }) => api.runEvaluation(selectedSuiteId, employeeId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['evaluations'] })
   });
   const gate = useMutation({
     mutationFn: () => api.runQaGate({
-      suiteId: 'core', candidateEmployeeId, repeats: Number(repeats), sampleCount: Number(sampleCount),
+      suiteId, candidateEmployeeId, repeats: Number(repeats), sampleCount: Number(sampleCount),
       successes: Number(successes), baselineSuccesses: Number(baselineSuccesses),
       discordantA: Number(discordantA), discordantB: Number(discordantB), calibrationPassed: calibrationPassed === 'true'
     }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['evaluation-qa'] })
   });
 
-  if (suites.isLoading || runs.isLoading || qa.isLoading) return <LoadingState />;
-  if (suites.error || runs.error || qa.error) return <ErrorState message={(suites.error ?? runs.error ?? qa.error)!.message} />;
+  if (suites.isLoading || runs.isLoading || qa.isLoading || employees.isLoading) return <LocalizedLoadingState />;
+  const queryError = suites.error ?? runs.error ?? qa.error ?? employees.error;
+  if (queryError) return <LocalizedErrorState error={queryError} />;
+
+  const validCandidate = employees.data?.some(employee => employee.id === candidateEmployeeId) === true;
+  const validSuite = suites.data?.some(suite => suite.id === suiteId) === true;
+  const sampleSize = Number(sampleCount);
+  const calibrations = qa.data?.calibrations ?? [];
+  const calibrationKeys = stableOccurrenceKeys(calibrations.map(row =>
+    `${row.sampleCount ?? ''}:${row.agreement ?? ''}:${row.kappa ?? ''}`
+  ));
+  const gateError = !validCandidate ? t('evaluationsPage.selectLoadedEmployee')
+    : !validSuite ? t('evaluationsPage.selectLoadedSuite')
+      : localizedPositiveIntegerError(repeats, t('evaluationsPage.repeats'), t)
+        ?? localizedPositiveIntegerError(sampleCount, t('evaluationsPage.sampleCount'), t)
+        ?? localizedIntegerRangeError(successes, t('evaluationsPage.successes'), 0, Number.isSafeInteger(sampleSize) ? sampleSize : Number.MAX_SAFE_INTEGER, t)
+        ?? localizedIntegerRangeError(baselineSuccesses, t('evaluationsPage.baselineSuccesses'), 0, Number.isSafeInteger(sampleSize) ? sampleSize : Number.MAX_SAFE_INTEGER, t)
+        ?? localizedIntegerRangeError(discordantA, t('evaluationsPage.discordantA'), 0, Number.MAX_SAFE_INTEGER, t)
+        ?? localizedIntegerRangeError(discordantB, t('evaluationsPage.discordantB'), 0, Number.MAX_SAFE_INTEGER, t);
 
   return (
-    <Stack spacing={3}>
-      <PageHeader title="Model evaluation" description="Versioned suites, independent judges, calibration and statistical release gates." />
-      <Grid columns={2}>
-        <Card title="Benchmark suites">
-          {suites.data?.map(suite => (
-            <Stack key={suite.id} direction="row" spacing={2}>
-              <Text variant="h3">{suite.name} v{suite.version}</Text>
-              <Text>{suite.caseCount} cases</Text>
-              <Button onClick={() => run.mutate(suite.id)} loading={run.isPending}>Run evaluation</Button>
-            </Stack>
-          ))}
+    <ContentContainer>
+      <Stack spacing={3}>
+        <PageHeader title={t('evaluationsPage.modelEvaluation')} description={t('evaluationsPage.versionedSuitesIndependentJudgesCalibrationAndStatisticalReleaseGates')} />
+        <Grid columns={4}>
+          <MetricCard label={t('evaluationsPage.benchmarkSuites')} value={suites.data?.length ?? 0} icon="evaluation" />
+          <MetricCard label={t('evaluationsPage.evaluationRuns')} value={runs.data?.length ?? 0} icon="activity" />
+          <MetricCard label={t('evaluationsPage.judgeCalibration')} value={calibrations.length} icon="evaluation" />
+          <MetricCard label={t('evaluationsPage.qAGates')} value={qa.data?.gates?.length ?? 0} icon="governance" tone={(qa.data?.gates?.length ?? 0) > 0 ? 'info' : 'default'} />
+        </Grid>
+        <Grid columns={2}>
+        <Card padding="small" title={t('evaluationsPage.benchmarkSuites')}>
+          <LocalizedDataTable
+            density="compact"
+            rows={suites.data ?? []}
+            getRowId={suite => suite.id}
+            emptyTitle={t('evaluationsPage.noEvaluationSuites')}
+            emptyDescription={t('evaluationsPage.createAVersionedSuiteBeforeRunningAnEvaluation')}
+            columns={[
+              { id: 'suite', header: t('evaluationsPage.suite'), render: suite => <Text variant="bodyStrong" component="h3">{t('evaluationsPage.v', { value0: suite.name, value1: format.number(toFiniteNumber(suite.version)) })}</Text> },
+              { id: 'cases', header: t('evaluationsPage.cases'), render: suite => localizedCount(t, format, 'evaluationsPage.cases', toFiniteNumber(suite.caseCount) ?? 0) },
+              { id: 'actions', header: t('common.actions'), align: 'right', render: suite => <Button size="small" onClick={() => run.mutate({ suiteId: suite.id, candidateEmployeeId })} disabled={!validCandidate || run.isPending} loading={run.isPending && run.variables?.suiteId === suite.id}>{t('evaluationsPage.runEvaluation')}</Button> }
+            ]}
+          />
+          <LocalizedMutationFeedback mutation={run} successMessage={t('evaluationsPage.evaluationRunCompleted')} />
         </Card>
-        <Card title="QA gate">
-          <FormField label="Candidate employee ID"><TextInput value={candidateEmployeeId} onChange={setCandidateEmployeeId} /></FormField>
-          <FormField label="Repeats"><TextInput value={repeats} onChange={setRepeats} inputProps={{ inputMode: 'numeric' }} /></FormField>
-          <FormField label="Sample count"><TextInput value={sampleCount} onChange={setSampleCount} inputProps={{ inputMode: 'numeric' }} /></FormField>
-          <FormField label="Successes"><TextInput value={successes} onChange={setSuccesses} inputProps={{ inputMode: 'numeric' }} /></FormField>
-          <FormField label="Baseline successes"><TextInput value={baselineSuccesses} onChange={setBaselineSuccesses} inputProps={{ inputMode: 'numeric' }} /></FormField>
-          <FormField label="Discordant A"><TextInput value={discordantA} onChange={setDiscordantA} inputProps={{ inputMode: 'numeric' }} /></FormField>
-          <FormField label="Discordant B"><TextInput value={discordantB} onChange={setDiscordantB} inputProps={{ inputMode: 'numeric' }} /></FormField>
-          <FormField label="Calibration passed">
-            <Button tone={calibrationPassed === 'true' ? 'primary' : 'danger'} onClick={() => setCalibrationPassed(value => value === 'true' ? 'false' : 'true')}>
-              {calibrationPassed === 'true' ? 'Yes' : 'No'}
-            </Button>
-          </FormField>
-          <Button onClick={() => gate.mutate()} disabled={!candidateEmployeeId} loading={gate.isPending}>Evaluate QA gate</Button>
+        <Card padding="small" title={t('evaluationsPage.qAGate')}>
+          <Select label={t('evaluationsPage.candidateEmployee')} value={candidateEmployeeId} onChange={setCandidateEmployeeId} options={[
+            { value: '', label: t('evaluationsPage.selectEmployee') },
+            ...(employees.data ?? []).map(employee => ({ value: employee.id, label: `${employee.displayName} · ${employee.employeeNo}` }))
+          ]} />
+          <Select label={t('evaluationsPage.evaluationSuite')} value={suiteId} onChange={setSuiteId} options={[
+            { value: '', label: t('evaluationsPage.selectSuite') },
+            ...(suites.data ?? []).map(suite => ({ value: suite.id, label: t('evaluationsPage.suiteVersion', { name: suite.name, version: format.number(toFiniteNumber(suite.version)) }) }))
+          ]} />
+          <FormField label={t('evaluationsPage.repeats')}><TextInput value={repeats} onChange={setRepeats} inputProps={{ inputMode: 'numeric' }} /></FormField>
+          <FormField label={t('evaluationsPage.sampleCount')}><TextInput value={sampleCount} onChange={setSampleCount} inputProps={{ inputMode: 'numeric' }} /></FormField>
+          <FormField label={t('evaluationsPage.successes')}><TextInput value={successes} onChange={setSuccesses} inputProps={{ inputMode: 'numeric' }} /></FormField>
+          <FormField label={t('evaluationsPage.baselineSuccesses')}><TextInput value={baselineSuccesses} onChange={setBaselineSuccesses} inputProps={{ inputMode: 'numeric' }} /></FormField>
+          <FormField label={t('evaluationsPage.discordantA')}><TextInput value={discordantA} onChange={setDiscordantA} inputProps={{ inputMode: 'numeric' }} /></FormField>
+          <FormField label={t('evaluationsPage.discordantB')}><TextInput value={discordantB} onChange={setDiscordantB} inputProps={{ inputMode: 'numeric' }} /></FormField>
+          <Select label={t('evaluationsPage.calibrationPassed')} value={calibrationPassed} onChange={setCalibrationPassed} options={[{ value: 'true', label: t('common.yes') }, { value: 'false', label: t('common.no') }]} />
+          <Button onClick={() => gate.mutate()} disabled={!!gateError || gate.isPending} loading={gate.isPending}>{t('evaluationsPage.evaluateQAGate')}</Button>
+          {gateError ? <Text color="error">{gateError}</Text> : null}
+          <LocalizedMutationFeedback mutation={gate} successMessage={t('evaluationsPage.qAGateEvaluated')} />
         </Card>
       </Grid>
-      <Card title="Evaluation runs">
-        <DataTable rows={runs.data ?? []} getRowId={row => row.id} columns={[
-          { id: 'suite', header: 'Suite', render: row => row.suiteId },
-          { id: 'candidate', header: 'Candidate', render: row => row.candidateEmployeeId },
-          { id: 'score', header: 'Score', render: row => row.score },
-          { id: 'safety', header: 'Safety', render: row => row.safetyPassed ? 'Pass' : 'Fail' },
-          { id: 'status', header: 'Status', render: row => <StatusChip label={row.status} tone={row.status === 'Approved' ? 'success' : 'error'} /> }
+      <Card padding="small" title={t('evaluationsPage.evaluationRuns')}>
+        <LocalizedDataTable density="compact" rows={runs.data ?? []} getRowId={row => row.id} columns={[
+          { id: 'suite', header: t('evaluationsPage.suite'), render: row => row.suiteId },
+          { id: 'candidate', header: t('common.candidate'), render: row => row.candidateEmployeeId },
+          { id: 'score', header: t('evaluationsPage.score'), render: row => format.number(toFiniteNumber(row.score)) },
+          { id: 'safety', header: t('evaluationsPage.safety'), render: row => <StatusChip label={row.safetyPassed ? domainLabel('Pass') : domainLabel('Fail')} tone={row.safetyPassed ? 'success' : 'error'} /> },
+          { id: 'status', header: t('common.status'), render: row => <StatusChip label={domainLabel(row.status)} tone={row.status === 'Approved' ? 'success' : 'error'} /> }
         ]} />
       </Card>
       <Grid columns={2}>
-        <Card title="Judge calibration">
-          <DataTable rows={qa.data?.calibrations ?? []} getRowId={row => `${row.sampleCount}:${row.agreement}`} columns={[
-            { id: 'samples', header: 'Samples', render: row => row.sampleCount ?? 0 },
-            { id: 'agreement', header: 'Agreement', render: row => `${Math.round(Number(row.agreement ?? 0) * 100)}%` },
-            { id: 'kappa', header: 'Kappa', render: row => Number(row.kappa ?? 0).toFixed(2) },
-            { id: 'status', header: 'Status', render: row => row.passed ? 'Pass' : 'Fail' }
+        <Card padding="small" title={t('evaluationsPage.judgeCalibration')}>
+          <LocalizedDataTable density="compact" rows={calibrations} getRowId={(_row, index) => calibrationKeys[index]} columns={[
+            { id: 'samples', header: t('evaluationsPage.samples'), render: row => format.number(toFiniteNumber(row.sampleCount)) },
+            { id: 'agreement', header: t('evaluationsPage.agreement'), render: row => format.percent(toFiniteNumber(row.agreement)) },
+            { id: 'kappa', header: t('evaluationsPage.kappa'), render: row => format.number(toFiniteNumber(row.kappa), { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
+            { id: 'status', header: t('common.status'), render: row => <StatusChip label={row.passed ? domainLabel('Pass') : domainLabel('Fail')} tone={row.passed ? 'success' : 'error'} /> }
           ]} />
         </Card>
-        <Card title="QA gates">
-          <DataTable rows={qa.data?.gates ?? []} getRowId={row => row.id ?? ''} columns={[
-            { id: 'suite', header: 'Suite', render: row => row.suiteId ?? '' },
-            { id: 'interval', header: 'Wilson 95%', render: row => row.scoreInterval ? `${Math.round(Number(row.scoreInterval.low) * 100)}–${Math.round(Number(row.scoreInterval.high) * 100)}%` : '' },
-            { id: 'contamination', header: 'Contaminated', render: row => row.contaminatedCases ?? 0 },
-            { id: 'status', header: 'Status', render: row => <StatusChip label={row.status ?? ''} tone={row.status === 'Approved' ? 'success' : 'error'} /> }
+        <Card padding="small" title={t('evaluationsPage.qAGates')}>
+          <LocalizedDataTable density="compact" rows={qa.data?.gates ?? []} getRowId={row => row.id ?? ''} columns={[
+            { id: 'suite', header: t('evaluationsPage.suite'), render: row => row.suiteId ?? '' },
+            { id: 'interval', header: t('evaluationsPage.wilson95'), render: row => row.scoreInterval ? t('common.interval', { low: format.percent(toFiniteNumber(row.scoreInterval.low)), high: format.percent(toFiniteNumber(row.scoreInterval.high)) }) : t('common.notAvailable') },
+            { id: 'contamination', header: t('evaluationsPage.contaminated'), render: row => format.number(toFiniteNumber(row.contaminatedCases)) },
+            { id: 'status', header: t('common.status'), render: row => <StatusChip label={domainLabel(row.status)} tone={row.status === 'Approved' ? 'success' : 'error'} /> }
           ]} />
         </Card>
-      </Grid>
-    </Stack>
+        </Grid>
+      </Stack>
+    </ContentContainer>
   );
 }

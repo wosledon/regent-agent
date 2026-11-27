@@ -31,7 +31,7 @@ export function ComponentGalleryControls({ category, onCategoryChange, search, o
         startAdornment={<Search />}
         inputProps={{ 'aria-label': 'Search components' }}
       />
-      <ToggleButtonGroup value={category} exclusive size="small" onChange={(_, value) => value && onCategoryChange(value)}>
+      <ToggleButtonGroup value={category} exclusive size="small" onChange={(_, value) => value && onCategoryChange(value)} sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
         {categories.map(item => <ToggleButton key={item.value} value={item.value}>{item.label}</ToggleButton>)}
       </ToggleButtonGroup>
     </Stack>
