@@ -8,14 +8,51 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgres: 17
+            image: pgvector/pgvector:pg17@sha256:b513c48566e4777cd3370451400000c78eda6a08131d68f4c31d4a76f27bd8fd
+          - postgres: 18
+            image: pgvector/pgvector:pg18@sha256:38681dc6eaf55308e2a4c6de392d131652dcfac70e1263e35cd9b5ea3fe39782
+    services:
+      postgres:
+        image: ${{ matrix.image }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: regent_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d regent_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.404'
+      - name: Verify pinned .NET SDK
+        run: test "$(dotnet --version)" = "10.0.404"
       - run: dotnet restore RegentAgent.slnx
       - run: dotnet build RegentAgent.slnx --no-restore --configuration Release
+      - name: Build backend image smoke test
+        run: docker build --file deploy/Dockerfile.backend --build-arg PROJECT=RegentAgent.ControlPlane --tag regent-agent-backend:smoke .
+      - name: Prepare PostgreSQL runtime role and schema
+        env:
+          REGENT_POSTGRES_DSN: "host=localhost port=5432 dbname=regent_test user=postgres password=postgres"
+        run: |
+          psql -X "$REGENT_POSTGRES_DSN" -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'regent_controlplane') THEN CREATE ROLE regent_controlplane LOGIN PASSWORD 'regent_test_only'; END IF; END \$\$;"
+          psql -X "$REGENT_POSTGRES_DSN" -v ON_ERROR_STOP=1 -Atc "SELECT 1"
+          python3 scripts/migrate-postgres.py
+          psql -X "$REGENT_POSTGRES_DSN" -v ON_ERROR_STOP=1 -f deploy/sql/runtime-grants.sql
       - run: dotnet test RegentAgent.slnx --no-build --no-restore --configuration Release --collect:"XPlat Code Coverage"
+        env:
+          REGENT_TEST_POSTGRES_MIGRATION_DSN: Host=localhost;Port=5432;Database=regent_test;Username=postgres;Password=postgres
+          REGENT_TEST_POSTGRES_DSN: Host=localhost;Port=5432;Database=regent_test;Username=regent_controlplane;Password=regent_test_only
 
   frontend:
     runs-on: ubuntu-latest
@@ -26,6 +63,10 @@ jobs:
           node-version: '24'
       - run: corepack enable
       - run: corepack pnpm install --frozen-lockfile
+      - name: Verify Tenant Dashboard OpenAPI schema
+        run: |
+          corepack pnpm --filter @regent/tenant-dashboard exec openapi-typescript ../../contracts/openapi/controlplane.json -o /tmp/tenant-dashboard-schema.d.ts
+          diff -u apps/tenant-dashboard/src/lib/api-client/schema.d.ts /tmp/tenant-dashboard-schema.d.ts
       - run: corepack pnpm lint
       - run: corepack pnpm typecheck
       - run: corepack pnpm test
@@ -38,7 +79,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.404'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
@@ -50,11 +91,13 @@ jobs:
           ASPNETCORE_ENVIRONMENT=Development \
           ASPNETCORE_URLS=http://localhost:5080 \
           Storage__UseInMemory=true \
+          Identity__AllowDemoLogin=true \
           dotnet run --project src/RegentAgent.ControlPlane/RegentAgent.ControlPlane.csproj --no-build --configuration Release &
           echo $! > /tmp/controlplane.pid
       - run: |
           ASPNETCORE_ENVIRONMENT=Development \
           ASPNETCORE_URLS=http://localhost:5082 \
+          Operations__AllowDemoLogin=true \
           dotnet run --project src/RegentAgent.Operations/RegentAgent.Operations.csproj --no-build --configuration Release &
           echo $! > /tmp/operations.pid
       - run: corepack pnpm --filter @regent/tenant-dashboard exec playwright install --with-deps chromium
@@ -81,7 +124,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: '10.0.404'
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: '24'
@@ -94,6 +137,12 @@ jobs:
       - run: python3 scripts/check-workflow-pins.py
       - run: python3 scripts/generate-license-inventory.py --check
       - run: python3 scripts/check-vulnerabilities.py
+      - run: python3 scripts/check-migration-checksums.py
+      - name: Verify reproducible source manifest
+        run: |
+          python3 scripts/source-manifest.py --output source-manifest.json
+          python3 scripts/source-manifest.py --check source-manifest.json
+      - run: python3 -m unittest discover -s tests/scripts -v
       - run: python3 scripts/migrate-postgres.py --dry-run
       - run: python3 scripts/migrate-postgres.py --phase contract --dry-run
       - run: python3 scripts/plan-upgrade.py --from-schema 2 --to-schema 3 --backup-enabled --output /tmp/upgrade-plan.json

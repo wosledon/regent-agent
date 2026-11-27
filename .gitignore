@@ -495,6 +495,7 @@ $RECYCLE.BIN/
 
 # Local runtime data
 data/
+backups/
 
 # Node / frontend
 node_modules/

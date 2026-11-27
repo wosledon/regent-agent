@@ -1,13 +1,15 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:8c6edfb26c85153f236d26efebd9ad349aec403583f343f201ee67838b23658d AS build
 WORKDIR /src
 COPY RegentAgent.slnx ./
 COPY Directory.Build.props ./
+COPY global.json ./
+COPY deploy/sql/controlplane-checksums.json ./deploy/sql/controlplane-checksums.json
 COPY src/ ./src/
 ARG PROJECT=RegentAgent.ControlPlane
 RUN dotnet restore "src/${PROJECT}/${PROJECT}.csproj"
 RUN dotnet publish "src/${PROJECT}/${PROJECT}.csproj" -c Release -o /app/publish --no-restore
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:aac50ceef10391e78a899e3d2ccd00bbafa2dcb56ccf4586cbccf00edb84fc21 AS final
 WORKDIR /app
 COPY --from=build /app/publish ./
 EXPOSE 8080

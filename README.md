@@ -9,7 +9,7 @@ Regent-Agent 是一个自主 AI 公司的开源实现。仓库已完成 Q-001～
 - Gateway：本地/远程可插拔 Provider 路由、OpenAI/Anthropic 原生 JSON/SSE 透传适配、流式用量记录、租户级预算和 AES-GCM 信封加密密钥库；模型调用必须使用员工 Assignment Token，KeyVault 可选本地文件或 Postgres `keyvault`（信封加密 + RLS）。
 - Runner：注册、心跳、任务领取、租约、检查点、完成上报、本地 Agent 执行和本地目录沙箱。
 - 四个服务统一接入可插拔 OpenTelemetry Profile（off/local/otlp/elastic），默认本地 Console 导出。
-- Operations：Operator 开发登录、租户账户、SupportGrant、备份配置和运营审计。
+- Operations：默认关闭的本地 Operator demo 登录、租户账户、SupportGrant、备份配置和运营审计；所有 `/ops` 端点要求 `OperatorReader`，所有状态变更端点还要求 `OperatorWriter`，`Ops Viewer` 只读。
 - React 19 + TypeScript + MUI 前端 workspace。
 - Tenant Dashboard：登录、首屏、项目、员工时间线、审批、行动中心、通知、消息、模型、预算、知识、工作流、绩效、评测、合规和设置页面；组织协作工作台支持办公室、组织图、协作网络、过程时间线切换，以及员工/群聊/项目追溯；知识页包含混合召回、投毒隔离、独立纠错和影响图。
 - Ops Console：登录、运营总览、租户、SupportGrant、备份和审计页面。
@@ -28,7 +28,7 @@ Regent-Agent 是一个自主 AI 公司的开源实现。仓库已完成 Q-001～
 
 ### 后端
 
-需要 .NET 10 SDK。
+需要 .NET 10 SDK 10.0.404（由 `global.json` 精确锁定，不允许回退到其他 SDK）。
 
 ```bash
 dotnet restore RegentAgent.slnx
@@ -46,8 +46,10 @@ dotnet run --project src/RegentAgent.Operations
 
 开发登录账号：
 
-- Tenant Dashboard：`owner@example.test`
-- Ops Console：`operator@example.test`
+- Tenant Dashboard：`owner@example.test`（仅在 `Development` 且 `Identity:AllowDemoLogin=true` 时可用）
+- Ops Console：`operator@example.test`（仅在 `Development` 且 `Operations:AllowDemoLogin=true` 时可用）
+
+两个应用的 demo 登录开关都默认 `false`，未同时满足 `Development` 和显式 opt-in 时 `POST /auth/dev-login` 返回 `404`。本地 Compose 的 Git 忽略 `compose.override.yaml` 仅为 Operations 设置 `Operations__AllowDemoLogin=true`；CI e2e 在临时 Development 进程中显式设置 `Identity__AllowDemoLogin=true` 和 `Operations__AllowDemoLogin=true`。跟踪的生产配置不得启用任一选项。demo 不提供生产 Operator SSO、MFA/step-up 或服务端 Operator 会话撤销存储。
 
 ### 前端
 
@@ -80,6 +82,9 @@ corepack pnpm build
 corepack pnpm --filter @regent/tenant-dashboard exec playwright install chromium
 corepack pnpm test:e2e
 python3 scripts/validate-docs.py
+python3 scripts/check-migration-checksums.py
+python3 scripts/source-manifest.py --output /tmp/regent-source-manifest.json
+python3 scripts/source-manifest.py --check /tmp/regent-source-manifest.json
 python3 scripts/scenario-trial.py
 python3 scripts/check-offline-cache.py --require
 python3 scripts/capacity-baseline.py --requests 50 --concurrency 8
