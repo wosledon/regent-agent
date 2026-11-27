@@ -2,10 +2,12 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using RegentAgent.Chat;
 using RegentAgent.Contracts.Identity;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.ControlPlane.Identity;
 using RegentAgent.ControlPlane.Infrastructure;
+using RegentAgent.ControlPlane.Realtime;
 using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
@@ -25,8 +27,9 @@ public sealed partial class IdentityService(
     JsonDocumentStore<ExternalLoginTransactionRecord> externalTransactions,
     JsonDocumentStore<AuthenticationPolicyRecord> authenticationPolicies,
     JsonDocumentStore<EmergencyAccessCredentialRecord> emergencyCredentials,
-    AuditIntegrityService audit, TenantRlsScope rlsScope,
-    IExternalIdentityProviderResolver? externalProviders = null)
+    AuditIntegrityService audit, MembershipAuthority membershipAuthority, TenantRlsScope rlsScope,
+    IExternalIdentityProviderResolver? externalProviders = null, TenantHubConnectionRegistry? connections = null)
+    : ITenantSessionValidator
 {
     public async Task<AuthResult> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken)
     {
@@ -300,6 +303,7 @@ public sealed partial class IdentityService(
         {
             session.Status = "Revoked";
             await sessions.PutAsync(session.Id.ToString(), session, cancellationToken);
+            if (connections is not null) await connections.DisconnectSessionAsync(session.Id, cancellationToken);
         }
     }
 
@@ -308,12 +312,129 @@ public sealed partial class IdentityService(
             .Select(x => new SessionDto(x.Id, x.TenantId, x.CreatedAt, x.ExpiresAt, x.Status,
                 x.AuthMethod, x.SessionKind)).ToArray();
 
+    public async Task<AuthSessionRecord?> GetActiveSessionAsync(Guid sessionId, Guid userId, Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var session = await sessions.GetAsync(sessionId.ToString(), cancellationToken);
+        var now = clock.GetUtcNow();
+        var lastActivity = session?.LastActivityAt ?? session?.CreatedAt ?? now;
+        if (session is null || session.Status != "Active" || session.ExpiresAt <= now
+            || session.UserId != userId || session.TenantId != tenantId
+            || now - lastActivity > TimeSpan.FromMinutes(session.IdleTimeoutMinutes))
+            return null;
+
+        var authorityHash = await LoadAuthorityHashAsync(tenantId, userId, cancellationToken);
+        if (authorityHash is null || session.AuthorityHash != authorityHash)
+        {
+            await RevokeSessionsAsync([session], cancellationToken);
+            return null;
+        }
+        return session;
+    }
+
+    public async Task<TenantSessionSummaryDto?> GetSessionSummaryAsync(Guid sessionId, Guid userId, Guid tenantId,
+        CancellationToken cancellationToken, string? employeeId = null)
+    {
+        var active = await GetActiveSessionAsync(sessionId, userId, tenantId, cancellationToken);
+        if (active is null) return null;
+
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == active.UserId, cancellationToken);
+        if (user is null) return null;
+        var membership = await membershipAuthority.FindAsync(active.TenantId, active.UserId, cancellationToken);
+        if (membership is null) return null;
+        EffectiveAccessDto effectiveAccess;
+        if (TenantSessionAccessPolicy.IsRestricted(active))
+        {
+            effectiveAccess = new EffectiveAccessDto(false, false, CollaborationAccessScope.None);
+        }
+        else
+        {
+            var viewer = await membershipAuthority.ResolveChatViewerAsync(active.TenantId, active.UserId, employeeId,
+                cancellationToken);
+            var collaborationScope = viewer?.Viewer switch
+            {
+                OwnerObserverViewer => CollaborationAccessScope.Observer,
+                EmployeeMemberViewer => CollaborationAccessScope.Participant,
+                _ => CollaborationAccessScope.None
+            };
+            effectiveAccess = new EffectiveAccessDto(
+                ObserverReadPolicy.CanRead(viewer, ControlPlanePolicies.ChatReadCapability),
+                ObserverReadPolicy.CanRead(viewer, ControlPlanePolicies.CollaborationReadCapability),
+                collaborationScope);
+        }
+        return new TenantSessionSummaryDto(user.Email,
+            await DisplayNameAsync(user.Id, active.TenantId, user.DisplayName, cancellationToken),
+            active.TenantId, membership.Role, active.AuthMethod, active.SessionKind,
+            membership.Capabilities.ToArray(), effectiveAccess);
+    }
+
     public async Task RevokeSessionAsync(Guid userId, Guid sessionId, CancellationToken cancellationToken)
     {
         var session = await sessions.GetAsync(sessionId.ToString(), cancellationToken);
         if (session is null || session.UserId != userId) throw new KeyNotFoundException("Session not found.");
-        session.Status = "Revoked";
-        await sessions.PutAsync(session.Id.ToString(), session, cancellationToken);
+        await RevokeSessionsAsync([session], cancellationToken);
+    }
+
+    private async Task RevokeUserSessionsAsync(Guid tenantId, Guid userId, CancellationToken cancellationToken)
+    {
+        var active = (await sessions.GetAllAsync(cancellationToken)).Where(x =>
+            x.TenantId == tenantId && x.UserId == userId && x.Status == "Active");
+        await RevokeSessionsAsync(active, cancellationToken);
+    }
+
+    private async Task RevokeSessionsAsync(IEnumerable<AuthSessionRecord> activeSessions,
+        CancellationToken cancellationToken)
+    {
+        foreach (var session in activeSessions)
+        {
+            session.Status = "Revoked";
+            await sessions.PutAsync(session.Id.ToString(), session, cancellationToken);
+            if (connections is not null) await connections.DisconnectSessionAsync(session.Id, cancellationToken);
+        }
+    }
+
+    private async Task<string?> LoadAuthorityHashAsync(Guid tenantId, Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var membership = await rlsScope.ExecuteAsync(tenantId, userId, token =>
+            db.Memberships.AsNoTracking()
+                .Where(x => x.TenantId == tenantId && x.UserId == userId)
+                .Select(x => new { x.Role, x.CapabilitiesJson }).SingleOrDefaultAsync(token), cancellationToken);
+        if (membership is null || string.IsNullOrWhiteSpace(membership.Role)) return null;
+        try
+        {
+            var capabilities = JsonSerializer.Deserialize<string[]>(membership.CapabilitiesJson) ?? [];
+            return MembershipAuthority.ComputeAuthorityHash(membership.Role, capabilities);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    Task<bool> ITenantSessionValidator.ValidateAsync(Guid sessionId, Guid userId, Guid tenantId, string? employeeId,
+        Guid? credentialEpoch, CancellationToken cancellationToken) =>
+        ValidateHubSessionAsync(sessionId, userId, tenantId, employeeId, credentialEpoch, cancellationToken);
+
+    private async Task<bool> ValidateHubSessionAsync(Guid sessionId, Guid userId, Guid tenantId, string? employeeId,
+        Guid? credentialEpoch, CancellationToken cancellationToken)
+    {
+        var session = await GetActiveSessionAsync(sessionId, userId, tenantId, cancellationToken);
+        if (session is null || !TenantSessionAccessPolicy.CanUseRealtime(session)) return false;
+        return await rlsScope.ExecuteAsync(tenantId, userId, async token =>
+        {
+            if (!await db.Tenants.AsNoTracking().AnyAsync(x => x.Id == tenantId && x.Status == "Active", token))
+                return false;
+            if (string.IsNullOrWhiteSpace(employeeId)) return true;
+            if (!Guid.TryParse(employeeId, out var parsedEmployeeId) || parsedEmployeeId == Guid.Empty
+                || credentialEpoch is not { } epoch || epoch == Guid.Empty)
+                return false;
+            if (!await db.Employees.AsNoTracking().AnyAsync(x => x.TenantId == tenantId && x.Id == parsedEmployeeId
+                    && x.State != RegentAgent.Contracts.Enums.EmployeeState.Terminated, token))
+                return false;
+            return await db.EmploymentPeriods.AsNoTracking().AnyAsync(x => x.TenantId == tenantId
+                && x.EmployeeId == parsedEmployeeId && x.Id == epoch && x.EndedAt == null, token);
+        }, cancellationToken);
     }
 
     public async Task<string> GetDisplaySuffixAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken) =>
@@ -346,6 +467,8 @@ public sealed partial class IdentityService(
     {
         var now = clock.GetUtcNow();
         var policy = await LoadPolicyAsync(tenantId, cancellationToken);
+        var authorityHash = await LoadAuthorityHashAsync(tenantId, userId, cancellationToken)
+            ?? throw new UnauthorizedAccessException("An active tenant membership is required.");
         var effectiveLifetime = lifetime ?? TimeSpan.FromHours(12);
         if (effectiveLifetime > TimeSpan.FromMinutes(policy.MaxSessionMinutes))
             effectiveLifetime = TimeSpan.FromMinutes(policy.MaxSessionMinutes);
@@ -353,6 +476,7 @@ public sealed partial class IdentityService(
         {
             UserId = userId, TenantId = tenantId, CreatedAt = now, LastActivityAt = now,
             ExpiresAt = now.Add(effectiveLifetime), AuthMethod = authMethod,
+            AuthorityHash = authorityHash,
             IdleTimeoutMinutes = policy.IdleTimeoutMinutes
         };
         await sessions.PutAsync(session.Id.ToString(), session, cancellationToken);

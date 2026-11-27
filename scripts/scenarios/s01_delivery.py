@@ -1,4 +1,5 @@
 import json
+import uuid
 from scenario_support import ApiClient, ScenarioFailure, create_project_with_plan
 
 CP = "http://localhost:5080"
@@ -22,6 +23,19 @@ def run():
         "leaseToken": claim["leaseToken"], "output": "# Scenario delivery\n\nImplemented and verified.",
         "status": "Done", "evidenceRefs": ["test:scenario-delivery"]
     }, headers=cp.agent_headers(token), status=204)
+    artifacts, _ = cp.expect(s, "task-artifacts", "GET",
+        f"/v1/projects/{linked['projectId']}/delivery/tasks/{claim['taskId']}/artifacts")
+    if not artifacts:
+        raise ScenarioFailure(s, "task-artifacts", "runtime completion did not produce an authoritative artifact")
+    artifact = artifacts[0]
+    try:
+        uuid.UUID(artifact["id"])
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
+        raise ScenarioFailure(s, "task-artifacts", "artifact ID is not an authoritative GUID") from error
+    if not artifact.get("objectKey") or len(artifact.get("hash", "")) != 64 or any(
+        character not in "0123456789abcdefABCDEF" for character in artifact["hash"]
+    ):
+        raise ScenarioFailure(s, "task-artifacts", "artifact object key or SHA-256 is missing")
     delivery, _ = cp.expect(s, "delivery-after-runtime", "GET", f"/v1/projects/{linked['projectId']}/delivery")
     task = next(item for item in delivery["tasks"] if item["id"] == claim["taskId"])
     if task["status"] != "ReadyForReview":
@@ -38,16 +52,22 @@ def run():
     detail, _ = cp.expect(s, "runtime-after-agent-submit", "GET", f"/v1/projects/{linked['projectId']}")
     if next(item for item in detail["tasks"] if item["id"] == claim["taskId"])["status"] != "InReview":
         raise ScenarioFailure(s, "runtime-after-agent-submit", "Agent submit Tool did not project InReview runtime status")
-    cp.expect(s, "independent-review", "POST", f"/v1/projects/{linked['projectId']}/delivery/reviews", {
-        "subjectId": claim["taskId"], "subjectType": "Task", "reviewer": "Independent Reviewer",
+    reviewer = cp.independent_approver(s)
+    if reviewer.user_id == auth["user_id"]:
+        raise ScenarioFailure(s, "independent-review", "reviewer must use a distinct authenticated identity")
+    review, _ = reviewer.expect(s, "independent-review", "POST", f"/v1/projects/{linked['projectId']}/delivery/reviews", {
+        "subjectId": claim["taskId"], "subjectType": "Task", "reviewer": reviewer.user_id,
         "author": controller["displayName"], "verdict": "Approved", "findings": [],
-        "evidence": [{"id": "review:scenario", "kind": "test", "location": "local:scenario"}]
+        "evidence": [{"id": artifact["id"], "kind": "artifact", "location": artifact["objectKey"], "sha256": artifact["hash"]}]
     })
-    cp.expect(s, "done-evidence", "POST", f"/v1/projects/{linked['projectId']}/delivery/tasks/{claim['taskId']}/complete", {
+    if review["reviewer"] != reviewer.user_id:
+        raise ScenarioFailure(s, "independent-review", "review identity was not taken from the authenticated reviewer")
+    reviewer.expect(s, "done-evidence", "POST", f"/v1/projects/{linked['projectId']}/delivery/tasks/{claim['taskId']}/complete", {
         "workItemId": claim["taskId"], "workItemType": "Task", "criteriaResults": {"Tasks are claimable": True},
-        "artifacts": [{"id": "artifact:scenario", "kind": "test", "location": "local:scenario"}],
-        "testResults": ["scenario test passed"], "securityChecks": ["tenant isolation checked"],
-        "openP0P1Defects": 0, "validator": "Independent Reviewer"
+        "artifacts": [{"id": artifact["id"], "kind": "test", "location": artifact["objectKey"], "sha256": artifact["hash"]}],
+        "testResults": [{"name": "scenario test", "passed": True, "evidenceRef": "test:scenario-delivery"}],
+        "securityChecks": [{"name": "tenant isolation", "passed": True, "evidenceRef": "test:tenant-isolation"}],
+        "openP0P1Defects": 0, "validator": reviewer.user_id
     })
     timeline, _ = cp.expect(s, "employee-timeline", "GET", f"/v1/employees/{controller['id']}/timeline")
     if not any(entry.get("taskId") == claim["taskId"] and entry["status"] == "Done" for entry in timeline["entries"]):

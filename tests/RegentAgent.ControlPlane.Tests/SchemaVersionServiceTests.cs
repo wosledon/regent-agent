@@ -22,6 +22,12 @@ public sealed class SchemaVersionServiceTests
     }
 
     [Fact]
+    public void Current_schema_version_is_nine()
+    {
+        Assert.Equal(9, SchemaVersionService.CurrentVersion);
+    }
+
+    [Fact]
     public async Task Newer_schema_is_rejected()
     {
         await using var db = new RegentDbContext(new DbContextOptionsBuilder<RegentDbContext>()

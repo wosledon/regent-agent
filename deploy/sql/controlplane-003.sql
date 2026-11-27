@@ -597,8 +597,7 @@ INSERT INTO "SchemaVersions" ("Version", "Name", "AppliedAt")
 VALUES (3, 'controlplane-postgres-rls-baseline', now())
 ON CONFLICT ("Version") DO NOTHING;
 
--- Create runtime roles outside this migration and grant only required privileges:
--- GRANT USAGE ON SCHEMA public TO regent_controlplane;
--- GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO regent_controlplane;
--- GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO regent_controlplane;
+-- Create runtime roles outside the migrations. After 003-008, apply runtime-grants.sql:
+-- business tables receive CRUD, AuditRecords/AuditCheckpoints receive SELECT/INSERT only,
+-- SchemaVersions receives SELECT only, and sequences receive USAGE/SELECT.
 COMMIT;

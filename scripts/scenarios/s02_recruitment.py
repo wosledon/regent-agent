@@ -27,7 +27,8 @@ def run():
             "candidateId": candidate["id"], "capabilityScore": 0.9, "qualityScore": 0.9, "costScore": 0.8,
             "evidenceJson": '{"scenario":"assessment"}'
         })
-        approval = cp.create_approval(s, "hiring.hire", f"Approve hiring {name}")
+        approval = cp.create_approval(s, "hiring.hire", f"Approve hiring {name}",
+            targetCandidateId=candidate["id"], targetPositionId=position["id"])
         if index <= 4:
             employee, _ = cp.expect(s, f"hire-{index}", "POST", f"/v1/candidates/{candidate['id']}/hire", {"approvalId": approval["id"]})
             hired.append(employee)

@@ -4,11 +4,6 @@
     "title": "RegentAgent.ControlPlane | v1",
     "version": "1.0.0"
   },
-  "servers": [
-    {
-      "url": "http://localhost:5080/"
-    }
-  ],
   "paths": {
     "/health/live": {
       "get": {
@@ -39,16 +34,6 @@
         "tags": [
           "RegentAgent.ControlPlane"
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DevLoginRequest"
-              }
-            }
-          },
-          "required": true
-        },
         "responses": {
           "200": {
             "description": "OK"
@@ -267,6 +252,28 @@
         "responses": {
           "200": {
             "description": "OK"
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": [
+          "RegentAgent.ControlPlane"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TenantSessionSummaryDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         }
       }
@@ -1765,8 +1772,8 @@
           "required": true
         },
         "responses": {
-          "200": {
-            "description": "OK"
+          "204": {
+            "description": "No Content"
           }
         }
       }
@@ -2423,45 +2430,6 @@
             }
           }
         }
-      },
-      "post": {
-        "tags": [
-          "Messaging"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PublishEventRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OutboxRecord"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/outbox/process": {
-      "post": {
-        "tags": [
-          "Messaging"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK"
-          }
-        }
       }
     },
     "/v1/schema/version": {
@@ -2791,7 +2759,14 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceProfile"
+                }
+              }
+            }
           }
         }
       },
@@ -2811,7 +2786,14 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComplianceProfile"
+                }
+              }
+            }
           }
         }
       }
@@ -3968,630 +3950,6 @@
         }
       }
     },
-    "/v1/task-governance": {
-      "get": {
-        "tags": [
-          "Task Governance"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskGovernanceState"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/task-types": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TaskTypeDefinition"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskTypeDefinition"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/capabilities": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CapabilityAssessment"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CapabilityAssessment"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/claim-score": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ClaimScoreRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ClaimScoreDto"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/auto-assign": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AutoAssignRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AutoAssignResult"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/tasks/{taskId}/reassign": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "parameters": [
-          {
-            "name": "taskId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReassignTaskRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskAssignmentRecord"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/ledger": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/WorkLedgerEntry"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkLedgerEntry"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/reviews": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReviewTaskRecord"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReviewTaskRecord"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/reviews/{reviewId}/approve": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "parameters": [
-          {
-            "name": "reviewId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ApproveReviewRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReviewTaskRecord"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/debates": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DebateTaskRecord"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DebateTaskRecord"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/debates/{debateId}/decide": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "parameters": [
-          {
-            "name": "debateId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DecideDebateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DebateTaskRecord"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/task-governance/adjudications": {
-      "post": {
-        "tags": [
-          "Task Governance"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AdjudicationTaskRecord"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdjudicationTaskRecord"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agent-evolution": {
-      "get": {
-        "tags": [
-          "Agent Evolution"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AgentEvolutionState"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agent-evolution/prompts": {
-      "post": {
-        "tags": [
-          "Agent Evolution"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreatePromptRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PromptBundle"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agent-evolution/prompts/{id}/activate": {
-      "post": {
-        "tags": [
-          "Agent Evolution"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PromptBundle"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agent-evolution/skills": {
-      "post": {
-        "tags": [
-          "Agent Evolution"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateSkillRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillDefinition"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agent-evolution/skills/{id}/activate": {
-      "post": {
-        "tags": [
-          "Agent Evolution"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SkillDefinition"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agent-evolution/onboarding": {
-      "post": {
-        "tags": [
-          "Agent Evolution"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OnboardingRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OnboardingBaseline"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agent-evolution/assets": {
-      "post": {
-        "tags": [
-          "Agent Evolution"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PublishAssetRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PublicAsset"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agent-evolution/tool-policies": {
-      "post": {
-        "tags": [
-          "Agent Evolution"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ToolDisclosurePolicy"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolDisclosurePolicy"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/agent-evolution/tools/disclose": {
-      "post": {
-        "tags": [
-          "Agent Evolution"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ToolDisclosureRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolDisclosureResult"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/kpis": {
       "get": {
         "tags": [
@@ -4671,6 +4029,48 @@
                 }
               }
             }
+          },
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceActionRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/performance-actions/{id}": {
+      "get": {
+        "tags": [
+          "Performance"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PerformanceActionRecord"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
           }
         }
       }
@@ -4928,7 +4328,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Conversation"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -4950,7 +4360,17 @@
         ],
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ChatMessage"
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -4995,36 +4415,6 @@
         "responses": {
           "200": {
             "description": "OK"
-          }
-        }
-      }
-    },
-    "/v1/projects/{projectId}/delivery": {
-      "get": {
-        "tags": [
-          "Delivery"
-        ],
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProjectDeliveryState"
-                }
-              }
-            }
           }
         }
       }
@@ -5919,10 +5309,21 @@
         }
       }
     },
-    "/v1/governance": {
+    "/v1/projects/{projectId}/delivery": {
       "get": {
         "tags": [
-          "Governance"
+          "Delivery"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
         ],
         "responses": {
           "200": {
@@ -5930,7 +5331,49 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GovernanceState"
+                  "$ref": "#/components/schemas/ProjectDeliveryState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/projects/{projectId}/delivery/tasks/{taskId}/artifacts": {
+      "get": {
+        "tags": [
+          "Delivery"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ArtifactDto"
+                  }
                 }
               }
             }
@@ -6059,36 +5502,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ToolAuthorizationResult"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/governance/tools/{toolId}/impact": {
-      "get": {
-        "tags": [
-          "Governance"
-        ],
-        "parameters": [
-          {
-            "name": "toolId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ToolRevocationImpact"
                 }
               }
             }
@@ -6273,26 +5686,6 @@
       }
     },
     "/v1/governance/incidents": {
-      "get": {
-        "tags": [
-          "Governance"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SecurityIncident"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "Governance"
@@ -6314,6 +5707,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SecurityIncident"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Governance"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecurityIncident"
+                  }
                 }
               }
             }
@@ -6441,36 +5854,6 @@
         }
       }
     },
-    "/v1/governance/incidents/{incidentId}/evidence/verify": {
-      "get": {
-        "tags": [
-          "Governance"
-        ],
-        "parameters": [
-          {
-            "name": "incidentId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EvidenceVerificationDto"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/v1/governance/incidents/{incidentId}/close": {
       "post": {
         "tags": [
@@ -6512,26 +5895,6 @@
       }
     },
     "/v1/governance/approval-delegations": {
-      "get": {
-        "tags": [
-          "Governance"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ApprovalDelegation"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "Governance"
@@ -6558,6 +5921,26 @@
             }
           }
         }
+      },
+      "get": {
+        "tags": [
+          "Governance"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApprovalDelegation"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/v1/governance/approval-delegations/{id}": {
@@ -6579,6 +5962,85 @@
         "responses": {
           "200": {
             "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/governance": {
+      "get": {
+        "tags": [
+          "Governance"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GovernanceState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/governance/tools/{toolId}/impact": {
+      "get": {
+        "tags": [
+          "Governance"
+        ],
+        "parameters": [
+          {
+            "name": "toolId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolRevocationImpact"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/governance/incidents/{incidentId}/evidence/verify": {
+      "get": {
+        "tags": [
+          "Governance"
+        ],
+        "parameters": [
+          {
+            "name": "incidentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceVerificationDto"
+                }
+              }
+            }
           }
         }
       }
@@ -6650,25 +6112,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApprovalResolutionDto"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/lifecycle": {
-      "get": {
-        "tags": [
-          "Lifecycle"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataLifecycleState"
                 }
               }
             }
@@ -6776,26 +6219,6 @@
       }
     },
     "/v1/lifecycle/legal-holds": {
-      "get": {
-        "tags": [
-          "Lifecycle"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/LegalHoldRecord"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "Lifecycle"
@@ -6817,6 +6240,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LegalHoldRecord"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Lifecycle"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LegalHoldRecord"
+                  }
                 }
               }
             }
@@ -6855,26 +6298,6 @@
       }
     },
     "/v1/lifecycle/retention-policies": {
-      "get": {
-        "tags": [
-          "Lifecycle"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/RetentionPolicyRecord"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
       "post": {
         "tags": [
           "Lifecycle"
@@ -6896,6 +6319,26 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RetentionPolicyRecord"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Lifecycle"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RetentionPolicyRecord"
+                  }
                 }
               }
             }
@@ -7091,6 +6534,25 @@
         }
       }
     },
+    "/v1/lifecycle": {
+      "get": {
+        "tags": [
+          "Lifecycle"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataLifecycleState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/lifecycle/evaluation": {
       "get": {
         "tags": [
@@ -7103,25 +6565,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/LifecycleEvaluation"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/models/pool": {
-      "get": {
-        "tags": [
-          "Models"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ModelPoolState"
                 }
               }
             }
@@ -7449,10 +6892,10 @@
         }
       }
     },
-    "/v1/runtime-policy": {
+    "/v1/models/pool": {
       "get": {
         "tags": [
-          "Runtime Policy"
+          "Models"
         ],
         "responses": {
           "200": {
@@ -7460,7 +6903,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RuntimePolicyState"
+                  "$ref": "#/components/schemas/ModelPoolState"
                 }
               }
             }
@@ -7530,35 +6973,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CostEntry"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/v1/runtime-policy/costs/summary": {
-      "get": {
-        "tags": [
-          "Runtime Policy"
-        ],
-        "parameters": [
-          {
-            "name": "projectId",
-            "in": "query",
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CostSummaryDto"
                 }
               }
             }
@@ -7711,6 +7125,54 @@
         }
       }
     },
+    "/v1/runtime-policy": {
+      "get": {
+        "tags": [
+          "Runtime Policy"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimePolicyState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/runtime-policy/costs/summary": {
+      "get": {
+        "tags": [
+          "Runtime Policy"
+        ],
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CostSummaryDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/runtime-policy/capacity/admission": {
       "get": {
         "tags": [
@@ -7738,6 +7200,630 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CapacityDecision"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/task-types": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskTypeDefinition"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskTypeDefinition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/capabilities": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CapabilityAssessment"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilityAssessment"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/claim-score": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClaimScoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClaimScoreDto"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/auto-assign": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoAssignRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoAssignResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/tasks/{taskId}/reassign": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "parameters": [
+          {
+            "name": "taskId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReassignTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskAssignmentRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/ledger": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkLedgerEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkLedgerEntry"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/reviews": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewTaskRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTaskRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/reviews/{reviewId}/approve": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "parameters": [
+          {
+            "name": "reviewId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewTaskRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/debates": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DebateTaskRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebateTaskRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/debates/{debateId}/decide": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "parameters": [
+          {
+            "name": "debateId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideDebateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DebateTaskRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance/adjudications": {
+      "post": {
+        "tags": [
+          "Task Governance"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdjudicationTaskRecord"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdjudicationTaskRecord"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/task-governance": {
+      "get": {
+        "tags": [
+          "Task Governance"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskGovernanceState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/prompts": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePromptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptBundle"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/prompts/{id}/activate": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromptBundle"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/skills": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSkillRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDefinition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/skills/{id}/activate": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDefinition"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/onboarding": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnboardingBaseline"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/assets": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishAssetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicAsset"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/tool-policies": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolDisclosurePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolDisclosurePolicy"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution": {
+      "get": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEvolutionState"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/agent-evolution/tools/disclose": {
+      "post": {
+        "tags": [
+          "Agent Evolution"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ToolDisclosureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ToolDisclosureResult"
                 }
               }
             }
@@ -9099,6 +9185,12 @@
           },
           "href": {
             "type": "string"
+          },
+          "nextActionKey": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -9452,6 +9544,55 @@
             "items": {
               "type": "string"
             }
+          },
+          "targetEmployeeId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "targetCandidateId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "targetPositionId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "consumedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "consumedBy": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "decidedBy": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "decidedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
           }
         }
       },
@@ -9475,15 +9616,8 @@
         ]
       },
       "ApprovePlanRequest": {
-        "required": [
-          "approver",
-          "approvalId"
-        ],
         "type": "object",
         "properties": {
-          "approver": {
-            "type": "string"
-          },
           "approvalId": {
             "type": [
               "null",
@@ -9564,6 +9698,61 @@
               "string"
             ],
             "format": "int32"
+          }
+        }
+      },
+      "ArtifactDto": {
+        "required": [
+          "id",
+          "projectId",
+          "taskId",
+          "objectKey",
+          "hash",
+          "contentType",
+          "length",
+          "uploadState",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "taskId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "objectKey": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "contentType": {
+            "type": "string"
+          },
+          "length": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "uploadState": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
           }
         }
       },
@@ -10604,6 +10793,87 @@
           }
         }
       },
+      "ChatMessage": {
+        "required": [
+          "id",
+          "tenantId",
+          "conversationId",
+          "seq",
+          "sender",
+          "body",
+          "priority",
+          "createdAt"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "conversationId": {
+            "type": "string"
+          },
+          "seq": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "sender": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messageType": {
+            "type": "string"
+          },
+          "replyToMessageId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "mentionedEmployeeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "idempotencyKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "senderEmployeeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "actorType": {
+            "type": "string"
+          }
+        }
+      },
       "CheckoutRequest": {
         "required": [
           "planId"
@@ -10710,15 +10980,7 @@
         }
       },
       "ClaimTaskRequest": {
-        "required": [
-          "assignee"
-        ],
-        "type": "object",
-        "properties": {
-          "assignee": {
-            "type": "string"
-          }
-        }
+        "type": "object"
       },
       "CloseIncidentRequest": {
         "required": [
@@ -10730,6 +10992,13 @@
             "type": "string"
           }
         }
+      },
+      "CollaborationAccessScope": {
+        "enum": [
+          "none",
+          "participant",
+          "observer"
+        ]
       },
       "CollaborationActivityDto": {
         "required": [
@@ -11247,6 +11516,70 @@
           }
         }
       },
+      "Conversation": {
+        "required": [
+          "id",
+          "tenantId",
+          "kind",
+          "title",
+          "status"
+        ],
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "tenantId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "memberEmployeeIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ownerEmployeeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "scopeType": {
+            "type": "string"
+          },
+          "scopeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdByEmployeeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "creatorType": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "CoordinationCancelRequest": {
         "required": [
           "reason"
@@ -11509,6 +11842,27 @@
             "items": {
               "type": "string"
             }
+          },
+          "targetEmployeeId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "targetCandidateId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
+          "targetPositionId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
           }
         }
       },
@@ -12010,6 +12364,148 @@
           },
           "href": {
             "type": "string"
+          },
+          "titleKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "summaryKey": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "summaryValues": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DashboardCardSummaryValues"
+              }
+            ]
+          },
+          "metricPresentation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DashboardMetricPresentation"
+              }
+            ]
+          }
+        }
+      },
+      "DashboardCardSummaryValues": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "secondaryCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "totalCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "activeCount": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "spentMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "budgetMinor": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "null",
+              "integer",
+              "string"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "eventType": {
+            "type": [
+              "null",
+              "string"
+            ]
+          }
+        }
+      },
+      "DashboardMetricPresentation": {
+        "required": [
+          "kind"
+        ],
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "value": {
+            "pattern": "^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$",
+            "type": [
+              "null",
+              "number",
+              "string"
+            ],
+            "format": "double"
+          },
+          "currency": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "timestamp": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "text": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -12289,8 +12785,7 @@
           "decision",
           "rationale",
           "evidenceIds",
-          "reround",
-          "decider"
+          "reround"
         ],
         "type": "object",
         "properties": {
@@ -12314,9 +12809,6 @@
               "string"
             ],
             "format": "int32"
-          },
-          "decider": {
-            "type": "string"
           }
         }
       },
@@ -12531,8 +13023,43 @@
             "type": "string",
             "format": "date-time"
           },
+          "purgeStartedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "purgedAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
           "status": {
             "type": "string"
+          }
+        }
+      },
+      "DeliveryCheckResult": {
+        "required": [
+          "name",
+          "passed"
+        ],
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "passed": {
+            "type": "boolean"
+          },
+          "evidenceRef": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -12645,6 +13172,13 @@
               "string"
             ]
           },
+          "assigneeEmployeeId": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "uuid"
+          },
           "validator": {
             "type": [
               "null",
@@ -12695,24 +13229,6 @@
             "items": {
               "type": "string"
             }
-          }
-        }
-      },
-      "DevLoginRequest": {
-        "required": [
-          "email"
-        ],
-        "type": "object",
-        "properties": {
-          "email": {
-            "type": "string"
-          },
-          "tenantId": {
-            "type": [
-              "null",
-              "string"
-            ],
-            "format": "uuid"
           }
         }
       },
@@ -12846,13 +13362,13 @@
           "testResults": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/DeliveryCheckResult"
             }
           },
           "securityChecks": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/DeliveryCheckResult"
             }
           },
           "openP0P1Defects": {
@@ -12869,6 +13385,25 @@
           "validatedAt": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "EffectiveAccessDto": {
+        "required": [
+          "can_read_chat",
+          "can_read_collaboration",
+          "collaboration_scope"
+        ],
+        "type": "object",
+        "properties": {
+          "can_read_chat": {
+            "type": "boolean"
+          },
+          "can_read_collaboration": {
+            "type": "boolean"
+          },
+          "collaboration_scope": {
+            "$ref": "#/components/schemas/CollaborationAccessScope"
           }
         }
       },
@@ -13496,6 +14031,12 @@
           },
           "location": {
             "type": "string"
+          },
+          "sha256": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -13656,14 +14197,10 @@
       },
       "FixDefectRequest": {
         "required": [
-          "fixer",
           "evidence"
         ],
         "type": "object",
         "properties": {
-          "fixer": {
-            "type": "string"
-          },
           "evidence": {
             "$ref": "#/components/schemas/EvidenceRef"
           }
@@ -14668,6 +15205,24 @@
             "format": "date-time"
           },
           "derivedFromClaimId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "authorEmployeeId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "authorUserId": {
+            "type": [
+              "null",
+              "string"
+            ]
+          },
+          "authorEmploymentPeriodId": {
             "type": [
               "null",
               "string"
@@ -15749,6 +16304,19 @@
               "string"
             ],
             "format": "date-time"
+          },
+          "nextAttemptAt": {
+            "type": [
+              "null",
+              "string"
+            ],
+            "format": "date-time"
+          },
+          "lastError": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },
@@ -16466,19 +17034,6 @@
           }
         }
       },
-      "PublishEventRequest": {
-        "required": [
-          "eventType",
-          "payload"
-        ],
-        "type": "object",
-        "properties": {
-          "eventType": {
-            "type": "string"
-          },
-          "payload": { }
-        }
-      },
       "PurgeRequest": {
         "required": [
           "confirmation"
@@ -16884,16 +17439,12 @@
       },
       "RetestDefectRequest": {
         "required": [
-          "passed",
-          "retester"
+          "passed"
         ],
         "type": "object",
         "properties": {
           "passed": {
             "type": "boolean"
-          },
-          "retester": {
-            "type": "string"
           }
         }
       },
@@ -17475,15 +18026,7 @@
         }
       },
       "SubmitTaskRequest": {
-        "required": [
-          "author"
-        ],
-        "type": "object",
-        "properties": {
-          "author": {
-            "type": "string"
-          }
-        }
+        "type": "object"
       },
       "SubscriptionDto": {
         "required": [
@@ -17830,6 +18373,49 @@
           },
           "status": {
             "type": "string"
+          }
+        }
+      },
+      "TenantSessionSummaryDto": {
+        "required": [
+          "email",
+          "display_name",
+          "tenant_id",
+          "role",
+          "auth_method",
+          "session_kind",
+          "capabilities",
+          "effective_access"
+        ],
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "tenant_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "role": {
+            "type": "string"
+          },
+          "auth_method": {
+            "type": "string"
+          },
+          "session_kind": {
+            "type": "string"
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "effective_access": {
+            "$ref": "#/components/schemas/EffectiveAccessDto"
           }
         }
       },
@@ -18511,12 +19097,6 @@
       "name": "Agent Runtime"
     },
     {
-      "name": "Task Governance"
-    },
-    {
-      "name": "Agent Evolution"
-    },
-    {
       "name": "Collaboration"
     },
     {
@@ -18539,6 +19119,12 @@
     },
     {
       "name": "Runtime Policy"
+    },
+    {
+      "name": "Task Governance"
+    },
+    {
+      "name": "Agent Evolution"
     },
     {
       "name": "Evaluation QA"

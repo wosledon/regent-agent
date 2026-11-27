@@ -7,12 +7,19 @@ using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class ArtifactService(RegentDbContext db, ITenantContext tenant, IObjectStore objects, TimeProvider clock)
+public sealed class ArtifactService(RegentDbContext db, ITenantContext tenant, IObjectStore objects, TimeProvider clock,
+    ITenantPurgeStateProvider? purgeState = null, string? lifecycleStatePath = null)
 {
+    private readonly ITenantPurgeStateProvider purgeAdmission = purgeState
+        ?? new ArtifactDbContextPurgeStateProvider(db,
+            lifecycleStatePath ?? TenantPurgeStateInspector.DefaultLifecycleStatePath);
+
     public async Task<ArtifactDto> UploadAsync(Guid projectId, Guid? taskId, Stream content,
         string contentType, long length, CancellationToken cancellationToken)
     {
         var tenantId = tenant.TenantId.Value;
+        await TenantPurgeFence.CheckPersistedPurgeAsync(tenantId, cancellationToken, purgeAdmission);
+        using var writeAccess = await TenantPurgeFence.EnterWriteAsync(tenantId, cancellationToken);
         var projectExists = await db.Projects.AnyAsync(x => x.TenantId == tenantId && x.Id == projectId, cancellationToken);
         if (!projectExists) throw new KeyNotFoundException("Project not found.");
         if (taskId is { } requestedTaskId && !await db.Tasks.AnyAsync(x => x.TenantId == tenantId && x.Id == requestedTaskId && x.ProjectId == projectId, cancellationToken))
@@ -47,7 +54,26 @@ public sealed class ArtifactService(RegentDbContext db, ITenantContext tenant, I
         return stream is null ? null : (ToDto(record), stream);
     }
 
+    public async Task<IReadOnlyList<ArtifactDto>> ListForTaskAsync(Guid projectId, Guid taskId,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = tenant.TenantId.Value;
+        var records = await db.Artifacts.AsNoTracking()
+            .Where(x => x.TenantId == tenantId && x.ProjectId == projectId && x.TaskId == taskId
+                && x.UploadState == "Ready")
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync(cancellationToken);
+        return records.Select(ToDto).ToArray();
+    }
+
     private static ArtifactDto ToDto(ArtifactRecord record) => new(
         record.Id, record.ProjectId, record.TaskId, record.ObjectKey, record.Hash,
         record.ContentType, record.Length, record.UploadState, record.CreatedAt);
+
+    private sealed class ArtifactDbContextPurgeStateProvider(RegentDbContext db, string lifecycleStatePath)
+        : ITenantPurgeStateProvider
+    {
+        public Task<bool> IsPurgeActiveAsync(Guid tenantId, CancellationToken cancellationToken) =>
+            TenantPurgeStateInspector.IsPurgeActiveAsync(db, tenantId, lifecycleStatePath, cancellationToken);
+    }
 }

@@ -41,6 +41,116 @@ public sealed class ApiContractTests
         Assert.Equal(409, conflict.Response.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/v1/employees/11111111-1111-1111-1111-111111111111/offboard")]
+    [InlineData("/v1/employees/11111111-1111-1111-1111-111111111111/rehire")]
+    [InlineData("/v1/candidates/11111111-1111-1111-1111-111111111111/hire")]
+    public async Task Approval_gated_routes_bypass_http_idempotency(string path)
+    {
+        await using var db = CreateDb();
+        var nextCalled = false;
+        var middleware = new ApiContractMiddleware(context =>
+        {
+            nextCalled = true;
+            context.Response.StatusCode = StatusCodes.Status204NoContent;
+            return Task.CompletedTask;
+        });
+        var context = CreateContext(HttpMethods.Post, "{}");
+        context.Request.Path = path;
+
+        await middleware.InvokeAsync(context, db, TimeProvider.System);
+
+        Assert.True(nextCalled);
+        Assert.Equal(StatusCodes.Status204NoContent, context.Response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("{\"actionType\":\"tErMiNaTe\"}")]
+    [InlineData("{\"ActionType\":\"Terminate\"}")]
+    [InlineData("{\"ACTIONTYPE\":\"TERMINATE\"}")]
+    public async Task Performance_terminate_bypasses_http_idempotency_and_resets_the_body(string json)
+    {
+        await using var db = CreateDb();
+        string? body = null;
+        var middleware = new ApiContractMiddleware(async context =>
+        {
+            context.Request.Body.Position = 0;
+            using var reader = new StreamReader(context.Request.Body);
+            body = await reader.ReadToEndAsync();
+            context.Response.StatusCode = StatusCodes.Status202Accepted;
+        });
+        var context = CreateContext(HttpMethods.Post, json);
+        context.Request.Path = "/v1/performance-actions";
+
+        await middleware.InvokeAsync(context, db, TimeProvider.System);
+
+        Assert.Equal(StatusCodes.Status202Accepted, context.Response.StatusCode);
+        Assert.Equal(json, body);
+    }
+
+    [Theory]
+    [InlineData("{\"actionType\":\"Terminate\",\"ActionType\":\"Coaching\"}")]
+    [InlineData("{\"ActionType\":\"Coaching\",\"actionType\":\"Terminate\"}")]
+    public async Task Mixed_case_duplicate_action_type_is_rejected_before_authorization_bypass(string json)
+    {
+        await using var db = CreateDb();
+        var nextCalled = false;
+        var middleware = new ApiContractMiddleware(context =>
+        {
+            nextCalled = true;
+            context.Response.StatusCode = StatusCodes.Status202Accepted;
+            return Task.CompletedTask;
+        });
+        var context = CreateContext(HttpMethods.Post, json);
+        context.Request.Path = "/v1/performance-actions";
+
+        await middleware.InvokeAsync(context, db, TimeProvider.System);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        Assert.False(nextCalled);
+        Assert.Empty(await db.IdempotencyRecords.ToListAsync());
+    }
+
+    [Theory]
+    [InlineData("{\"name\":\"one\",\"name\":\"two\"}")]
+    [InlineData("{\"nested\":{\"value\":1,\"Value\":2}}")]
+    public async Task Duplicate_json_properties_are_rejected_before_routing_and_idempotency(string json)
+    {
+        await using var db = CreateDb();
+        var nextCalled = false;
+        var middleware = new ApiContractMiddleware(context =>
+        {
+            nextCalled = true;
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            return Task.CompletedTask;
+        });
+        var context = CreateContext(HttpMethods.Post, json);
+        context.Request.Headers["Idempotency-Key"] = "duplicate-key";
+
+        await middleware.InvokeAsync(context, db, TimeProvider.System);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+        Assert.False(nextCalled);
+        Assert.Empty(await db.IdempotencyRecords.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Non_termination_performance_action_keeps_http_idempotency_validation()
+    {
+        await using var db = CreateDb();
+        var middleware = new ApiContractMiddleware(context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            return Task.CompletedTask;
+        });
+        var context = CreateContext(HttpMethods.Post, "{\"actionType\":\"Coaching\"}");
+        context.Request.Path = "/v1/performance-actions";
+
+        await middleware.InvokeAsync(context, db, TimeProvider.System);
+
+        Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
+    }
+
     [Fact]
     public async Task Update_requires_matching_if_match_and_row_version()
     {

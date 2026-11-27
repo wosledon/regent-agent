@@ -6,12 +6,15 @@ using RegentAgent.Storage;
 
 namespace RegentAgent.Agents;
 
-public sealed class AgentRuntimeService(JsonDocumentStore<AgentContextSnapshot> contexts, TimeProvider clock)
+public sealed class AgentRuntimeService(IDocumentStore<AgentContextSnapshot> contexts, TimeProvider clock,
+    ITenantRuntimeAdmission? admission = null)
 {
-    public async Task<AgentContextSnapshot> BuildContextAsync(Guid taskId, string systemPrefix, string tenantMemory,
+    public async Task<AgentContextSnapshot> BuildContextAsync(Guid tenantId, Guid taskId, string systemPrefix, string tenantMemory,
         string taskGrantJson, IReadOnlyList<string> toolResultRefs, string checkpointJson, bool compressed,
         CancellationToken cancellationToken)
     {
+        using var writeAccess = await TenantPurgeFence.EnterWriteAsync(tenantId, cancellationToken);
+        if (admission is not null) await admission.EnsureActiveAsync(tenantId, cancellationToken);
         var snapshot = new AgentContextSnapshot
         {
             TaskId = taskId, SystemPrefix = systemPrefix, TenantMemory = tenantMemory,
@@ -19,12 +22,14 @@ public sealed class AgentRuntimeService(JsonDocumentStore<AgentContextSnapshot> 
             CheckpointJson = checkpointJson, Compressed = compressed,
             PrefixHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(systemPrefix))).ToLowerInvariant()
         };
-        await contexts.PutAsync(taskId.ToString(), snapshot, cancellationToken);
+        await contexts.PutAsync(ContextKey(tenantId, taskId), snapshot, cancellationToken);
         return snapshot;
     }
 
-    public async Task<ToolLoopResult> RunToolLoopAsync(ToolLoopRequest request, CancellationToken cancellationToken)
+    public async Task<ToolLoopResult> RunToolLoopAsync(Guid tenantId, ToolLoopRequest request, CancellationToken cancellationToken)
     {
+        using var writeAccess = await TenantPurgeFence.EnterWriteAsync(tenantId, cancellationToken);
+        if (admission is not null) await admission.EnsureActiveAsync(tenantId, cancellationToken);
         if (request.MaxSteps is < 1 or > 32) throw new InvalidOperationException("Tool loop bound must be between 1 and 32.");
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var results = new List<string>();
@@ -42,12 +47,13 @@ public sealed class AgentRuntimeService(JsonDocumentStore<AgentContextSnapshot> 
             results.Add(step.Result);
         }
         var checkpoint = JsonSerializer.Serialize(new { request.TaskId, executed, duplicates, unauthorized, cost, at = clock.GetUtcNow() });
-        var context = await contexts.GetAsync(request.TaskId.ToString(), cancellationToken);
+        var contextKey = ContextKey(tenantId, request.TaskId);
+        var context = await contexts.GetAsync(contextKey, cancellationToken);
         if (context is not null)
         {
             context.CheckpointJson = checkpoint;
             context.ToolResultRefs = results.ToArray();
-            await contexts.PutAsync(request.TaskId.ToString(), context, cancellationToken);
+            await contexts.PutAsync(contextKey, context, cancellationToken);
         }
         return new ToolLoopResult
         {
@@ -57,4 +63,6 @@ public sealed class AgentRuntimeService(JsonDocumentStore<AgentContextSnapshot> 
             CheckpointJson = checkpoint, Results = results
         };
     }
+
+    private static string ContextKey(Guid tenantId, Guid taskId) => $"{tenantId}:{taskId}";
 }

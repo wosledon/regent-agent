@@ -25,8 +25,9 @@ public sealed class AgentAssignmentTokenValidator(IAgentIdentityKeyProvider keys
         var principal = new JwtSecurityTokenHandler().ValidateToken(token, validation, out var validated);
         if (validated is not JwtSecurityToken jwt || jwt.Header.Alg != SecurityAlgorithms.HmacSha256)
             throw new SecurityTokenException("Agent token algorithm is not allowed.");
-        if (!principal.TryGetGuid("tenant_id", out var tenantId) || !principal.TryGetGuid("employee_id", out var employeeId))
-            throw new SecurityTokenException("Agent token tenant and employee are required.");
+        if (!principal.TryGetGuid("tenant_id", out var tenantId) || !principal.TryGetGuid("employee_id", out var employeeId)
+            || !principal.TryGetGuid("credential_epoch", out var credentialEpoch) || credentialEpoch == Guid.Empty)
+            throw new SecurityTokenException("Agent token tenant, employee and credential epoch are required.");
         var taskId = principal.TryGetGuid("task_id", out var parsedTaskId) ? parsedTaskId : (Guid?)null;
         var scopes = principal.FindFirst("scopes")?.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? [];
         if (scopes.Length == 0 || scopes.Any(scope => scope.StartsWith("admin", StringComparison.OrdinalIgnoreCase)))
@@ -34,7 +35,7 @@ public sealed class AgentAssignmentTokenValidator(IAgentIdentityKeyProvider keys
         return new AgentIdentity(tenantId, employeeId, taskId, principal.FindFirst("runner_id")?.Value,
             scopes, principal.FindFirst("jti")?.Value ?? string.Empty,
             DateTimeOffset.FromUnixTimeSeconds(long.Parse(principal.FindFirst("iat")?.Value ?? "0")),
-            jwt.ValidTo);
+            jwt.ValidTo, credentialEpoch);
     }
 }
 

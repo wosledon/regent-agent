@@ -4,13 +4,15 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RegentAgent.Contracts.Billing;
+using RegentAgent.Contracts.Governance;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
 
 public sealed class DataExportService(RegentDbContext db, JsonDocumentStore<DataExportDto> exports,
-    IObjectStore objects, IWebHostEnvironment environment, TimeProvider clock)
+    IObjectStore objects, IWebHostEnvironment environment, TimeProvider clock,
+    IDocumentStore<DataLifecycleState>? lifecycleStore = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
     private static readonly string[] ModuleFiles =
@@ -27,7 +29,9 @@ public sealed class DataExportService(RegentDbContext db, JsonDocumentStore<Data
 
     public async Task<DataExportDto> CreateAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken)
     {
+        using var writeAccess = await TenantPurgeFence.EnterWriteAsync(tenantId, cancellationToken);
         await RequireOwnerAsync(userId, tenantId, cancellationToken);
+        await EnsureTenantActiveAsync(tenantId, cancellationToken);
         var id = Guid.NewGuid();
         var database = await ReadDatabaseAsync(tenantId, cancellationToken);
         var modules = ReadModules(tenantId);
@@ -52,7 +56,13 @@ public sealed class DataExportService(RegentDbContext db, JsonDocumentStore<Data
         var bytes = package.ToArray();
         var key = $"tenants/{tenantId}/exports/{id:N}.zip";
         await using var stream = new MemoryStream(bytes);
+        await EnsureTenantActiveAsync(tenantId, cancellationToken);
         var stored = await objects.PutAsync(new ObjectUploadRequest(key, stream, "application/zip", bytes.Length), cancellationToken);
+        if (!await IsTenantActiveAsync(tenantId, cancellationToken))
+        {
+            await objects.DeleteAsync(key, cancellationToken);
+            throw new TenantPurgeInProgressException(tenantId.ToString());
+        }
         var record = new DataExportDto(id, tenantId, "Completed", "zip", "1", stored.ObjectKey,
             stored.Sha256, stored.Length, database.Count, modules.Count, stored.StoredAt, null, null);
         await exports.PutAsync(id.ToString(), record, cancellationToken);
@@ -77,9 +87,12 @@ public sealed class DataExportService(RegentDbContext db, JsonDocumentStore<Data
     public async Task<DataExportValidationDto> ValidateAsync(Guid userId, Guid tenantId, Guid exportId,
         CancellationToken cancellationToken)
     {
+        using var writeAccess = await TenantPurgeFence.EnterWriteAsync(tenantId, cancellationToken);
         await RequireOwnerAsync(userId, tenantId, cancellationToken);
+        await EnsureTenantActiveAsync(tenantId, cancellationToken);
         var export = await LoadAsync(tenantId, exportId, cancellationToken);
         var temporaryPath = Path.Combine(Path.GetTempPath(), $"regent-export-{Guid.NewGuid():N}.zip");
+        DataExportValidationDto validation;
         try
         {
             var outputOptions = new FileStreamOptions
@@ -119,19 +132,23 @@ public sealed class DataExportService(RegentDbContext db, JsonDocumentStore<Data
             if (digest != export.Sha256 || contentDigest != manifest.RootElement.GetProperty("content_sha256").GetString())
                 throw new InvalidOperationException("Export checksum mismatch.");
             export = export with { ValidatedAt = clock.GetUtcNow(), ValidationError = null };
-            await exports.PutAsync(export.Id.ToString(), export, cancellationToken);
-            return new DataExportValidationDto(export.Id, true, digest, export.TableCount, export.ModuleCount, export.ValidatedAt.Value, null);
+            validation = new DataExportValidationDto(export.Id, true, digest, export.TableCount, export.ModuleCount,
+                export.ValidatedAt.Value, null);
         }
         catch (Exception exception) when (exception is InvalidOperationException or JsonException or InvalidDataException)
         {
             export = export with { ValidationError = exception.Message };
-            await exports.PutAsync(export.Id.ToString(), export, cancellationToken);
-            return new DataExportValidationDto(export.Id, false, export.Sha256, export.TableCount, export.ModuleCount, clock.GetUtcNow(), exception.Message);
+            validation = new DataExportValidationDto(export.Id, false, export.Sha256, export.TableCount,
+                export.ModuleCount, clock.GetUtcNow(), exception.Message);
         }
         finally
         {
             if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
         }
+
+        await EnsureTenantActiveAsync(tenantId, cancellationToken);
+        await exports.PutAsync(export.Id.ToString(), export, cancellationToken);
+        return validation;
     }
 
     private async Task<Dictionary<string, List<Dictionary<string, object?>>>> ReadDatabaseAsync(Guid tenantId,
@@ -204,6 +221,22 @@ public sealed class DataExportService(RegentDbContext db, JsonDocumentStore<Data
             ?? throw new KeyNotFoundException("Export not found.");
         if (export.TenantId != tenantId) throw new UnauthorizedAccessException("Export belongs to another tenant.");
         return export;
+    }
+
+    private async Task EnsureTenantActiveAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        if (!await IsTenantActiveAsync(tenantId, cancellationToken))
+            throw new TenantPurgeInProgressException(tenantId.ToString());
+    }
+
+    private async Task<bool> IsTenantActiveAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var status = await db.Tenants.AsNoTracking().Where(x => x.Id == tenantId).Select(x => x.Status)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (!string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase)) return false;
+        if (lifecycleStore is null) return true;
+        var lifecycle = await lifecycleStore.GetAsync(tenantId.ToString(), cancellationToken);
+        return lifecycle is null || (!lifecycle.IsPurging && !lifecycle.IsPurged);
     }
 
     private async Task RequireOwnerAsync(Guid userId, Guid tenantId, CancellationToken cancellationToken)

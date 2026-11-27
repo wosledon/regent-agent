@@ -14,7 +14,7 @@ public sealed class DeliveryServiceTests
         var path = Path.Combine(Path.GetTempPath(), $"delivery-{Guid.NewGuid():N}.json");
         try
         {
-            var service = new DeliveryService(new JsonDocumentStore<ProjectDeliveryState>(path), TimeProvider.System);
+            var service = new DeliveryService(new JsonDocumentStore<ProjectDeliveryState>(path), TimeProvider.System, new TestArtifactVerifier());
             var tenantId = Guid.NewGuid();
             var projectId = Guid.NewGuid();
             var finding = await service.AddFindingAsync(tenantId, projectId, new ResearchFinding
@@ -59,8 +59,9 @@ public sealed class DeliveryServiceTests
                 await service.CompleteTaskAsync(tenantId, projectId, taskId, new DoneEvidence
                 {
                     CriteriaResults = requirement.AcceptanceCriteria.ToDictionary(value => value, _ => true),
-                    Artifacts = [new($"artifact-{taskId:N}", "document", "local")],
-                    TestResults = ["PASS"], SecurityChecks = ["PASS"], OpenP0P1Defects = 0, Validator = $"Reviewer-{taskId:N}"
+                    Artifacts = [new($"artifact-{taskId:N}", "document", "local", new string('a', 64))],
+                    TestResults = [new("unit", true, "test:unit")], SecurityChecks = [new("security", true, "test:security")],
+                    OpenP0P1Defects = 0, Validator = $"Reviewer-{taskId:N}"
                 }, CancellationToken.None);
             }
             await service.AddAcceptanceReportAsync(tenantId, projectId, new AcceptanceReport
@@ -225,18 +226,100 @@ public sealed class DeliveryServiceTests
     }
 
     [Fact]
-    public async Task Self_review_and_unverified_key_claims_are_rejected()
+    public async Task Defects_start_open_and_reject_unknown_severity()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"delivery-{Guid.NewGuid():N}.json");
+        var path = Path.Combine(Path.GetTempPath(), $"delivery-defect-{Guid.NewGuid():N}.json");
         try
         {
             var service = new DeliveryService(new JsonDocumentStore<ProjectDeliveryState>(path), TimeProvider.System);
             var tenantId = Guid.NewGuid();
             var projectId = Guid.NewGuid();
-            await Assert.ThrowsAsync<InvalidOperationException>(() => service.AddFindingAsync(tenantId, projectId,
+            var defect = await service.ReportDefectAsync(tenantId, projectId, new Defect
+            {
+                Severity = "P0", Status = "Closed", ReproductionSteps = "Steps"
+            }, CancellationToken.None);
+            Assert.Equal("New", defect.Status);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.ReportDefectAsync(tenantId, projectId,
+                new Defect { Severity = "P0 ", ReproductionSteps = "Steps" }, CancellationToken.None));
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    [Fact]
+    public async Task Non_task_reviews_and_failed_checks_cannot_complete_a_task()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"delivery-evidence-{Guid.NewGuid():N}.json");
+        try
+        {
+            var tenantId = Guid.NewGuid();
+            var projectId = Guid.NewGuid();
+            var task = new DeliveryTask
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, ProjectId = projectId, Status = "InReview",
+                Author = "Author", Assignee = "Assignee", AcceptanceCriteria = ["Works"]
+            };
+            var store = new JsonDocumentStore<ProjectDeliveryState>(path);
+            await store.PutAsync(projectId.ToString(), new ProjectDeliveryState
+            {
+                TenantId = tenantId, ProjectId = projectId, Tasks = [task],
+                Reviews = [new Review { SubjectId = task.Id, SubjectType = "Defect", Reviewer = "Reviewer", Author = "Author", Verdict = "Approved" }]
+            }, CancellationToken.None);
+            var service = new DeliveryService(store, TimeProvider.System, new TestArtifactVerifier());
+            var evidence = new DoneEvidence
+            {
+                CriteriaResults = new Dictionary<string, bool> { ["Works"] = true },
+                Artifacts = [new("artifact", "document", "local", new string('a', 64))],
+                TestResults = [new("unit", false, "test:unit")], SecurityChecks = [new("security", true, "test:security")],
+                Validator = "Reviewer"
+            };
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.CompleteTaskAsync(
+                tenantId, projectId, task.Id, evidence, CancellationToken.None));
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+
+    private sealed class TestArtifactVerifier : IDeliveryArtifactVerifier
+    {
+        public Task<IReadOnlyList<string>> ValidateAsync(Guid tenantId, Guid projectId, Guid taskId,
+            IReadOnlyList<EvidenceRef> artifacts, CancellationToken cancellationToken) =>
+            Task.FromResult<IReadOnlyList<string>>([]);
+    }
+
+    [Fact]
+    public async Task Self_review_and_unverified_key_claims_are_rejected()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"delivery-{Guid.NewGuid():N}.json");
+        try
+        {
+            var tenantId = Guid.NewGuid();
+            var projectId = Guid.NewGuid();
+            var taskId = Guid.NewGuid();
+            var store = new JsonDocumentStore<ProjectDeliveryState>(path);
+            await store.PutAsync(projectId.ToString(), new ProjectDeliveryState
+            {
+                TenantId = tenantId,
+                ProjectId = projectId,
+                Tasks =
+                [
+                    new DeliveryTask
+                    {
+                        Id = taskId,
+                        TenantId = tenantId,
+                        ProjectId = projectId,
+                        Author = "Same",
+                        Assignee = "Different"
+                    }
+                ]
+            }, CancellationToken.None);
+            var service = new DeliveryService(store, TimeProvider.System);
+
+            var keyClaimError = await Assert.ThrowsAsync<InvalidOperationException>(() => service.AddFindingAsync(tenantId, projectId,
                 new ResearchFinding { Claim = "Key claim", KeyClaim = true, Sources = [new("one", "web", "url")] }, CancellationToken.None));
-            await Assert.ThrowsAsync<InvalidOperationException>(() => service.AddReviewAsync(tenantId, projectId,
-                new Review { Reviewer = "Same", Author = "Same", Verdict = "Approved" }, CancellationToken.None));
+            Assert.Contains("two independent sources", keyClaimError.Message, StringComparison.Ordinal);
+
+            var reviewError = await Assert.ThrowsAsync<InvalidOperationException>(() => service.AddReviewAsync(tenantId, projectId,
+                new Review { SubjectType = "Task", SubjectId = taskId, Reviewer = "Same", Verdict = "Approved" }, CancellationToken.None));
+            Assert.Contains("cannot independently review", reviewError.Message, StringComparison.Ordinal);
         }
         finally
         {

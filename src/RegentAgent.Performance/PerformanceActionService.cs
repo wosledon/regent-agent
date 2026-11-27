@@ -6,21 +6,56 @@ public sealed record PerformanceActionRecord(string Id, string TenantId, string 
     string Status, string? ApprovalId, string Reason, DateTimeOffset CreatedAt, string AppealStatus = "None",
     string? AppealReason = null, string? AppealResolution = null, string? AppealReviewer = null);
 
-public sealed class PerformanceActionService(JsonDocumentStore<PerformanceActionRecord> actions)
+public sealed class PerformanceActionService(JsonDocumentStore<PerformanceActionRecord> actions,
+    TimeProvider? clock = null)
 {
+    private readonly TimeProvider clock = clock ?? TimeProvider.System;
+
     public async Task<PerformanceActionRecord> PerformAsync(string tenantId, string employeeId, string actionType,
         string? approvalId, string reason, CancellationToken cancellationToken)
     {
-        if (actionType is not ("Coaching" or "Transfer" or "Demotion" or "Freeze" or "Terminate" or "Reinstate"))
+        if (string.Equals(actionType, "Terminate", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Termination must execute through ApprovalExecutionService.");
+        if (actionType is not ("Coaching" or "Transfer" or "Demotion" or "Freeze" or "Reinstate"))
             throw new InvalidOperationException("Invalid performance action.");
         if (string.IsNullOrWhiteSpace(employeeId) || string.IsNullOrWhiteSpace(reason))
             throw new InvalidOperationException("Employee and reason are required.");
-        if (actionType == "Terminate" && string.IsNullOrWhiteSpace(approvalId))
-            throw new InvalidOperationException("Human Boss approval is required for termination.");
         var record = new PerformanceActionRecord(Guid.NewGuid().ToString("N"), tenantId, employeeId, actionType,
-            "Completed", approvalId, reason, DateTimeOffset.UtcNow);
+            "Completed", approvalId, reason, clock.GetUtcNow());
         await actions.PutAsync(record.Id, record, cancellationToken);
         return record;
+    }
+
+    public PerformanceActionRecord CreateApprovedTerminationRecord(string tenantId, string employeeId,
+        string approvalId, string reason, DateTimeOffset? createdAt = null)
+    {
+        ValidateTermination(tenantId, employeeId, approvalId, reason);
+        return new PerformanceActionRecord(TerminationRecordId(approvalId), tenantId, employeeId, "Terminate",
+            "Completed", approvalId, reason, createdAt ?? clock.GetUtcNow());
+    }
+
+    public async Task<PerformanceActionRecord> RecordApprovedTerminationAsync(string tenantId, string employeeId,
+        string approvalId, string reason, CancellationToken cancellationToken, DateTimeOffset? createdAt = null)
+    {
+        var id = TerminationRecordId(approvalId);
+        var existing = await actions.GetAsync(id, cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.TenantId != tenantId || existing.EmployeeId != employeeId
+                || existing.ActionType != "Terminate" || existing.ApprovalId != approvalId)
+                throw new InvalidOperationException("Termination projection conflicts with the approved action.");
+            return existing;
+        }
+        var record = CreateApprovedTerminationRecord(tenantId, employeeId, approvalId, reason, createdAt);
+        await actions.PutAsync(id, record, cancellationToken);
+        return record;
+    }
+
+    public async Task<PerformanceActionRecord?> GetAsync(string id, string tenantId,
+        CancellationToken cancellationToken)
+    {
+        var record = await actions.GetAsync(id, cancellationToken);
+        return record is not null && record.TenantId == tenantId ? record : null;
     }
 
     public async Task<IReadOnlyList<PerformanceActionRecord>> ListAsync(string tenantId, CancellationToken cancellationToken) =>
@@ -53,5 +88,20 @@ public sealed class PerformanceActionService(JsonDocumentStore<PerformanceAction
         };
         await actions.PutAsync(id, record, cancellationToken);
         return record;
+    }
+
+    private static string TerminationRecordId(string approvalId)
+    {
+        if (!Guid.TryParse(approvalId, out var parsed) || parsed == Guid.Empty)
+            throw new InvalidOperationException("A valid approval ID is required.");
+        return $"termination-{parsed:N}";
+    }
+
+    private static void ValidateTermination(string tenantId, string employeeId, string approvalId, string reason)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(employeeId)
+            || string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Tenant, employee and reason are required.");
+        _ = TerminationRecordId(approvalId);
     }
 }

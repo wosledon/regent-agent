@@ -75,6 +75,87 @@ public sealed class S3ObjectStoreTests
     }
 
     [Fact]
+    public async Task S3_prefix_delete_fails_on_access_denied_without_retrying()
+    {
+        var s3 = new Mock<IAmazonS3>(MockBehavior.Strict);
+        s3.SetupSequence(client => client.ListObjectsV2Async(It.IsAny<ListObjectsV2Request>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response { S3Objects = [new S3Object { Key = "tenant/a" }] });
+        s3.Setup(client => client.DeleteObjectsAsync(It.IsAny<DeleteObjectsRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeleteObjectsResponse
+            {
+                DeleteErrors = [new DeleteError { Key = "tenant/a", Code = "AccessDenied" }]
+            });
+        var store = new S3ObjectStore(s3.Object, new S3ObjectStoreOptions { Bucket = "bucket", MaxRetries = 3 });
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.DeletePrefixAsync("tenant/", CancellationToken.None));
+
+        Assert.Contains("AccessDenied", error.Message);
+        s3.Verify(client => client.DeleteObjectsAsync(It.IsAny<DeleteObjectsRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task S3_prefix_delete_retries_transient_partial_errors_within_bound()
+    {
+        var s3 = new Mock<IAmazonS3>(MockBehavior.Strict);
+        s3.SetupSequence(client => client.ListObjectsV2Async(It.IsAny<ListObjectsV2Request>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response { S3Objects = [new S3Object { Key = "tenant/a" }] })
+            .ReturnsAsync(new ListObjectsV2Response());
+        s3.SetupSequence(client => client.DeleteObjectsAsync(It.IsAny<DeleteObjectsRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeleteObjectsResponse
+            {
+                DeleteErrors = [new DeleteError { Key = "tenant/a", Code = "SlowDown" }]
+            })
+            .ReturnsAsync(new DeleteObjectsResponse
+            {
+                DeletedObjects = [new DeletedObject { Key = "tenant/a" }]
+            });
+        var store = new S3ObjectStore(s3.Object, new S3ObjectStoreOptions
+        {
+            Bucket = "bucket", MaxRetries = 1, DeleteRetryDelayMilliseconds = 0
+        });
+
+        var deleted = await store.DeletePrefixAsync("tenant/", CancellationToken.None);
+
+        Assert.Equal(1, deleted);
+        s3.Verify(client => client.DeleteObjectsAsync(It.IsAny<DeleteObjectsRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task S3_prefix_delete_throws_when_bounded_retries_are_exhausted()
+    {
+        var s3 = new Mock<IAmazonS3>(MockBehavior.Strict);
+        s3.Setup(client => client.ListObjectsV2Async(It.IsAny<ListObjectsV2Request>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response { S3Objects = [new S3Object { Key = "tenant/a" }] });
+        s3.Setup(client => client.DeleteObjectsAsync(It.IsAny<DeleteObjectsRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeleteObjectsResponse
+            {
+                DeleteErrors = [new DeleteError { Key = "tenant/a", Code = "503" }]
+            });
+        var store = new S3ObjectStore(s3.Object, new S3ObjectStoreOptions
+        {
+            Bucket = "bucket", MaxRetries = 1, DeleteRetryDelayMilliseconds = 0
+        });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeletePrefixAsync("tenant/", CancellationToken.None));
+        s3.Verify(client => client.DeleteObjectsAsync(It.IsAny<DeleteObjectsRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task S3_prefix_delete_verifies_the_prefix_is_empty_before_returning()
+    {
+        var s3 = new Mock<IAmazonS3>(MockBehavior.Strict);
+        s3.SetupSequence(client => client.ListObjectsV2Async(It.IsAny<ListObjectsV2Request>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ListObjectsV2Response { S3Objects = [new S3Object { Key = "tenant/a" }] })
+            .ReturnsAsync(new ListObjectsV2Response { S3Objects = [new S3Object { Key = "tenant/a" }] });
+        s3.Setup(client => client.DeleteObjectsAsync(It.IsAny<DeleteObjectsRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DeleteObjectsResponse { DeletedObjects = [new DeletedObject { Key = "tenant/a" }] });
+        var store = new S3ObjectStore(s3.Object, new S3ObjectStoreOptions { Bucket = "bucket" });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => store.DeletePrefixAsync("tenant/", CancellationToken.None));
+    }
+
+    [Fact]
     public void S3_options_require_https_or_an_approved_internal_endpoint()
     {
         var options = new S3ObjectStoreOptions

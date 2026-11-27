@@ -1,6 +1,8 @@
 namespace RegentAgent.Contracts.Projects;
 
-public sealed record EvidenceRef(string Id, string Kind, string Location);
+public sealed record EvidenceRef(string Id, string Kind, string Location, string? Sha256 = null);
+
+public sealed record DeliveryCheckResult(string Name, bool Passed, string? EvidenceRef = null);
 
 public sealed class ResearchFinding
 {
@@ -82,6 +84,7 @@ public sealed class DeliveryTask
     public string Status { get; set; } = "Backlog";
     public string Author { get; set; } = string.Empty;
     public string? Assignee { get; set; }
+    public Guid? AssigneeEmployeeId { get; set; }
     public string? Validator { get; set; }
     public IReadOnlyList<string> AcceptanceCriteria { get; set; } = [];
 }
@@ -167,8 +170,8 @@ public sealed class DoneEvidence
     public string WorkItemType { get; set; } = "Task";
     public IReadOnlyDictionary<string, bool> CriteriaResults { get; set; } = new Dictionary<string, bool>();
     public IReadOnlyList<EvidenceRef> Artifacts { get; set; } = [];
-    public IReadOnlyList<string> TestResults { get; set; } = [];
-    public IReadOnlyList<string> SecurityChecks { get; set; } = [];
+    public IReadOnlyList<DeliveryCheckResult> TestResults { get; set; } = [];
+    public IReadOnlyList<DeliveryCheckResult> SecurityChecks { get; set; } = [];
     public int OpenP0P1Defects { get; set; }
     public string Validator { get; set; } = string.Empty;
     public DateTimeOffset ValidatedAt { get; set; }

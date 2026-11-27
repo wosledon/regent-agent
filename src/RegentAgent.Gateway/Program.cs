@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Microsoft.IdentityModel.Tokens;
 using Npgsql;
 using RegentAgent.AgentIdentity;
+using RegentAgent.Gateway;
 using RegentAgent.Gateway.KeyVault;
 using RegentAgent.Gateway.Metering;
 using RegentAgent.Observability;
@@ -14,7 +15,14 @@ using RegentAgent.Storage;
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRegentObservability(builder.Configuration);
 builder.Services.AddAgentIdentity(builder.Configuration);
-builder.Services.AddOpenApi("v1");
+builder.Services.AddOpenApi("v1", options =>
+{
+    options.AddDocumentTransformer((document, context, cancellationToken) =>
+    {
+        document.Servers = [];
+        return Task.CompletedTask;
+    });
+});
 builder.Services.AddProblemDetails();
 var providerMode = builder.Configuration["Gateway:ProviderMode"] ?? "local";
 if (providerMode.Trim().ToLowerInvariant() is not ("local" or "remote"))
@@ -84,6 +92,12 @@ builder.Services.AddHttpClient("controlplane-metering", client =>
     client.Timeout = TimeSpan.FromSeconds(5);
     if (!string.IsNullOrWhiteSpace(meteringToken)) client.DefaultRequestHeaders.Add("X-Regent-Metering-Token", meteringToken);
 });
+builder.Services.AddHttpClient("controlplane-assignment", client =>
+{
+    client.BaseAddress = new Uri(controlPlaneUrl);
+    client.Timeout = TimeSpan.FromSeconds(5);
+});
+builder.Services.AddSingleton<AgentAssignmentAccessValidator>();
 builder.Services.AddSingleton(new JsonDocumentStore<UsageProjectionRecord>(
     builder.Configuration["Gateway:UsageProjectionPath"] ?? "data/gateway-usage-projections.json"));
 builder.Services.AddSingleton<IUsageProjector, HttpUsageProjector>();
@@ -175,6 +189,8 @@ app.Use(async (context, next) =>
             var identity = context.RequestServices.GetRequiredService<AgentAssignmentTokenValidator>()
                 .Validate(authorization["Bearer ".Length..].Trim(), "regent-gateway");
             if (!identity.Scopes.Contains("infer:employee")) throw new SecurityTokenException("Employee inference scope is required.");
+            await context.RequestServices.GetRequiredService<AgentAssignmentAccessValidator>()
+                .ValidateAsync(authorization["Bearer ".Length..].Trim(), identity, context.RequestAborted);
             context.Items[AgentIdentityContext.Key] = identity;
         }
         catch (SecurityTokenException)

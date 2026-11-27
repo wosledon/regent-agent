@@ -31,7 +31,9 @@ public sealed class ToolDisclosurePolicy
     public string Summary { get; set; } = string.Empty;
 }
 
+// Retained for wire compatibility; these client fields never grant disclosure authority.
 public sealed record ToolDisclosureRequest(IReadOnlyList<string> Capabilities, bool RestrictedActivated);
+public sealed record ToolDisclosureAuthority(IReadOnlySet<string> Capabilities, bool RestrictedActivated);
 public sealed record DisclosedTool(string Name, string Level, string Summary);
 public sealed record ToolDisclosureResult(IReadOnlyList<DisclosedTool> Tools, bool PermissionExpanded);
 

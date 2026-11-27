@@ -171,7 +171,10 @@ public sealed partial class MemorySafetyService(
         var corrected = new MemoryClaim(Guid.NewGuid().ToString("N"), tenantId, current.Scope, task.ProposedContent,
             current.SourceRef, current.Confidence, current.Taint, "Active", current.Version + 1, current.Id,
             Author: current.Scope == "personal" ? current.Author : request.ReviewerId,
-            Verified: true, VerifiedAt: clock.GetUtcNow(), CreatedAt: clock.GetUtcNow());
+            Verified: true, VerifiedAt: clock.GetUtcNow(), CreatedAt: clock.GetUtcNow(),
+            AuthorEmployeeId: current.Scope == "personal" ? current.AuthorEmployeeId : null,
+            AuthorUserId: current.Scope == "personal" ? current.AuthorUserId : null,
+            AuthorEmploymentPeriodId: current.Scope == "personal" ? current.AuthorEmploymentPeriodId : null);
         await claims.PutAsync(current.Id, current with { Status = "Superseded" }, cancellationToken);
         await claims.PutAsync(corrected.Id, corrected, cancellationToken);
         await index.ReplaceClaimAsync(tenantId, current.Id, corrected, cancellationToken);

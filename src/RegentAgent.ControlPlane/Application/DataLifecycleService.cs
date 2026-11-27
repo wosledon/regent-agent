@@ -9,16 +9,19 @@ using RegentAgent.Storage;
 
 namespace RegentAgent.ControlPlane.Application;
 
-public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> store,
+public sealed class DataLifecycleService(IDocumentStore<DataLifecycleState> store,
     IObjectStore objects, RegentDbContext db, TimeProvider clock, TenantPurgeService tenantPurge, TenantRlsScope rlsScope)
 {
-    private readonly SemaphoreSlim gate = new(1, 1);
-
-    public Task<DataLifecycleState> GetAsync(Guid tenantId, CancellationToken cancellationToken) =>
-        MutateAsync(tenantId, state => (false, state), cancellationToken);
+    public async Task<DataLifecycleState> GetAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var state = await store.GetAsync(tenantId.ToString(), cancellationToken) ?? new DataLifecycleState { TenantId = tenantId };
+        if (state.TenantId == Guid.Empty) state.TenantId = tenantId;
+        else if (state.TenantId != tenantId) throw new UnauthorizedAccessException("Lifecycle state belongs to another tenant.");
+        return state;
+    }
 
     public Task<DeletionRequestRecord> SoftDeleteAsync(Guid tenantId, string resourceType, string resourceId,
-        string reason, CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
+        string reason, CancellationToken cancellationToken, DateTimeOffset? restoreUntil = null) => MutateAsync(tenantId, state =>
     {
         if (resourceType.Equals("Tenant", StringComparison.OrdinalIgnoreCase))
         {
@@ -32,11 +35,19 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
         var request = new DeletionRequestRecord
         {
             TenantId = tenantId, ResourceType = resourceType, ResourceId = resourceId,
-            Reason = reason, DeletedAt = clock.GetUtcNow(), RestoreUntil = clock.GetUtcNow().AddDays(days)
+            Reason = reason, DeletedAt = clock.GetUtcNow(), RestoreUntil = restoreUntil ?? clock.GetUtcNow().AddDays(days)
         };
         state.DeletionRequests.Add(request);
         return (true, request);
     }, cancellationToken);
+
+    public async Task<DeletionProof> PurgeTenantNowAsync(Guid tenantId, string reason,
+        CancellationToken cancellationToken)
+    {
+        var request = await SoftDeleteAsync(tenantId, "Tenant", tenantId.ToString(), reason,
+            cancellationToken, clock.GetUtcNow());
+        return await PurgeAsync(tenantId, request.Id, "PURGE", cancellationToken);
+    }
 
     public Task<DeletionRequestRecord> RestoreAsync(Guid tenantId, Guid requestId, CancellationToken cancellationToken) =>
         MutateAsync(tenantId, state =>
@@ -102,7 +113,7 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
         };
         state.Archives.Add(record);
         return (true, record);
-    }, cancellationToken, true);
+    }, cancellationToken);
 
     public Task<ArchiveManifest> RestoreArchiveAsync(Guid tenantId, Guid archiveId, CancellationToken cancellationToken) =>
         MutateAsync(tenantId, async state =>
@@ -118,7 +129,7 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
             if (string.IsNullOrWhiteSpace(content)) throw new InvalidOperationException("Archive is empty.");
             archive.Status = "Restored";
             return (true, archive);
-        }, cancellationToken, true);
+        }, cancellationToken);
 
     public Task<BackupRunRecord> BackupAsync(Guid tenantId, string profile, int rpoMinutes, int rtoMinutes,
         CancellationToken cancellationToken) => MutateAsync(tenantId, async state =>
@@ -141,7 +152,7 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
         };
         state.Backups.Add(record);
         return (true, record);
-    }, cancellationToken, true);
+    }, cancellationToken);
 
     public Task<BackupRunRecord> VerifyRestoreAsync(Guid tenantId, Guid backupId, CancellationToken cancellationToken) =>
         MutateAsync(tenantId, async state =>
@@ -155,34 +166,109 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
             backup.RestoreVerified = true;
             backup.Status = "RestoreVerified";
             return (true, backup);
-        }, cancellationToken, true);
+        }, cancellationToken);
 
-    public Task<DeletionProof> PurgeAsync(Guid tenantId, Guid requestId, string confirmation,
-        CancellationToken cancellationToken) => MutateAsync(tenantId, async state =>
+    public async Task<DeletionProof> PurgeAsync(Guid tenantId, Guid requestId, string confirmation,
+        CancellationToken cancellationToken)
     {
         if (confirmation != "PURGE") throw new InvalidOperationException("Explicit PURGE confirmation is required.");
-        var request = Find(state.DeletionRequests, requestId);
-        if (request.Status == "Purged") throw new InvalidOperationException("Deletion request is already purged.");
-        if (clock.GetUtcNow() < request.RestoreUntil) throw new InvalidOperationException("Restore window has not expired.");
-        var holds = state.LegalHolds.Where(IsActiveHold).Where(x => x.ResourceRef == request.ResourceId
-            || x.ResourceRef == $"tenant:{request.ResourceId}" || x.ResourceRef == "*").ToArray();
-        if (holds.Length > 0) throw new InvalidOperationException("Legal hold blocks physical purge.");
-        var manifest = JsonSerializer.Serialize(new { request.Id, request.ResourceType, request.ResourceId, request.DeletedAt });
-        var manifestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
-        if (request.ResourceType.Equals("Tenant", StringComparison.OrdinalIgnoreCase))
-            await tenantPurge.PurgeAsync(tenantId, cancellationToken);
-        request.Status = "Purged";
-        var proof = new DeletionProof
+        var current = await store.GetAsync(tenantId.ToString(), cancellationToken)
+            ?? throw new KeyNotFoundException("Deletion request not found.");
+        if (current.IsPurged)
         {
-            RequestId = request.Id, ResourceType = request.ResourceType, ResourceId = request.ResourceId,
-            PurgedAt = clock.GetUtcNow(), ManifestHash = manifestHash,
-            RemainingBackupIds = state.Backups.Where(x => x.TenantId == tenantId).Select(x => x.Id).ToArray()
-        };
-        proof.ProofHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-            JsonSerializer.Serialize(new { proof.Id, proof.RequestId, proof.ManifestHash, proof.PurgedAt })))).ToLowerInvariant();
-        state.DeletionProofs.Add(proof);
-        return (true, proof);
-    }, cancellationToken, true);
+            var existing = current.DeletionProofs.FirstOrDefault(proof => proof.RequestId == requestId);
+            if (existing is not null) return existing;
+            throw new InvalidOperationException("Tenant lifecycle has been purged.");
+        }
+        var request = Find(current.DeletionRequests, requestId);
+        if (request.Status == "Purged") throw new InvalidOperationException("Deletion request is already purged.");
+        var isTenantPurge = request.ResourceType.Equals("Tenant", StringComparison.OrdinalIgnoreCase);
+
+        if (isTenantPurge)
+        {
+            if (request.Status != "Purging")
+            {
+                using (var purge = await TenantPurgeFence.BeginPurgeAsync(tenantId, cancellationToken))
+                using (TenantPurgeFence.AllowPurgeWrites(tenantId))
+                {
+                    try
+                    {
+                        await store.MutateAsync(tenantId.ToString(), state =>
+                        {
+                            var pending = state ?? throw new InvalidOperationException("Lifecycle tombstone disappeared during purge.");
+                            if (pending.TenantId == Guid.Empty) pending.TenantId = tenantId;
+                            else if (pending.TenantId != tenantId)
+                                throw new UnauthorizedAccessException("Lifecycle state belongs to another tenant.");
+                            if (pending.IsPurged) throw new InvalidOperationException("Tenant lifecycle has been purged.");
+
+                            var pendingRequest = Find(pending.DeletionRequests, requestId);
+                            ValidateTenantObjectKeys(tenantId, pending);
+                            if (pendingRequest.Status != "Purging")
+                                ValidatePurgeEligibility(pending, pendingRequest);
+
+                            pendingRequest.Status = "Purging";
+                            pendingRequest.PurgeStartedAt ??= clock.GetUtcNow();
+                            return pending;
+                        }, cancellationToken);
+                    }
+                    catch
+                    {
+                        // Validation can fail before the tombstone commits; only keep admission closed after a durable Purging state.
+                        if (!await TenantPurgeStateInspector.IsPurgeActiveAsync(db, store, tenantId))
+                            purge.AbortBeforeDurableState();
+                        throw;
+                    }
+
+                    var tenant = db.Tenants.SingleOrDefault(x => x.Id == tenantId);
+                    if (tenant is not null) tenant.Status = "Purging";
+                    await db.SaveChangesAsync(cancellationToken);
+                }
+            }
+
+            await tenantPurge.PurgeAsync(tenantId, cancellationToken);
+        }
+
+        using var purgeWrites = isTenantPurge ? TenantPurgeFence.AllowPurgeWrites(tenantId) : null;
+        var finalized = await store.MutateAsync(tenantId.ToString(), state =>
+        {
+            var pending = state ?? throw new InvalidOperationException("Lifecycle tombstone disappeared during purge.");
+            if (pending.TenantId == Guid.Empty) pending.TenantId = tenantId;
+            else if (pending.TenantId != tenantId)
+                throw new UnauthorizedAccessException("Lifecycle state belongs to another tenant.");
+            if (pending.IsPurged) throw new InvalidOperationException("Tenant lifecycle has been purged.");
+            if (!isTenantPurge && pending.IsPurging)
+                throw new InvalidOperationException("Tenant lifecycle is being purged.");
+
+            var pendingRequest = Find(pending.DeletionRequests, requestId);
+            if (!isTenantPurge && pendingRequest.Status != "Purging")
+                ValidatePurgeEligibility(pending, pendingRequest);
+            var manifest = JsonSerializer.Serialize(new { pendingRequest.Id, pendingRequest.ResourceType,
+                pendingRequest.ResourceId, pendingRequest.DeletedAt });
+            var manifestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(manifest))).ToLowerInvariant();
+            pendingRequest.Status = "Purged";
+            pendingRequest.PurgedAt = clock.GetUtcNow();
+            var proof = new DeletionProof
+            {
+                RequestId = pendingRequest.Id, ResourceType = pendingRequest.ResourceType, ResourceId = pendingRequest.ResourceId,
+                PurgedAt = clock.GetUtcNow(), ManifestHash = manifestHash, RemainingBackupIds = []
+            };
+            proof.ProofHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                JsonSerializer.Serialize(new { proof.Id, proof.RequestId, proof.ManifestHash, proof.PurgedAt })))).ToLowerInvariant();
+            if (isTenantPurge)
+            {
+                pending.DeletionRequests.Clear();
+                pending.LegalHolds.Clear();
+                pending.RetentionPolicies.Clear();
+                pending.Archives.Clear();
+                pending.Backups.Clear();
+                pending.Rights.Clear();
+                pending.Licenses.Clear();
+            }
+            pending.DeletionProofs.Add(proof);
+            return pending;
+        }, cancellationToken);
+        return finalized.DeletionProofs.Single(proof => proof.RequestId == requestId);
+    }
 
     public Task<RightsRecord> RecordRightsAsync(Guid tenantId, RightsRecord rights,
         CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
@@ -211,65 +297,97 @@ public sealed class DataLifecycleService(JsonDocumentStore<DataLifecycleState> s
         var purged = 0;
         foreach (var state in states)
         {
-            var due = state.DeletionRequests.Where(x => x.Status == "SoftDeleted" && x.RestoreUntil <= clock.GetUtcNow()).ToArray();
+            var due = state.DeletionRequests.Where(x => x.Status == "Purging"
+                || (x.Status == "SoftDeleted" && x.RestoreUntil <= clock.GetUtcNow())).ToArray();
             foreach (var request in due)
             {
-                var blocked = state.LegalHolds.Where(IsActiveHold).Any(x => x.ResourceRef == request.ResourceId
-                    || x.ResourceRef == $"tenant:{request.ResourceId}" || x.ResourceRef == "*");
+                var blocked = state.LegalHolds.Where(IsActiveHold).Any(hold => BlocksPurge(hold, request));
                 if (blocked) continue;
                 await rlsScope.ExecuteAsync(state.TenantId, null,
                     token => PurgeAsync(state.TenantId, request.Id, "PURGE", token), cancellationToken);
                 purged++;
+                if (request.ResourceType.Equals("Tenant", StringComparison.OrdinalIgnoreCase)) break;
             }
         }
         return purged;
     }
 
-    public Task<LifecycleEvaluation> EvaluateAsync(Guid tenantId, CancellationToken cancellationToken) =>
-        MutateAsync(tenantId, state =>
+    public async Task<LifecycleEvaluation> EvaluateAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var state = await GetAsync(tenantId, cancellationToken);
+        var due = state.DeletionRequests.Where(x => x.Status == "SoftDeleted" && x.RestoreUntil <= clock.GetUtcNow()).ToArray();
+        var holds = state.LegalHolds.Where(IsActiveHold).ToArray();
+        var blocked = due.Where(request => holds.Any(hold => BlocksPurge(hold, request))).Select(x => x.Id).ToArray();
+        return new LifecycleEvaluation
         {
-            var due = state.DeletionRequests.Where(x => x.Status == "SoftDeleted" && x.RestoreUntil <= clock.GetUtcNow()).ToArray();
-            var holds = state.LegalHolds.Where(IsActiveHold).ToArray();
-            var blocked = due.Where(x => holds.Any(h => h.ResourceRef == x.ResourceId || h.ResourceRef == "*")).Select(x => x.Id).ToArray();
-            return (false, new LifecycleEvaluation
-            {
-                ArchiveCandidates = state.RetentionPolicies.Select(x => x.DataClass).ToArray(),
-                PurgeCandidates = due.Select(x => x.Id).ToArray(), LegalHoldBlocked = blocked
-            });
-        }, cancellationToken);
+            ArchiveCandidates = state.RetentionPolicies.Select(x => x.DataClass).ToArray(),
+            PurgeCandidates = due.Select(x => x.Id).ToArray(), LegalHoldBlocked = blocked
+        };
+    }
 
     private Task<T> MutateAsync<T>(Guid tenantId, Func<DataLifecycleState, (bool Changed, T Result)> mutation,
-        CancellationToken cancellationToken) => MutateCoreAsync(tenantId, state => Task.FromResult(mutation(state)), cancellationToken);
+        CancellationToken cancellationToken) => MutateCoreAsync(tenantId, state => Task.FromResult(mutation(state)),
+        cancellationToken, allowPurged: false);
 
     private Task<T> MutateAsync<T>(Guid tenantId, Func<DataLifecycleState, Task<(bool Changed, T Result)>> mutation,
-        CancellationToken cancellationToken, bool asyncMutation) => MutateCoreAsync(tenantId, mutation, cancellationToken);
+        CancellationToken cancellationToken, bool allowPurged = false) => MutateCoreAsync(tenantId, mutation,
+        cancellationToken, allowPurged);
 
     private async Task<T> MutateCoreAsync<T>(Guid tenantId,
-        Func<DataLifecycleState, Task<(bool Changed, T Result)>> mutation, CancellationToken cancellationToken)
+        Func<DataLifecycleState, Task<(bool Changed, T Result)>> mutation, CancellationToken cancellationToken,
+        bool allowPurged)
     {
-        await gate.WaitAsync(cancellationToken);
-        try
+        var result = default(T);
+        await store.MutateAsync(tenantId.ToString(), async state =>
         {
-            var state = await store.GetAsync(tenantId.ToString(), cancellationToken) ?? new DataLifecycleState();
-            if (state.TenantId == Guid.Empty) state.TenantId = tenantId;
-            else if (state.TenantId != tenantId) throw new UnauthorizedAccessException("Lifecycle state belongs to another tenant.");
-            var (changed, result) = await mutation(state);
-            if (changed)
-            {
-                await store.PutAsync(tenantId.ToString(), state, cancellationToken);
-                await db.SaveChangesAsync(cancellationToken);
-            }
-            return result;
+            var current = state ?? new DataLifecycleState { TenantId = tenantId };
+            if (current.TenantId == Guid.Empty) current.TenantId = tenantId;
+            else if (current.TenantId != tenantId) throw new UnauthorizedAccessException("Lifecycle state belongs to another tenant.");
+            if ((current.IsPurged || current.IsPurging) && !allowPurged)
+                throw new InvalidOperationException("Tenant lifecycle is being purged or has been purged.");
+            var (changed, mutationResult) = await mutation(current);
+            if (changed) await db.SaveChangesAsync(cancellationToken);
+            result = mutationResult;
+            return current;
+        }, cancellationToken);
+        return result!;
+    }
+
+    private void ValidatePurgeEligibility(DataLifecycleState state, DeletionRequestRecord request)
+    {
+        if (request.Status == "Purged") throw new InvalidOperationException("Deletion request is already purged.");
+        if (request.Status == "Restored") throw new InvalidOperationException("Restored deletion request cannot be purged.");
+        if (request.Status != "SoftDeleted") throw new InvalidOperationException("Deletion request is not purgeable.");
+        if (clock.GetUtcNow() < request.RestoreUntil) throw new InvalidOperationException("Restore window has not expired.");
+        if (state.LegalHolds.Any(hold => IsActiveHold(hold) && BlocksPurge(hold, request)))
+            throw new InvalidOperationException("Legal hold blocks physical purge.");
+    }
+
+    private static bool BlocksPurge(LegalHoldRecord hold, DeletionRequestRecord request) =>
+        hold.ResourceRef == request.ResourceId
+        || hold.ResourceRef == $"tenant:{request.ResourceId}"
+        || hold.ResourceRef == "*";
+
+    private static void ValidateTenantObjectKeys(Guid tenantId, DataLifecycleState state)
+    {
+        foreach (var key in state.Archives.Select(x => x.ObjectKey)
+                     .Concat(state.Backups.Select(x => x.ManifestObjectKey))
+                     .Where(key => !string.IsNullOrWhiteSpace(key)))
+        {
+            if (!TenantObjectNamespace.Contains(key, tenantId))
+                throw new InvalidOperationException("Lifecycle object key is outside the tenant namespace.");
         }
-        finally { gate.Release(); }
     }
 
     private static T Find<T>(IEnumerable<T> items, Guid id) where T : class =>
         items.FirstOrDefault(x => (Guid?)typeof(T).GetProperty("Id")!.GetValue(x) == id)
         ?? throw new KeyNotFoundException($"{typeof(T).Name} not found.");
 
-    private static bool IsActiveHold(LegalHoldRecord hold) =>
-        hold.Status == "Active" && hold.StartsAt <= DateTimeOffset.UtcNow && (hold.ExpiresAt is null || hold.ExpiresAt > DateTimeOffset.UtcNow);
+    private bool IsActiveHold(LegalHoldRecord hold)
+    {
+        var now = clock.GetUtcNow();
+        return hold.Status == "Active" && hold.StartsAt <= now && (hold.ExpiresAt is null || hold.ExpiresAt > now);
+    }
 
     private static object FileInfoHash(string path)
     {

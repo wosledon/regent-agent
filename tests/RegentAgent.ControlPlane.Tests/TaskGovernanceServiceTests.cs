@@ -16,9 +16,10 @@ public sealed class TaskGovernanceServiceTests
         try
         {
             var runtime = new AgentRuntimeService(new JsonDocumentStore<AgentContextSnapshot>(Path.Combine(root, "contexts.json")), TimeProvider.System);
+            var tenantId = Guid.NewGuid();
             var taskId = Guid.NewGuid();
-            await runtime.BuildContextAsync(taskId, "system", "memory", "{}", [], "{}", false, CancellationToken.None);
-            var loop = await runtime.RunToolLoopAsync(new ToolLoopRequest
+            await runtime.BuildContextAsync(tenantId, taskId, "system", "memory", "{}", [], "{}", false, CancellationToken.None);
+            var loop = await runtime.RunToolLoopAsync(tenantId, new ToolLoopRequest
             {
                 TaskId = taskId, MaxSteps = 3, CostWarningThreshold = 1m,
                 Steps = [
@@ -28,7 +29,6 @@ public sealed class TaskGovernanceServiceTests
                 ]
             }, CancellationToken.None);
             var service = new TaskGovernanceService(new JsonDocumentStore<TaskGovernanceState>(Path.Combine(root, "state.json")), TimeProvider.System);
-            var tenantId = Guid.NewGuid();
             var employeeId = Guid.NewGuid();
             await service.RegisterTaskTypeAsync(tenantId, new TaskTypeDefinition { TaskType = "engineering.implement" }, CancellationToken.None);
             await service.AssessAsync(tenantId, new CapabilityAssessment { EmployeeId = employeeId, Dimension = "engineering", ModelScore = 0.9m, HistoryScore = 0.8m, ToolFit = 1m, ContextFit = 1m }, CancellationToken.None);

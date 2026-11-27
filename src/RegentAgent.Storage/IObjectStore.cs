@@ -19,4 +19,6 @@ public interface IObjectStore
     Task<StoredObject?> GetMetadataAsync(string objectKey, CancellationToken cancellationToken);
     Task<Stream?> OpenReadAsync(string objectKey, CancellationToken cancellationToken);
     Task<bool> DeleteAsync(string objectKey, CancellationToken cancellationToken);
+    Task<int> DeletePrefixAsync(string prefix, CancellationToken cancellationToken);
+    Task<bool> IsPrefixEmptyAsync(string prefix, CancellationToken cancellationToken);
 }

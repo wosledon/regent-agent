@@ -12,8 +12,16 @@ namespace RegentAgent.ControlPlane.Application;
 internal static class Mappings
 {
     public static DashboardCard ToCard(string id, string title, string summary, string? metric,
-        Severity severity, Freshness freshness, DateTimeOffset dataAt, string href) =>
-        new(id, title, summary, metric, severity, freshness, dataAt, href);
+        Severity severity, Freshness freshness, DateTimeOffset dataAt, string href,
+        string? titleKey = null, string? summaryKey = null, DashboardCardSummaryValues? summaryValues = null,
+        DashboardMetricPresentation? metricPresentation = null) =>
+        new(id, title, summary, metric, severity, freshness, dataAt, href)
+        {
+            TitleKey = titleKey,
+            SummaryKey = summaryKey,
+            SummaryValues = summaryValues,
+            MetricPresentation = metricPresentation
+        };
 
     public static ProjectSummary ToSummary(ProjectRecord project, Freshness freshness) => new(
         project.Id, project.Name, project.Stage, project.Health, project.Owner,
@@ -40,5 +48,7 @@ internal static class Mappings
         approval.Id, approval.ActionType, approval.Title, approval.Impact,
         approval.Severity, approval.State, approval.Requester, approval.CreatedAt, approval.ExpiresAt,
         JsonSerializer.Deserialize<string[]>(approval.OptionsJson) ?? [],
-        JsonSerializer.Deserialize<string[]>(approval.EvidenceJson) ?? []);
+        JsonSerializer.Deserialize<string[]>(approval.EvidenceJson) ?? [],
+        approval.TargetEmployeeId, approval.TargetCandidateId, approval.TargetPositionId,
+        approval.ConsumedAt, approval.ConsumedBy, approval.DecidedBy, approval.DecidedAt);
 }

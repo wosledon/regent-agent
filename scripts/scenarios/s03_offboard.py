@@ -1,4 +1,6 @@
 from scenario_support import ApiClient, ScenarioFailure, create_project_with_plan, hire_employee
+import json
+import time
 
 CP = "http://localhost:5080"
 
@@ -23,8 +25,21 @@ def run():
     }, headers=cp.agent_headers(token))
     if not captured["success"]:
         raise ScenarioFailure(s, "capture-private-memory", "Agent could not capture personal memory")
-    approval = cp.create_approval(s, "employee.offboard", f"Offboard {employee['displayName']}")
+    approval = cp.create_approval(s, "employee.offboard", f"Offboard {employee['displayName']}",
+        targetEmployeeId=employee["id"])
     cp.expect(s, "offboard", "POST", f"/v1/employees/{employee['id']}/offboard", {"approvalId": approval["id"]}, status=204)
+    deadline = time.monotonic() + 45
+    while True:
+        messages, _ = cp.expect(s, "outbox-poll", "GET", "/v1/outbox")
+        event = next((item for item in messages if item["eventType"] == "approval.execution.committed"
+            and json.loads(item["payloadJson"]).get("approval_id") == approval["id"]), None)
+        if event and event["status"] == "Processed":
+            break
+        if event and event["status"] == "Quarantined":
+            raise ScenarioFailure(s, "outbox-poll", f"approval execution event quarantined: {event.get('lastError')}")
+        if time.monotonic() >= deadline:
+            raise ScenarioFailure(s, "outbox-poll", "approval execution event was not processed before timeout")
+        time.sleep(1)
     detail, _ = cp.expect(s, "project-after-offboard", "GET", f"/v1/projects/{linked['projectId']}")
     task = next(item for item in detail["tasks"] if item["id"] == claim["taskId"])
     if task["status"] != "Interrupted":
@@ -42,7 +57,8 @@ def run():
     })
     if status != 204:
         raise ScenarioFailure(s, "reclaim", f"interrupted task was reclaimable, HTTP {status}", status)
-    memories, _ = cp.expect(s, "owner-memory-search", "GET", f"/v1/memories?query={marker}")
+    # The owner search is defense in depth only; ApprovalExecutionServiceTests proves direct-ID denial after rehire.
+    memories, _ = cp.expect(s, "owner-memory-search-defense-in-depth", "GET", f"/v1/memories?query={marker}")
     if memories:
         raise ScenarioFailure(s, "private-memory-isolation", "departed employee private memory remained visible")
     return {"tenantId": tenant, "employeeId": employee["id"], "taskId": claim["taskId"]}

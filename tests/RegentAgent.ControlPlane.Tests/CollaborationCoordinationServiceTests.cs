@@ -256,7 +256,7 @@ public sealed class CollaborationCoordinationServiceTests
             var tokens = new AgentAssignmentTokenService(new FixedAgentKeyProvider(), identityOptions);
             var delivery = new DeliveryService(new JsonDocumentStore<ProjectDeliveryState>(Path.Combine(root, "delivery.json")), TimeProvider.System);
             var projection = new DeliveryRuntimeProjectionService(db, delivery, audit, TimeProvider.System);
-            var execution = new TaskExecutionService(db, new LocalFileObjectStore(root), TimeProvider.System, audit, tokens, projection, new AllowQuotaGuard());
+            var execution = new TaskExecutionService(db, new LocalFileObjectStore(root), TimeProvider.System, audit, tokens, projection);
             AgentIdentityModel Identity(Guid employeeId, Guid taskId) => new(tenantId, employeeId, taskId, "runner",
                 ["tasks:execute"], Guid.NewGuid().ToString("N"), now, now.AddHours(1));
             var outsiderId = db.Employees.Single(x => x.TenantId == OtherTenantId).Id;

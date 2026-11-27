@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace RegentAgent.Contracts.Governance;
 
 public sealed class DeletionRequestRecord
@@ -9,6 +11,8 @@ public sealed class DeletionRequestRecord
     public string Reason { get; set; } = string.Empty;
     public DateTimeOffset DeletedAt { get; set; }
     public DateTimeOffset RestoreUntil { get; set; }
+    public DateTimeOffset? PurgeStartedAt { get; set; }
+    public DateTimeOffset? PurgedAt { get; set; }
     public string Status { get; set; } = "SoftDeleted";
 }
 
@@ -119,4 +123,18 @@ public sealed class DataLifecycleState
     public List<BackupRunRecord> Backups { get; set; } = [];
     public List<RightsRecord> Rights { get; set; } = [];
     public List<LicenseRecord> Licenses { get; set; } = [];
+
+    [JsonIgnore]
+    public bool IsPurging => DeletionRequests.Any(request => request.Status == "Purging");
+
+    [JsonIgnore]
+    public bool IsPurged => DeletionProofs.Any(IsTenantPurgeProof);
+
+    [JsonIgnore]
+    public DateTimeOffset? PurgedAt => DeletionProofs.Where(IsTenantPurgeProof)
+        .Select(proof => (DateTimeOffset?)proof.PurgedAt).Max();
+
+    private bool IsTenantPurgeProof(DeletionProof proof) =>
+        proof.ResourceType.Equals("Tenant", StringComparison.OrdinalIgnoreCase)
+        && Guid.TryParse(proof.ResourceId, out var tenantId) && tenantId == TenantId;
 }

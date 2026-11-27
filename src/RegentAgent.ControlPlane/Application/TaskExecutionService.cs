@@ -2,7 +2,6 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RegentAgent.AgentIdentity;
-using RegentAgent.Contracts.Billing;
 using RegentAgent.Contracts.Runtime;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.Storage;
@@ -11,7 +10,7 @@ namespace RegentAgent.ControlPlane.Application;
 
 public sealed class TaskExecutionService(RegentDbContext db, IObjectStore objects, TimeProvider clock,
     AuditIntegrityService audit, AgentAssignmentTokenService assignmentTokens,
-    DeliveryRuntimeProjectionService deliveryProjection, ITenantQuotaGuard quotaGuard)
+    DeliveryRuntimeProjectionService deliveryProjection)
 {
     public async Task<TaskClaim?> ClaimAsync(string runnerId, Guid tenantId, CancellationToken cancellationToken)
     {
@@ -21,10 +20,10 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
         var now = clock.GetUtcNow();
         var candidates = await db.Tasks.Where(x => x.TenantId == tenantId &&
             (x.Status == "Pending" || x.Status == "Assigned" || x.Status == "InProgress")
+            && x.AssigneeEmployeeId != null
             && !db.Employees.Any(employee => employee.TenantId == tenantId
                 && employee.State == RegentAgent.Contracts.Enums.EmployeeState.Terminated
-                && (employee.Id == x.AssigneeEmployeeId
-                    || (x.AssigneeEmployeeId == null && employee.DisplayName == x.Assignee))))
+                && employee.Id == x.AssigneeEmployeeId))
             .ToListAsync(cancellationToken);
         var task = candidates.Where(x => x.Status == "Pending").OrderBy(x => x.UpdatedAt).FirstOrDefault()
             ?? candidates.Where(x => x.Status == "Assigned" && (x.LeaseExpiresAt is null || x.LeaseExpiresAt <= now))
@@ -37,8 +36,12 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
             return null;
         }
 
-        var employeeName = string.IsNullOrWhiteSpace(task.Assignee) ? "Local Agent" : task.Assignee;
-        var employee = await ResolveEmployeeAsync(tenantId, employeeName, task.AssigneeEmployeeId, cancellationToken);
+        var employee = await ResolveEmployeeAsync(tenantId, task.AssigneeEmployeeId, cancellationToken);
+        var period = db.EmploymentPeriods.Local.FirstOrDefault(x => x.TenantId == tenantId
+            && x.EmployeeId == employee.Id && x.EndedAt == null)
+            ?? await db.EmploymentPeriods.AsNoTracking().FirstOrDefaultAsync(
+                x => x.TenantId == tenantId && x.EmployeeId == employee.Id && x.EndedAt == null, cancellationToken)
+            ?? throw new InvalidOperationException("Active employment is required to issue an assignment token.");
         task.Assignee = employee.DisplayName;
         task.AssigneeEmployeeId = employee.Id;
         task.AccountableEmployeeId ??= employee.Id;
@@ -62,18 +65,13 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
         await deliveryProjection.MarkRuntimeClaimedAsync(tenantId, task.Id, cancellationToken);
         var scopes = new HashSet<string>(AgentScopes.Baseline, StringComparer.OrdinalIgnoreCase);
-        var period = await db.EmploymentPeriods.AsNoTracking().FirstOrDefaultAsync(
-            x => x.TenantId == tenantId && x.EmployeeId == employee.Id && x.EndedAt == null, cancellationToken);
-        if (period is not null)
-        {
-            var position = await db.Positions.AsNoTracking().SingleOrDefaultAsync(
-                x => x.TenantId == tenantId && x.Id == period.PositionId, cancellationToken);
-            if (position is not null)
-                foreach (var capability in JsonSerializer.Deserialize<string[]>(position.CapabilitiesJson) ?? [])
-                    scopes.Add(capability);
-        }
+        var position = await db.Positions.AsNoTracking().SingleOrDefaultAsync(
+            x => x.TenantId == tenantId && x.Id == period.PositionId, cancellationToken);
+        if (position is not null)
+            foreach (var capability in JsonSerializer.Deserialize<string[]>(position.CapabilitiesJson) ?? [])
+                scopes.Add(capability);
         var scopeArray = scopes.ToArray();
-        var assignment = assignmentTokens.Issue(new AgentAssignmentRequest(tenantId, employee.Id, task.Id, runnerId, scopeArray));
+        var assignment = assignmentTokens.Issue(new AgentAssignmentRequest(tenantId, employee.Id, task.Id, runnerId, scopeArray, period.Id));
         return new TaskClaim(task.Id, task.Title, task.TaskType, task.ProjectId, task.LeaseToken,
             task.LeaseExpiresAt.Value, tenantId, employee.Id, assignment.Token, assignment.Identity.ExpiresAt, scopeArray, runnerId);
     }
@@ -122,8 +120,7 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
             delegation.Version++;
         }
         var project = await db.Projects.AsNoTracking().SingleAsync(x => x.TenantId == tenantId && x.Id == task.ProjectId, cancellationToken);
-        var employeeName = string.IsNullOrWhiteSpace(task.Assignee) ? "Local Runner" : task.Assignee;
-        var employee = await ResolveEmployeeAsync(tenantId, employeeName, task.AssigneeEmployeeId, cancellationToken);
+        var employee = await ResolveEmployeeAsync(tenantId, task.AssigneeEmployeeId, cancellationToken);
 
         var workId = Guid.NewGuid();
         db.WorkEntries.Add(new WorkEntryRecord
@@ -146,7 +143,7 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
             Length = stored.Length, UploadState = "Ready", CreatedAt = clock.GetUtcNow()
         });
 
-        await audit.AppendAsync(tenantId, "task.completed", employeeName,
+        await audit.AppendAsync(tenantId, "task.completed", employee.DisplayName,
             new { task_id = task.Id, status = task.Status, artifact_id = artifactId, project = project.Name }, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
         if (transaction is not null) await transaction.CommitAsync(cancellationToken);
@@ -154,22 +151,42 @@ public sealed class TaskExecutionService(RegentDbContext db, IObjectStore object
         return true;
     }
 
-    private async Task<EmployeeRecord> ResolveEmployeeAsync(Guid tenantId, string employeeName, Guid? employeeId,
+    private async Task<EmployeeRecord> ResolveEmployeeAsync(Guid tenantId, Guid? employeeId,
         CancellationToken cancellationToken)
     {
-        var employee = employeeId is { } id
-            ? await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == id, cancellationToken)
-            : null;
-        if (employeeId is not null && employee is null) throw new KeyNotFoundException("Assigned employee not found.");
-        employee ??= await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.DisplayName == employeeName, cancellationToken);
-        if (employee is not null) return employee;
-        await quotaGuard.EnsureAsync(tenantId, "employees", 1, cancellationToken);
-        employee = new EmployeeRecord
-        {
-            Id = Guid.NewGuid(), TenantId = tenantId, EmployeeNo = $"EMP-{Guid.NewGuid():N}"[..12],
-            DisplayName = employeeName, Position = "Runner", State = RegentAgent.Contracts.Enums.EmployeeState.Active
-        };
-        db.Employees.Add(employee);
+        if (employeeId is not { } id)
+            throw new InvalidOperationException("Task must be explicitly assigned to a stable employee before execution.");
+        var employee = await db.Employees.SingleOrDefaultAsync(
+            x => x.TenantId == tenantId && x.Id == id, cancellationToken)
+            ?? throw new KeyNotFoundException("Assigned employee not found.");
+        if (employee.State == RegentAgent.Contracts.Enums.EmployeeState.Terminated)
+            throw new InvalidOperationException("Terminated employees cannot execute tasks.");
+        await EnsureActiveEmploymentAsync(employee, cancellationToken);
         return employee;
+    }
+
+    private async Task EnsureActiveEmploymentAsync(EmployeeRecord employee, CancellationToken cancellationToken)
+    {
+        if (await db.EmploymentPeriods.AnyAsync(x => x.TenantId == employee.TenantId
+                && x.EmployeeId == employee.Id && x.EndedAt == null, cancellationToken))
+            return;
+        var position = await db.Positions.FirstOrDefaultAsync(x => x.TenantId == employee.TenantId
+            && x.Name == "Runner", cancellationToken);
+        if (position is null)
+        {
+            position = new PositionRecord
+            {
+                Id = Guid.NewGuid(), TenantId = employee.TenantId, Name = "Runner",
+                Responsibilities = "Execute assigned runtime work.", Status = "Filled"
+            };
+            position.Path = PositionPath.Root(position.Id);
+            db.Positions.Add(position);
+        }
+        employee.Position = position.Name;
+        db.EmploymentPeriods.Add(new EmploymentPeriodRecord
+        {
+            Id = Guid.NewGuid(), TenantId = employee.TenantId, EmployeeId = employee.Id,
+            PositionId = position.Id, Kind = "Primary", StartedAt = clock.GetUtcNow()
+        });
     }
 }

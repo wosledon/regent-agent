@@ -16,6 +16,7 @@ public sealed class S3ObjectStoreOptions
     public bool ForcePathStyle { get; set; } = true;
     public int TimeoutSeconds { get; set; } = 120;
     public int MaxRetries { get; set; } = 2;
+    public int DeleteRetryDelayMilliseconds { get; set; } = 100;
 
     public void Validate()
     {
@@ -31,7 +32,8 @@ public sealed class S3ObjectStoreOptions
         if (string.IsNullOrWhiteSpace(Region) || string.IsNullOrWhiteSpace(Bucket)
             || string.IsNullOrWhiteSpace(AccessKey) || string.IsNullOrWhiteSpace(SecretKey))
             throw new InvalidOperationException("S3 region, bucket and credentials are required.");
-        if (TimeoutSeconds is < 1 or > 600 || MaxRetries is < 0 or > 5)
+        if (TimeoutSeconds is < 1 or > 600 || MaxRetries is < 0 or > 5
+            || DeleteRetryDelayMilliseconds is < 0 or > 5000)
             throw new InvalidOperationException("S3 HTTP limits are invalid.");
     }
 
@@ -158,6 +160,90 @@ public sealed class S3ObjectStore(IAmazonS3 client, S3ObjectStoreOptions options
             return false;
         }
     }
+
+    public async Task<int> DeletePrefixAsync(string prefix, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(prefix) || prefix.StartsWith('/') || prefix.Contains('\\'))
+            throw new ArgumentException("Invalid object prefix.", nameof(prefix));
+        var normalized = prefix.TrimEnd('/');
+        if (normalized.Length == 0) throw new ArgumentException("Invalid object prefix.", nameof(prefix));
+        ValidateKey(normalized);
+        var deletedKeys = new HashSet<string>(StringComparer.Ordinal);
+        string? continuationToken = null;
+        do
+        {
+            var list = await client.ListObjectsV2Async(new ListObjectsV2Request
+            {
+                BucketName = options.Bucket,
+                Prefix = prefix,
+                ContinuationToken = continuationToken
+            }, cancellationToken);
+            var listed = list.S3Objects ?? [];
+            if (listed.Count > 0)
+            {
+                var request = new DeleteObjectsRequest { BucketName = options.Bucket };
+                foreach (var item in listed) request.AddKey(item.Key);
+                foreach (var key in await DeleteBatchAsync(request, cancellationToken)) deletedKeys.Add(key);
+            }
+            continuationToken = list.IsTruncated == true ? list.NextContinuationToken : null;
+        } while (continuationToken is not null);
+
+        var verification = await client.ListObjectsV2Async(new ListObjectsV2Request
+        {
+            BucketName = options.Bucket, Prefix = prefix, MaxKeys = 1
+        }, cancellationToken);
+        if ((verification.S3Objects?.Count ?? 0) > 0)
+            throw new InvalidOperationException($"S3 prefix '{prefix}' is not empty after deletion.");
+        return deletedKeys.Count;
+    }
+
+    public async Task<bool> IsPrefixEmptyAsync(string prefix, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(prefix) || prefix.StartsWith('/') || prefix.Contains('\\'))
+            throw new ArgumentException("Invalid object prefix.", nameof(prefix));
+        var normalized = prefix.TrimEnd('/');
+        if (normalized.Length == 0) throw new ArgumentException("Invalid object prefix.", nameof(prefix));
+        ValidateKey(normalized);
+        var response = await client.ListObjectsV2Async(new ListObjectsV2Request
+        {
+            BucketName = options.Bucket, Prefix = prefix, MaxKeys = 1
+        }, cancellationToken);
+        return (response.S3Objects?.Count ?? 0) == 0;
+    }
+
+    private async Task<IReadOnlyList<string>> DeleteBatchAsync(DeleteObjectsRequest request,
+        CancellationToken cancellationToken)
+    {
+        var deleted = new HashSet<string>(StringComparer.Ordinal);
+        var remaining = request.Objects.Select(item => item.Key).ToHashSet(StringComparer.Ordinal);
+        var maxAttempts = options.MaxRetries + 1;
+        for (var attempt = 1; attempt <= maxAttempts && remaining.Count > 0; attempt++)
+        {
+            var retryRequest = new DeleteObjectsRequest { BucketName = options.Bucket };
+            foreach (var key in remaining) retryRequest.AddKey(key);
+            var response = await client.DeleteObjectsAsync(retryRequest, cancellationToken);
+            var deletedObjects = response.DeletedObjects ?? [];
+            foreach (var item in deletedObjects) deleted.Add(item.Key);
+            remaining.ExceptWith(deletedObjects.Select(item => item.Key));
+            var errors = response.DeleteErrors?.ToArray() ?? [];
+            if (errors.Length == 0) continue;
+            var blocked = errors.FirstOrDefault(error => !IsRetryableDeleteError(error.Code));
+            if (blocked is not null)
+                throw new InvalidOperationException($"S3 delete failed for '{blocked.Key}': {blocked.Code}.");
+            remaining = errors.Select(error => error.Key).ToHashSet(StringComparer.Ordinal);
+            if (attempt < maxAttempts && remaining.Count > 0)
+            {
+                var delay = options.DeleteRetryDelayMilliseconds * Math.Pow(2, attempt - 1);
+                await Task.Delay(TimeSpan.FromMilliseconds(delay), cancellationToken);
+            }
+        }
+        if (remaining.Count > 0)
+            throw new InvalidOperationException("S3 prefix deletion exhausted its bounded retries.");
+        return deleted.ToArray();
+    }
+
+    private static bool IsRetryableDeleteError(string? code) => code is "500" or "InternalError"
+        or "503" or "ServiceUnavailable" or "SlowDown" or "RequestTimeout";
 
     private static void ValidateKey(string objectKey)
     {

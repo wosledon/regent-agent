@@ -116,14 +116,15 @@ public sealed class ObservabilityService(
         await alerts.PutAsync(alert.Id.ToString(), alert, cancellationToken);
     }
 
-    public async Task<AlertSilenceRecord> SilenceAlertAsync(AlertSilenceRequest request, CancellationToken cancellationToken)
+    public async Task<AlertSilenceRecord> SilenceAlertAsync(AlertSilenceRequest request, string operatorId,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Fingerprint) || string.IsNullOrWhiteSpace(request.Reason)
-            || string.IsNullOrWhiteSpace(request.ApprovedBy) || request.Minutes is < 1 or > 1440)
+            || string.IsNullOrWhiteSpace(operatorId) || request.Minutes is < 1 or > 1440)
             throw new InvalidOperationException("Silence requires a fingerprint, reason, approver and valid expiry.");
         var record = new AlertSilenceRecord
         {
-            Fingerprint = request.Fingerprint, Reason = request.Reason, ApprovedBy = request.ApprovedBy,
+            Fingerprint = request.Fingerprint, Reason = request.Reason, ApprovedBy = operatorId,
             ExpiresAt = clock.GetUtcNow().AddMinutes(request.Minutes), CreatedAt = clock.GetUtcNow()
         };
         await silences.PutAsync(record.Id.ToString(), record, cancellationToken);

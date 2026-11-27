@@ -13,6 +13,8 @@ public sealed class AgentAssignmentTokenService(IAgentIdentityKeyProvider keys, 
         options.Validate();
         if (request.Scopes.Any(scope => scope.Contains(' ') || scope.StartsWith("admin", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("Employee assignment scopes are invalid.");
+        if (request.CredentialEpoch is not { } credentialEpoch || credentialEpoch == Guid.Empty)
+            throw new InvalidOperationException("Employee assignment credential epoch is required.");
         var now = DateTimeOffset.UtcNow;
         var expires = now.AddMinutes(options.LifetimeMinutes);
         var tokenId = Guid.NewGuid().ToString("N");
@@ -23,6 +25,7 @@ public sealed class AgentAssignmentTokenService(IAgentIdentityKeyProvider keys, 
             new("aud", options.GatewayAudience),
             new("tenant_id", request.TenantId.ToString()),
             new("employee_id", request.EmployeeId.ToString()),
+            new("credential_epoch", credentialEpoch.ToString()),
             new("scopes", string.Join(' ', request.Scopes)),
             new("jti", tokenId),
             new("iat", now.ToUnixTimeSeconds().ToString(), System.Security.Claims.ClaimValueTypes.Integer64)
@@ -33,7 +36,7 @@ public sealed class AgentAssignmentTokenService(IAgentIdentityKeyProvider keys, 
         var jwt = new JwtSecurityToken(options.Issuer, null, claims, now.UtcDateTime, expires.UtcDateTime,
             new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
         var identity = new AgentIdentity(request.TenantId, request.EmployeeId, request.TaskId, request.RunnerId,
-            request.Scopes.ToArray(), tokenId, now, expires);
+            request.Scopes.ToArray(), tokenId, now, expires, credentialEpoch);
         return new AgentAssignmentToken(new JwtSecurityTokenHandler().WriteToken(jwt), identity);
     }
 }

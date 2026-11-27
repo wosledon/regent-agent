@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using RegentAgent.Contracts.Identity;
 using RegentAgent.ControlPlane.Data;
+using RegentAgent.ControlPlane.Identity;
 
 namespace RegentAgent.ControlPlane.Application;
 
@@ -151,9 +152,14 @@ public sealed partial class IdentityService
                 ?? throw new UnauthorizedAccessException("Emergency access account is unavailable.");
             return await rlsScope.ExecuteAsync(request.TenantId, user.Id, async token =>
             {
-                var role = await db.Memberships.AsNoTracking().Where(x => x.TenantId == request.TenantId && x.UserId == user.Id)
-                    .Select(x => x.Role).SingleOrDefaultAsync(token) ?? throw new UnauthorizedAccessException("Emergency access account is not a tenant member.");
+                var membership = await db.Memberships.AsNoTracking()
+                    .Where(x => x.TenantId == request.TenantId && x.UserId == user.Id)
+                    .Select(x => new { x.Role, x.CapabilitiesJson }).SingleOrDefaultAsync(token)
+                    ?? throw new UnauthorizedAccessException("Emergency access account is not a tenant member.");
+                var role = membership.Role;
                 if (role is not ("Owner" or "CoOwner")) throw new UnauthorizedAccessException("Emergency access requires an existing owner account.");
+                var capabilities = JsonSerializer.Deserialize<string[]>(membership.CapabilitiesJson) ?? [];
+                var authorityHash = MembershipAuthority.ComputeAuthorityHash(role, capabilities);
                 record.Status = "Used";
                 record.UsedAt = now;
                 await emergencyCredentials.PutAsync(record.Id.ToString(), record, token);
@@ -169,6 +175,7 @@ public sealed partial class IdentityService
                     UserId = user.Id, TenantId = request.TenantId, CreatedAt = now, LastActivityAt = now,
                     ExpiresAt = now.AddMinutes(15), AuthMethod = "Emergency", SessionKind = "Emergency",
                     AllowedActionsJson = JsonSerializer.Serialize(new[] { "sso.restore", "account.access" }, JsonOptions),
+                    AuthorityHash = authorityHash,
                     IdleTimeoutMinutes = 15
                 };
                 await sessions.PutAsync(session.Id.ToString(), session, token);
@@ -186,7 +193,6 @@ public sealed partial class IdentityService
                     actor_type = "Human", user_id = user.Id, session_id = session.Id,
                     expires_at = session.ExpiresAt, purpose = request.Purpose, credential_rotated = true
                 }, token);
-                var capabilities = await LoadCapabilitiesAsync(request.TenantId, user.Id, token);
                 return new EmergencyAccessResult(user.Id, request.TenantId, session.Id, session.ExpiresAt,
                     await DisplayNameAsync(user.Id, request.TenantId, user.DisplayName, token), role, capabilities,
                     rotatedCredential) { Email = user.Email };
@@ -223,6 +229,7 @@ public sealed partial class IdentityService
         var membership = await db.Memberships.SingleAsync(x => x.TenantId == tenantId && x.UserId == userId, cancellationToken);
         membership.CapabilitiesJson = JsonSerializer.Serialize(capabilities, JsonOptions);
         await db.SaveChangesAsync(cancellationToken);
+        await RevokeUserSessionsAsync(tenantId, userId, cancellationToken);
         return capabilities;
     }
 
@@ -269,12 +276,9 @@ public sealed partial class IdentityService
 
     private async Task RevokeNonOidcSessionsAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        foreach (var session in (await sessions.GetAllAsync(cancellationToken)).Where(x =>
-            x.TenantId == tenantId && x.Status == "Active" && x.AuthMethod != "Oidc"))
-        {
-            session.Status = "Revoked";
-            await sessions.PutAsync(session.Id.ToString(), session, cancellationToken);
-        }
+        var active = (await sessions.GetAllAsync(cancellationToken)).Where(x =>
+            x.TenantId == tenantId && x.Status == "Active" && x.AuthMethod != "Oidc");
+        await RevokeSessionsAsync(active, cancellationToken);
     }
 
     private async Task<GroupMappingRefreshResult> RefreshGroupMappingsCoreAsync(Guid tenantId,
@@ -289,6 +293,7 @@ public sealed partial class IdentityService
         var evaluated = 0;
         var updated = 0;
         var denied = 0;
+        var changedUserIds = new HashSet<Guid>();
         foreach (var binding in bindings)
         {
             evaluated++;
@@ -299,12 +304,7 @@ public sealed partial class IdentityService
             {
                 membership.CapabilitiesJson = "[]";
                 denied++;
-                foreach (var session in (await sessions.GetAllAsync(cancellationToken)).Where(x =>
-                    x.TenantId == tenantId && x.UserId == binding.UserId && x.Status == "Active"))
-                {
-                    session.Status = "Revoked";
-                    await sessions.PutAsync(session.Id.ToString(), session, cancellationToken);
-                }
+                changedUserIds.Add(binding.UserId);
                 continue;
             }
             var capabilities = ComputeCapabilities(provider.GroupMappingJson, groups);
@@ -312,16 +312,13 @@ public sealed partial class IdentityService
             if (membership.CapabilitiesJson != serialized)
             {
                 updated++;
-                foreach (var session in (await sessions.GetAllAsync(cancellationToken)).Where(x =>
-                    x.TenantId == tenantId && x.UserId == binding.UserId && x.Status == "Active"))
-                {
-                    session.Status = "Revoked";
-                    await sessions.PutAsync(session.Id.ToString(), session, cancellationToken);
-                }
+                changedUserIds.Add(binding.UserId);
             }
             membership.CapabilitiesJson = serialized;
         }
         await db.SaveChangesAsync(cancellationToken);
+        foreach (var userId in changedUserIds)
+            await RevokeUserSessionsAsync(tenantId, userId, cancellationToken);
         return new GroupMappingRefreshResult(evaluated, updated, denied, clock.GetUtcNow());
     }
 

@@ -75,7 +75,7 @@ public sealed class AlertSilenceRecord
 }
 
 public sealed record AlertAcknowledgementRequest(string Operator);
-public sealed record AlertSilenceRequest(string Fingerprint, string Reason, string ApprovedBy, int Minutes);
+public sealed record AlertSilenceRequest(string Fingerprint, string Reason, int Minutes);
 
 public sealed class BrowserTelemetrySample
 {

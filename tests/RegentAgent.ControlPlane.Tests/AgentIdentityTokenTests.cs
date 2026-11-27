@@ -19,9 +19,10 @@ public sealed class AgentIdentityTokenTests
         var tenantId = Guid.NewGuid();
         var employeeId = Guid.NewGuid();
         var taskId = Guid.NewGuid();
+        var credentialEpoch = Guid.NewGuid();
         var service = new AgentAssignmentTokenService(keys, options);
         var issued = service.Issue(new AgentAssignmentRequest(tenantId, employeeId, taskId, "runner-1",
-            ["tasks:execute", "chat:write", "infer:employee"]));
+            ["tasks:execute", "chat:write", "infer:employee"], credentialEpoch));
 
         var identity = new AgentAssignmentTokenValidator(keys, options).Validate(issued.Token);
         var gatewayIdentity = new AgentAssignmentTokenValidator(keys, options).Validate(issued.Token, "regent-gateway");
@@ -30,6 +31,7 @@ public sealed class AgentIdentityTokenTests
         Assert.Equal(employeeId, identity.EmployeeId);
         Assert.Equal(taskId, identity.TaskId);
         Assert.Equal("runner-1", identity.RunnerId);
+        Assert.Equal(credentialEpoch, identity.CredentialEpoch);
         Assert.Contains("infer:employee", identity.Scopes);
         Assert.Equal(employeeId, gatewayIdentity.EmployeeId);
     }
@@ -39,7 +41,7 @@ public sealed class AgentIdentityTokenTests
     {
         var service = new AgentAssignmentTokenService(keys, options);
         var issued = service.Issue(new AgentAssignmentRequest(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null,
-            ["tasks:execute"]));
+            ["tasks:execute"], Guid.NewGuid()));
         var validator = new AgentAssignmentTokenValidator(keys, options);
         Assert.ThrowsAny<SecurityTokenException>(() => validator.Validate(issued.Token, "regent-ops"));
         Assert.ThrowsAny<SecurityTokenException>(() => validator.Validate(issued.Token[..^4] + "AAAA"));
@@ -63,7 +65,15 @@ public sealed class AgentIdentityTokenTests
     {
         var service = new AgentAssignmentTokenService(keys, options);
         Assert.Throws<InvalidOperationException>(() => service.Issue(new AgentAssignmentRequest(
-            Guid.NewGuid(), Guid.NewGuid(), null, null, ["admin:write"])));
+            Guid.NewGuid(), Guid.NewGuid(), null, null, ["admin:write"], Guid.NewGuid())));
+    }
+
+    [Fact]
+    public void Employee_token_requires_a_credential_epoch()
+    {
+        var service = new AgentAssignmentTokenService(keys, options);
+        Assert.Throws<InvalidOperationException>(() => service.Issue(new AgentAssignmentRequest(
+            Guid.NewGuid(), Guid.NewGuid(), null, null, ["tasks:execute"])));
     }
 
     private sealed class FixedKeyProvider : IAgentIdentityKeyProvider

@@ -14,7 +14,14 @@ public sealed record ApprovalDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset ExpiresAt,
     IReadOnlyList<string> Options,
-    IReadOnlyList<string> EvidenceRefs);
+    IReadOnlyList<string> EvidenceRefs,
+    Guid? TargetEmployeeId = null,
+    Guid? TargetCandidateId = null,
+    Guid? TargetPositionId = null,
+    DateTimeOffset? ConsumedAt = null,
+    Guid? ConsumedBy = null,
+    Guid? DecidedBy = null,
+    DateTimeOffset? DecidedAt = null);
 
 public sealed record ApprovalDecision(string Decision, string Reason);
 
@@ -25,4 +32,7 @@ public sealed record CreateApprovalDto(
     Severity Severity,
     string Requester,
     int ExpiresInMinutes,
-    IReadOnlyList<string> EvidenceRefs);
+    IReadOnlyList<string> EvidenceRefs,
+    Guid? TargetEmployeeId = null,
+    Guid? TargetCandidateId = null,
+    Guid? TargetPositionId = null);

@@ -23,5 +23,5 @@ public sealed class ObjectStoreAuditAnchorStore(IObjectStore objects) : IAuditAn
     }
 
     private static string Key(Guid tenantId, long throughSeq) =>
-        $"tenants/{tenantId:N}/audit-anchors/{throughSeq:D20}.json";
+        $"{TenantObjectNamespace.CanonicalPrefix(tenantId)}audit-anchors/{throughSeq:D20}.json";
 }

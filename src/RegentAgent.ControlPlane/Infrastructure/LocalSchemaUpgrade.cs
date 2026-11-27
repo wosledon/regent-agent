@@ -20,7 +20,7 @@ public static class LocalSchemaUpgrade
                 Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL,
                 Name TEXT NOT NULL, Responsibilities TEXT NOT NULL,
                 CapabilitiesJson TEXT NOT NULL, BudgetMinor INTEGER NOT NULL,
-                ParentPositionId TEXT NULL, Status TEXT NOT NULL, Version INTEGER NOT NULL
+                ParentPositionId TEXT NULL, Path TEXT NOT NULL DEFAULT '', Status TEXT NOT NULL, Version INTEGER NOT NULL
             );
             CREATE INDEX IF NOT EXISTS IX_Positions_TenantId_Name ON Positions (TenantId, Name);
             CREATE TABLE IF NOT EXISTS EmploymentPeriods (
@@ -78,7 +78,8 @@ public static class LocalSchemaUpgrade
             );
             CREATE UNIQUE INDEX IF NOT EXISTS IX_Inbox_TenantId_MessageId ON Inbox (TenantId, MessageId);
             CREATE TABLE IF NOT EXISTS SchemaVersions (
-                Version INTEGER NOT NULL PRIMARY KEY, Name TEXT NOT NULL, AppliedAt TEXT NOT NULL
+                Version INTEGER NOT NULL PRIMARY KEY, Name TEXT NOT NULL, AppliedAt TEXT NOT NULL,
+                Checksum TEXT NULL
             );
             CREATE TABLE IF NOT EXISTS AuditCheckpoints (
                 Id TEXT NOT NULL PRIMARY KEY, TenantId TEXT NOT NULL,
@@ -104,6 +105,10 @@ public static class LocalSchemaUpgrade
                 ON TaskCoordinations (TenantId, TaskId, Kind, Status);
             """;
         await db.Database.ExecuteSqlRawAsync(schema, cancellationToken);
+        var schemaVersionColumns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('SchemaVersions')").ToListAsync(cancellationToken);
+        if (!schemaVersionColumns.Contains("Checksum"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE SchemaVersions ADD COLUMN Checksum TEXT NULL;", cancellationToken);
         var columns = await db.Database.SqlQueryRaw<string>(
             "SELECT name FROM pragma_table_info('AuditRecords')").ToListAsync(cancellationToken);
         if (!columns.Contains("PreviousHash"))
@@ -140,9 +145,56 @@ public static class LocalSchemaUpgrade
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE IdempotencyRecords ADD COLUMN StatusCode INTEGER NOT NULL DEFAULT 200;", cancellationToken);
         if (!idempotencyColumns.Contains("ContentType"))
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE IdempotencyRecords ADD COLUMN ContentType TEXT NOT NULL DEFAULT 'application/json';", cancellationToken);
+        var approvalColumns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('Approvals')").ToListAsync(cancellationToken);
+        if (!approvalColumns.Contains("RequesterUserId"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Approvals ADD COLUMN RequesterUserId TEXT NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000';", cancellationToken);
+        if (!approvalColumns.Contains("TargetEmployeeId"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Approvals ADD COLUMN TargetEmployeeId TEXT NULL;", cancellationToken);
+        if (!approvalColumns.Contains("TargetCandidateId"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Approvals ADD COLUMN TargetCandidateId TEXT NULL;", cancellationToken);
+        if (!approvalColumns.Contains("TargetPositionId"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Approvals ADD COLUMN TargetPositionId TEXT NULL;", cancellationToken);
+        if (!approvalColumns.Contains("ActionHash"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Approvals ADD COLUMN ActionHash TEXT NOT NULL DEFAULT '';", cancellationToken);
+        if (!approvalColumns.Contains("ConsumedAt"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Approvals ADD COLUMN ConsumedAt TEXT NULL;", cancellationToken);
+        if (!approvalColumns.Contains("ConsumedBy"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Approvals ADD COLUMN ConsumedBy TEXT NULL;", cancellationToken);
+        if (!approvalColumns.Contains("DecidedBy"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Approvals ADD COLUMN DecidedBy TEXT NULL;", cancellationToken);
+        if (!approvalColumns.Contains("DecidedAt"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Approvals ADD COLUMN DecidedAt TEXT NULL;", cancellationToken);
+        var outboxColumns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('Outbox')").ToListAsync(cancellationToken);
+        if (!outboxColumns.Contains("NextAttemptAt"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Outbox ADD COLUMN NextAttemptAt TEXT NULL;", cancellationToken);
+        if (!outboxColumns.Contains("LastError"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Outbox ADD COLUMN LastError TEXT NULL;", cancellationToken);
+        var milestoneColumns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('Milestones')").ToListAsync(cancellationToken);
+        if (!milestoneColumns.Contains("TenantId"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Milestones ADD COLUMN TenantId TEXT NOT NULL DEFAULT '';", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync("""
+            UPDATE "Milestones"
+            SET "TenantId" = (SELECT "Projects"."TenantId" FROM "Projects" WHERE "Projects"."Id" = "Milestones"."ProjectId")
+            WHERE "TenantId" IS NULL OR "TenantId" = '';
+            """, cancellationToken);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE INDEX IF NOT EXISTS IX_Milestones_TenantId_ProjectId
+            ON Milestones (TenantId, ProjectId);
+            """, cancellationToken);
         var membershipColumns = await db.Database.SqlQueryRaw<string>(
             "SELECT name FROM pragma_table_info('Memberships')").ToListAsync(cancellationToken);
         if (!membershipColumns.Contains("CapabilitiesJson"))
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE Memberships ADD COLUMN CapabilitiesJson TEXT NOT NULL DEFAULT '[]';", cancellationToken);
+        var positionColumns = await db.Database.SqlQueryRaw<string>(
+            "SELECT name FROM pragma_table_info('Positions')").ToListAsync(cancellationToken);
+        if (!positionColumns.Contains("Path"))
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE Positions ADD COLUMN Path TEXT NOT NULL DEFAULT '';", cancellationToken);
+        var positions = await db.Positions.ToListAsync(cancellationToken);
+        var paths = PositionPath.BuildPaths(positions);
+        foreach (var position in positions) position.Path = paths[position.Id];
+        await db.SaveChangesAsync(cancellationToken);
     }
 }

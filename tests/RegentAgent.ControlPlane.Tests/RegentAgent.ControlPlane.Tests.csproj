@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.1" />
     <PackageReference Include="Moq" Version="4.21.0" />
     <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.23.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
@@ -22,10 +23,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\RegentAgent.AgentIdentity\RegentAgent.AgentIdentity.csproj" />
-    <ProjectReference Include="..\..\src\RegentAgent.ControlPlane\RegentAgent.ControlPlane.csproj" />
+    <ProjectReference Include="..\..\src\RegentAgent.ControlPlane\RegentAgent.ControlPlane.csproj" Aliases="global, RegentAgentControlPlane" />
     <ProjectReference Include="..\..\src\RegentAgent.Agents\RegentAgent.Agents.csproj" />
     <ProjectReference Include="..\..\src\RegentAgent.Observability\RegentAgent.Observability.csproj" />
-    <ProjectReference Include="..\..\src\RegentAgent.Operations\RegentAgent.Operations.csproj" />
+    <ProjectReference Include="..\..\src\RegentAgent.Operations\RegentAgent.Operations.csproj" Aliases="global, RegentAgentOperations" />
+    <ProjectReference Include="..\..\src\RegentAgent.Gateway\RegentAgent.Gateway.csproj" Aliases="global, RegentAgentGateway" />
+    <ProjectReference Include="..\RegentAgent.PurgeFenceProbe\RegentAgent.PurgeFenceProbe.csproj" />
   </ItemGroup>
 
 </Project>

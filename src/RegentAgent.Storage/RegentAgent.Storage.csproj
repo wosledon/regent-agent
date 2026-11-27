@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\RegentAgent.Contracts\RegentAgent.Contracts.csproj" />
+    <InternalsVisibleTo Include="RegentAgent.ControlPlane.Tests" />
   </ItemGroup>
 
   <ItemGroup>

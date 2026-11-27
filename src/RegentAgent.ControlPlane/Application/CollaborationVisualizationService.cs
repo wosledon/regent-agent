@@ -8,8 +8,14 @@ namespace RegentAgent.ControlPlane.Application;
 
 public sealed class CollaborationVisualizationService(RegentDbContext db, ChatService chat, TimeProvider clock)
 {
-    public async Task<CollaborationGraphDto> GetGraphAsync(Guid tenantId, CancellationToken cancellationToken)
+    public Task<CollaborationGraphDto> GetGraphAsync(Guid tenantId, string employeeId,
+        CancellationToken cancellationToken) =>
+        GetGraphAsync(tenantId, new EmployeeMemberViewer(tenantId, employeeId), cancellationToken);
+
+    public async Task<CollaborationGraphDto> GetGraphAsync(Guid tenantId, ChatViewer viewer,
+        CancellationToken cancellationToken)
     {
+        if (viewer.TenantId != tenantId) throw new UnauthorizedAccessException();
         var employees = await db.Employees.AsNoTracking().Where(x => x.TenantId == tenantId).OrderBy(x => x.EmployeeNo).ToListAsync(cancellationToken);
         var positions = await db.Positions.AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken);
         var periods = await db.EmploymentPeriods.AsNoTracking()
@@ -19,10 +25,19 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
         var coordinations = (await db.TaskCoordinations.AsNoTracking().Where(x => x.TenantId == tenantId)
             .ToListAsync(cancellationToken)).OrderByDescending(x => x.CreatedAt).Take(500).ToList();
         var work = await db.WorkEntries.AsNoTracking().Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken);
-        var conversations = await chat.ListAsync(tenantId.ToString(), cancellationToken);
-        var messages = await chat.ListAllMessagesAsync(tenantId.ToString(), cancellationToken);
-        var audits = await db.AuditRecords.AsNoTracking().Where(x => x.TenantId == tenantId)
-            .OrderByDescending(x => x.Seq).Take(500).ToListAsync(cancellationToken);
+        var conversations = viewer switch
+        {
+            OwnerObserverViewer => await chat.ListObserverConversationsAsync(tenantId.ToString(), cancellationToken),
+            EmployeeMemberViewer employee => await chat.ListAsync(tenantId.ToString(), cancellationToken,
+                employee.EmployeeId),
+            _ => throw new UnauthorizedAccessException()
+        };
+        var conversationIds = conversations.Select(x => x.Id).ToHashSet(StringComparer.Ordinal);
+        var messages = (await chat.ListAllMessagesAsync(tenantId.ToString(), cancellationToken))
+            .Where(x => conversationIds.Contains(x.ConversationId)).ToArray();
+        var audits = (await db.AuditRecords.AsNoTracking().Where(x => x.TenantId == tenantId)
+            .OrderByDescending(x => x.Seq).Take(500).ToListAsync(cancellationToken))
+            .Where(x => ShouldIncludeAudit(x, viewer, conversationIds)).ToArray();
 
         var employeeById = employees.ToDictionary(x => x.Id, x => x);
         var employeeByName = employees.ToDictionary(x => x.DisplayName, x => x, StringComparer.OrdinalIgnoreCase);
@@ -164,16 +179,21 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
                 || (node.ProjectId is not null && x.ProjectId == node.ProjectId));
             nodes[index] = node with { ActivityCount = count };
         }
-        var summary = new CollaborationSummaryDto(employees.Count, conversations.Count, messages.Count,
+        var summary = new CollaborationSummaryDto(employees.Count, conversations.Count, messages.Length,
             edges.Count(x => x.Value.Kind == "collaborates"), projects.Count, activities.Count, coordinations.Count);
         return new CollaborationGraphDto(nodes, edges.Values.OrderBy(x => x.Kind).ThenBy(x => x.SourceId).ToArray(),
             activities, summary, clock.GetUtcNow());
     }
 
-    public async Task<CollaborationTraceDto> GetTraceAsync(Guid tenantId, string entityType, string entityId,
-        CancellationToken cancellationToken)
+    public Task<CollaborationTraceDto> GetTraceAsync(Guid tenantId, string employeeId, string entityType,
+        string entityId, CancellationToken cancellationToken) =>
+        GetTraceAsync(tenantId, new EmployeeMemberViewer(tenantId, employeeId), entityType, entityId,
+            cancellationToken);
+
+    public async Task<CollaborationTraceDto> GetTraceAsync(Guid tenantId, ChatViewer viewer, string entityType,
+        string entityId, CancellationToken cancellationToken)
     {
-        var graph = await GetGraphAsync(tenantId, cancellationToken);
+        var graph = await GetGraphAsync(tenantId, viewer, cancellationToken);
         var normalized = entityType.Trim().ToLowerInvariant();
         var activities = graph.Activities.Where(x => normalized switch
         {
@@ -208,19 +228,53 @@ public sealed class CollaborationVisualizationService(RegentDbContext db, ChatSe
         return depth;
     }
 
-    private static (string? SourceId, string? EmployeeId, string? ConversationId, string? ProjectId, string? TaskId,
-        string? TargetEmployeeId) ReadPayloadRefs(string json)
+    private static bool ShouldIncludeAudit(AuditRecord audit, ChatViewer viewer, IReadOnlySet<string> conversationIds)
+    {
+        var refs = ReadPayloadRefs(audit.PayloadJson);
+        if (viewer is OwnerObserverViewer
+            && IsChatAudit(audit.EventType, audit.PayloadJson)
+            && (refs.ConversationId is null || !conversationIds.Contains(refs.ConversationId))) return false;
+        return refs.ConversationId is null || conversationIds.Contains(refs.ConversationId);
+    }
+
+    private static bool IsChatAudit(string eventType, string payloadJson) =>
+        eventType.StartsWith("chat.", StringComparison.OrdinalIgnoreCase)
+        || HasPayloadProperty(payloadJson, "message_id")
+        || HasPayloadProperty(payloadJson, "conversation_id");
+
+    private static bool HasPayloadProperty(string json, string propertyName)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(json);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && document.RootElement.TryGetProperty(propertyName, out _);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static PayloadReferences ReadPayloadRefs(string json)
     {
         try
         {
             using var document = JsonDocument.Parse(json);
             var root = document.RootElement;
-            return (Read(root, "coordination_id", "message_id", "conversation_id", "employee_id", "project_id", "task_id", "action_id", "id"),
+            return new PayloadReferences(
+                Read(root, "coordination_id", "message_id", "conversation_id", "employee_id", "project_id", "task_id", "action_id", "id"),
                 Read(root, "employee_id"), Read(root, "conversation_id"), Read(root, "project_id"), Read(root, "task_id"),
                 Read(root, "target_employee_id"));
         }
-        catch (JsonException) { return (null, null, null, null, null, null); }
+        catch (JsonException)
+        {
+            return new PayloadReferences(null, null, null, null, null, null);
+        }
     }
+
+    private sealed record PayloadReferences(string? SourceId, string? EmployeeId, string? ConversationId,
+        string? ProjectId, string? TaskId, string? TargetEmployeeId);
 
     private static string ReadPayloadActorType(string json)
     {

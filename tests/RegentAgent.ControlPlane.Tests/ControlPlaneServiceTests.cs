@@ -16,7 +16,8 @@ public sealed class ControlPlaneServiceTests
     public async Task Dashboard_is_scoped_to_current_tenant()
     {
         await using var db = CreateDb();
-        await DbInitializer.InitializeAsync(db, CancellationToken.None);
+        var clock = new FixedTimeProvider();
+        await DbInitializer.InitializeAsync(db, CancellationToken.None, clock);
         var otherTenant = Guid.NewGuid();
         db.Projects.Add(new ProjectRecord
         {
@@ -38,30 +39,59 @@ public sealed class ControlPlaneServiceTests
     public async Task Approval_decision_is_audited_and_cannot_be_repeated()
     {
         await using var db = CreateDb();
-        await DbInitializer.InitializeAsync(db, CancellationToken.None);
+        var clock = new FixedTimeProvider();
+        await DbInitializer.InitializeAsync(db, CancellationToken.None, clock);
         var approval = await db.Approvals.FirstAsync();
-        var audit = new AuditIntegrityService(db, new FixedTimeProvider());
+        var audit = new AuditIntegrityService(db, clock);
         await audit.BackfillAsync(CancellationToken.None);
-        var service = new ApprovalService(db, new TestTenantContext(), new FixedTimeProvider(), audit,
-            new IdempotencyService(db, new FixedTimeProvider()));
+        var service = new ApprovalService(db, new TestTenantContext(Guid.Parse("33333333-3333-3333-3333-333333333333")), clock, audit,
+            new IdempotencyService(db, clock), new ApprovalAuthority(db));
 
         var result = await service.DecideAsync(new ApprovalId(approval.Id), new ApprovalDecision("approve", "Verified"), CancellationToken.None, "approval-key-1");
 
         Assert.True(result.IsSuccess);
         Assert.Equal(ApprovalState.Approved, result.Value!.State);
         Assert.Contains(await db.AuditRecords.ToListAsync(), item => item.EventType == "approval.decided" && item.Seq == 2);
-        var repeated = await service.DecideAsync(new ApprovalId(approval.Id), new ApprovalDecision("reject", "Changed mind"), CancellationToken.None, "approval-key-1");
+        var repeated = await service.DecideAsync(new ApprovalId(approval.Id), new ApprovalDecision("approve", "Verified"), CancellationToken.None, "approval-key-1");
         Assert.True(repeated.IsSuccess);
         Assert.Equal(ApprovalState.Approved, repeated.Value!.State);
+        var conflict = await service.DecideAsync(new ApprovalId(approval.Id), new ApprovalDecision("reject", "Changed mind"), CancellationToken.None, "approval-key-1");
+        Assert.False(conflict.IsSuccess);
+        Assert.Equal("IDEMPOTENCY_CONFLICT", conflict.Error!.Code);
         Assert.Single(await db.AuditRecords.Where(x => x.EventType == "approval.decided").ToListAsync());
+    }
+
+    [Fact]
+    public async Task Seeded_approvals_are_fresh_and_independently_decidable()
+    {
+        await using var db = CreateDb();
+        var clock = new FixedTimeProvider();
+        await DbInitializer.InitializeAsync(db, CancellationToken.None, clock);
+        var approvals = await db.Approvals.ToListAsync();
+        var approverId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+        Assert.NotEmpty(approvals);
+        Assert.All(approvals, approval =>
+        {
+            Assert.Equal(ApprovalState.Pending, approval.State);
+            Assert.True(approval.ExpiresAt > clock.GetUtcNow());
+            Assert.NotEqual(approverId, approval.RequesterUserId);
+        });
+        var service = new ApprovalService(db, new TestTenantContext(approverId), clock,
+            new AuditIntegrityService(db, clock), new IdempotencyService(db, clock), new ApprovalAuthority(db));
+        var result = await service.DecideAsync(new ApprovalId(approvals[0].Id),
+            new ApprovalDecision("approve", "Fresh seed verified"), CancellationToken.None, "seed-decision");
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(approverId, result.Value!.DecidedBy);
     }
 
     [Fact]
     public async Task Expired_approvals_default_to_rejected_and_are_audited()
     {
         await using var db = CreateDb();
-        await DbInitializer.InitializeAsync(db, CancellationToken.None);
         var clock = new FixedTimeProvider();
+        await DbInitializer.InitializeAsync(db, CancellationToken.None, clock);
         var approval = new ApprovalRecord
         {
             Id = Guid.NewGuid(), TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
@@ -87,10 +117,10 @@ public sealed class ControlPlaneServiceTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options);
 
-    private sealed class TestTenantContext : ITenantContext
+    private sealed class TestTenantContext(Guid? userId = null) : ITenantContext
     {
         public TenantId TenantId { get; } = new(Guid.Parse("11111111-1111-1111-1111-111111111111"));
-        public UserId UserId { get; } = new(Guid.Parse("22222222-2222-2222-2222-222222222222"));
+        public UserId UserId { get; } = new(userId ?? Guid.Parse("22222222-2222-2222-2222-222222222222"));
         public string DisplayName => "Demo Owner";
         public bool IsAuthenticated => true;
     }

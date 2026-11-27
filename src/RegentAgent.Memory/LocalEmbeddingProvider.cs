@@ -7,7 +7,7 @@ namespace RegentAgent.Memory;
 public sealed partial class LocalEmbeddingProvider
 {
     public const string ModelVersion = "local-hash-v1";
-    private const int Dimensions = 256;
+    private const int Dimensions = MemoryVectorFormat.Dimensions;
 
     [GeneratedRegex(@"[\p{L}\p{N}]+", RegexOptions.CultureInvariant)]
     private static partial Regex TokenPattern();

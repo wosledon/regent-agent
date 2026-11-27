@@ -19,7 +19,17 @@ public sealed class OutboxWorker(IServiceScopeFactory scopeFactory, ILogger<Outb
                 var rls = scope.ServiceProvider.GetRequiredService<TenantRlsScope>();
                 var outbox = scope.ServiceProvider.GetRequiredService<OutboxService>();
                 foreach (var tenantId in await db.Tenants.AsNoTracking().Select(x => x.Id).ToListAsync(stoppingToken))
-                    await rls.ExecuteAsync(tenantId, null, token => outbox.ProcessAsync(token), stoppingToken);
+                {
+                    try
+                    {
+                        await rls.ExecuteAsync(tenantId, null, token => outbox.ProcessAsync(token), stoppingToken);
+                    }
+                    catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
+                    catch (Exception exception)
+                    {
+                        logger.LogError(exception, "Outbox processing failed for tenant {TenantId}.", tenantId);
+                    }
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { return; }
             catch (Exception exception) { logger.LogError(exception, "Outbox worker failed."); }

@@ -57,7 +57,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
     {
         var tenantId = tenant.TenantId.Value;
         var started = false;
-        var controllerPosition = await db.Positions.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Name == "Controller", cancellationToken);
+        var controllerPosition = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Name == "Controller", cancellationToken);
         if (controllerPosition is null)
         {
             controllerPosition = new PositionRecord
@@ -67,9 +67,17 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
                 CapabilitiesJson = JsonSerializer.Serialize(new[] { "org.design", "project.decide", "task.assign" }),
                 BudgetMinor = 1_000_000, Status = "Filled"
             };
+            controllerPosition.Path = PositionPath.Root(controllerPosition.Id);
             db.Positions.Add(controllerPosition);
             started = true;
         }
+        else if (string.IsNullOrEmpty(controllerPosition.Path))
+        {
+            if (controllerPosition.ParentPositionId is not null)
+                throw new InvalidOperationException("Controller position path is missing.");
+            controllerPosition.Path = PositionPath.Root(controllerPosition.Id);
+        }
+        PositionPath.Validate(controllerPosition.Path, controllerPosition.Id);
 
         var controller = await db.Employees.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.DisplayName == "Controller", cancellationToken);
         if (controller is null)
@@ -107,12 +115,17 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         if (string.IsNullOrWhiteSpace(input.Name) || string.IsNullOrWhiteSpace(input.Responsibilities) || input.BudgetMinor < 0)
             throw new InvalidOperationException("Position name, responsibilities and a valid budget are required.");
         var tenantId = tenant.TenantId.Value;
+        if (input.Name == ControllerSuccessionPolicy.ControllerPositionName
+            && await db.Positions.AnyAsync(x => x.TenantId == tenantId
+                && x.Name == ControllerSuccessionPolicy.ControllerPositionName, cancellationToken))
+            throw new InvalidOperationException("The Controller position already exists.");
+        PositionRecord? parent = null;
         if (input.ParentPositionId is { } parentId)
         {
-            var parent = await db.Positions.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == parentId, cancellationToken)
+            parent = await db.Positions.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == parentId, cancellationToken)
                 ?? throw new KeyNotFoundException("Parent position not found.");
             if (parent.Status is "Closed" or "Frozen") throw new InvalidOperationException("Cannot create a child under a closed or frozen position.");
-            if (await GetDepthAsync(parent, tenantId, cancellationToken) >= 4)
+            if (await GetDepthAsync(parent, tenantId, cancellationToken) >= PositionPath.MaximumDepth)
                 throw new InvalidOperationException("Organization depth cannot exceed 4.");
         }
         var record = new PositionRecord
@@ -121,6 +134,9 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
             Responsibilities = input.Responsibilities, CapabilitiesJson = JsonSerializer.Serialize(input.Capabilities),
             BudgetMinor = input.BudgetMinor, ParentPositionId = input.ParentPositionId, Status = "Open"
         };
+        record.Path = parent is null
+            ? PositionPath.Root(record.Id)
+            : PositionPath.Child(parent.Path, parent.Id, record.Id);
         db.Positions.Add(record);
         await db.SaveChangesAsync(cancellationToken);
         await AuditAsync("position.created", new { position_id = record.Id, parent_position_id = record.ParentPositionId }, cancellationToken);
@@ -130,12 +146,18 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
     public async Task<EmploymentPeriodDto> AssignAsync(Guid employeeId, Guid positionId, CancellationToken cancellationToken)
     {
         var tenantId = tenant.TenantId.Value;
+        await using var mutation = await TenantMutationScope.BeginAsync(db, tenantId, cancellationToken);
         var employee = await db.Employees.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == employeeId, cancellationToken)
             ?? throw new KeyNotFoundException("Employee not found.");
         var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken)
             ?? throw new KeyNotFoundException("Position not found.");
         if (employee.State != EmployeeState.Active) throw new InvalidOperationException("Only active employees can be assigned.");
         if (position.Status is "Closed" or "Frozen") throw new InvalidOperationException("Position is not available for assignment.");
+        var controllerPositionId = await ControllerSuccessionPolicy.FindControllerPositionIdAsync(
+            db, tenantId, employeeId, cancellationToken);
+        if (controllerPositionId is { } currentControllerPositionId && currentControllerPositionId != positionId)
+            await ControllerSuccessionPolicy.RequireAcceptedSuccessorAsync(db, tenantId,
+                currentControllerPositionId, employeeId, cancellationToken);
         var current = await db.EmploymentPeriods.FirstOrDefaultAsync(x => x.TenantId == tenantId && x.EmployeeId == employeeId && x.Kind == "Primary" && x.EndedAt == null, cancellationToken);
         if (current is not null) current.EndedAt = clock.GetUtcNow();
         var period = new EmploymentPeriodRecord
@@ -148,6 +170,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         position.Status = "Filled";
         await db.SaveChangesAsync(cancellationToken);
         await AuditAsync("employment.assigned", new { employee_id = employeeId, position_id = positionId, period_id = period.Id }, cancellationToken);
+        await mutation.CommitAsync(cancellationToken);
         return ToPeriod(period);
     }
 
@@ -183,78 +206,6 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         record.Status = "Revoked";
         await db.SaveChangesAsync(cancellationToken);
         await AuditAsync("org.delegation.revoked", new { delegation_id = id }, cancellationToken);
-    }
-
-    public async Task OffboardAsync(Guid employeeId, string approvalId, CancellationToken cancellationToken)
-    {
-        var tenantId = tenant.TenantId.Value;
-        var approval = await db.Approvals.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == Guid.Parse(approvalId), cancellationToken);
-        if (approval is null || approval.State != ApprovalState.Approved || approval.ActionType != "employee.offboard")
-            throw new InvalidOperationException("Human Boss approval is required.");
-        var employee = await db.Employees.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == employeeId, cancellationToken)
-            ?? throw new KeyNotFoundException("Employee not found.");
-        employee.State = EmployeeState.Terminated;
-        employee.StateReason = "Offboarded after Boss approval";
-        var activeTasks = await db.Tasks.Where(x => x.TenantId == tenantId
-            && (x.AssigneeEmployeeId == employeeId || (x.AssigneeEmployeeId == null && x.Assignee == employee.DisplayName))
-            && (x.Status == "Pending" || x.Status == "Assigned" || x.Status == "InProgress" || x.Status == "InReview" || x.Status == "Blocked"))
-            .ToListAsync(cancellationToken);
-        foreach (var task in activeTasks)
-        {
-            task.Status = "Interrupted";
-            task.LeaseOwner = null;
-            task.LeaseToken = null;
-            task.LeaseExpiresAt = null;
-            task.UpdatedAt = clock.GetUtcNow();
-            task.Version++;
-        }
-        var periods = await db.EmploymentPeriods.Where(x => x.TenantId == tenantId && x.EmployeeId == employeeId && x.EndedAt == null).ToListAsync(cancellationToken);
-        foreach (var period in periods) period.EndedAt = clock.GetUtcNow();
-        foreach (var positionId in periods.Select(x => x.PositionId).Distinct())
-        {
-            if (!await db.EmploymentPeriods.AnyAsync(x => x.TenantId == tenantId && x.PositionId == positionId
-                    && x.EmployeeId != employeeId && x.EndedAt == null, cancellationToken))
-            {
-                var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken);
-                if (position is not null) position.Status = "Open";
-            }
-        }
-        await db.SaveChangesAsync(cancellationToken);
-        await AuditAsync("employee.offboarded", new
-        {
-            employee_id = employeeId, approval_id = approvalId, interrupted_task_ids = activeTasks.Select(x => x.Id).ToArray()
-        }, cancellationToken);
-    }
-
-    public async Task<EmployeeSummary> RehireAsync(Guid employeeId, Guid positionId, string approvalId,
-        CancellationToken cancellationToken)
-    {
-        var tenantId = tenant.TenantId.Value;
-        var employee = await db.Employees.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == employeeId, cancellationToken)
-            ?? throw new KeyNotFoundException("Employee not found.");
-        if (employee.State != EmployeeState.Terminated) throw new InvalidOperationException("Only terminated employees can be rehired.");
-        var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken)
-            ?? throw new KeyNotFoundException("Position not found.");
-        if (position.Status is not "Open") throw new InvalidOperationException("Rehire position must be open.");
-        var approval = await db.Approvals.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId
-            && x.Id == Guid.Parse(approvalId) && x.State == ApprovalState.Approved
-            && x.ActionType == "hiring.hire" && x.Title.Contains(employee.DisplayName, StringComparison.OrdinalIgnoreCase), cancellationToken);
-        if (approval is null) throw new InvalidOperationException("Human Boss approval is required for rehiring.");
-        if (await db.Employees.CountAsync(x => x.TenantId == tenantId && x.State != EmployeeState.Terminated, cancellationToken) >= 20)
-            throw new InvalidOperationException("Headcount limit reached.");
-        await quotaGuard.EnsureAsync(tenantId, "employees", 1, cancellationToken);
-        employee.State = EmployeeState.Active;
-        employee.StateReason = null;
-        employee.Position = position.Name;
-        position.Status = "Filled";
-        db.EmploymentPeriods.Add(new EmploymentPeriodRecord
-        {
-            Id = Guid.NewGuid(), TenantId = tenantId, EmployeeId = employeeId,
-            PositionId = positionId, Kind = "Primary", StartedAt = clock.GetUtcNow()
-        });
-        await db.SaveChangesAsync(cancellationToken);
-        await AuditAsync("employee.rehired", new { employee_id = employeeId, position_id = positionId, approval_id = approvalId }, cancellationToken);
-        return Mappings.ToSummary(employee, Freshness.Fresh);
     }
 
     public async Task<CandidateDto> CreateCandidateAsync(Guid positionId, string displayName, string modelVersion,
@@ -325,54 +276,27 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         return ToCandidate(candidate);
     }
 
-    public async Task<EmployeeSummary> HireCandidateAsync(Guid candidateId, string approvalId,
-        CancellationToken cancellationToken)
-    {
-        var tenantId = tenant.TenantId.Value;
-        var candidate = await db.Candidates.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == candidateId, cancellationToken)
-            ?? throw new KeyNotFoundException("Candidate not found.");
-        if (candidate.Status is not ("Assessed" or "Offered")) throw new InvalidOperationException("Candidate must be assessed or offered before hiring.");
-        var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == candidate.PositionId, cancellationToken)
-            ?? throw new KeyNotFoundException("Candidate position not found.");
-        if (position.Status is "Closed" or "Frozen") throw new InvalidOperationException("Candidate position is not available.");
-        var approval = await db.Approvals.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == Guid.Parse(approvalId), cancellationToken);
-        if (approval is null || approval.State != ApprovalState.Approved || approval.ActionType != "hiring.hire" || !approval.Title.Contains(candidate.DisplayName, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Human Boss approval is required for hiring.");
-        if (await db.Employees.CountAsync(x => x.TenantId == tenantId && x.State != EmployeeState.Terminated, cancellationToken) >= 20)
-            throw new InvalidOperationException("Headcount limit reached.");
-        await quotaGuard.EnsureAsync(tenantId, "employees", 1, cancellationToken);
-        var number = await db.Employees.CountAsync(x => x.TenantId == tenantId, cancellationToken) + 1;
-        var employee = new EmployeeRecord
-        {
-            Id = Guid.NewGuid(), TenantId = tenantId, EmployeeNo = $"EMP-{number:D4}",
-            DisplayName = candidate.DisplayName, Position = position.Name, State = EmployeeState.Active
-        };
-        db.Employees.Add(employee);
-        db.EmploymentPeriods.Add(new EmploymentPeriodRecord
-        {
-            Id = Guid.NewGuid(), TenantId = tenantId, EmployeeId = employee.Id,
-            PositionId = candidate.PositionId, Kind = "Primary", StartedAt = clock.GetUtcNow()
-        });
-        candidate.Status = "Hired";
-        position.Status = "Filled";
-        await db.SaveChangesAsync(cancellationToken);
-        await AuditAsync("candidate.hired", new { candidate_id = candidateId, employee_id = employee.Id, position_id = position.Id, approval_id = approvalId }, cancellationToken);
-        return Mappings.ToSummary(employee, Freshness.Fresh);
-    }
-
     public async Task<PositionDto> SetPositionStatusAsync(Guid positionId, string status,
         CancellationToken cancellationToken)
     {
         if (status is not ("Open" or "Filled" or "Frozen" or "Closed")) throw new InvalidOperationException("Invalid position status.");
         var tenantId = tenant.TenantId.Value;
+        await using var mutation = await TenantMutationScope.BeginAsync(db, tenantId, cancellationToken);
         var position = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == positionId, cancellationToken)
             ?? throw new KeyNotFoundException("Position not found.");
-        if (status == "Closed" && await db.EmploymentPeriods.AnyAsync(x => x.TenantId == tenantId && x.PositionId == positionId && x.EndedAt == null, cancellationToken))
-            throw new InvalidOperationException("Cannot close a filled position before offboarding its employee.");
+        if (status == "Closed")
+        {
+            if (position.Name == ControllerSuccessionPolicy.ControllerPositionName)
+                await ControllerSuccessionPolicy.RequireAcceptedSuccessorForPositionAsync(
+                    db, tenantId, positionId, cancellationToken);
+            if (await db.EmploymentPeriods.AnyAsync(x => x.TenantId == tenantId && x.PositionId == positionId && x.EndedAt == null, cancellationToken))
+                throw new InvalidOperationException("Cannot close a filled position before offboarding its employee.");
+        }
         position.Status = status;
         position.Version++;
         await db.SaveChangesAsync(cancellationToken);
         await AuditAsync("position.status_changed", new { position_id = positionId, status }, cancellationToken);
+        await mutation.CommitAsync(cancellationToken);
         return ToPosition(position);
     }
 
@@ -380,25 +304,44 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
         CancellationToken cancellationToken)
     {
         var tenantId = tenant.TenantId.Value;
-        var source = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == sourceId, cancellationToken)
+        await using var mutation = await TenantMutationScope.BeginAsync(db, tenantId, cancellationToken);
+        var tenantPositions = await db.Positions.Where(x => x.TenantId == tenantId).ToListAsync(cancellationToken);
+        var paths = PositionPath.BuildPaths(tenantPositions);
+        var source = tenantPositions.SingleOrDefault(x => x.Id == sourceId)
             ?? throw new KeyNotFoundException("Source position not found.");
-        var target = await db.Positions.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == targetId, cancellationToken)
+        var target = tenantPositions.SingleOrDefault(x => x.Id == targetId)
             ?? throw new KeyNotFoundException("Target position not found.");
         if (source.Id == target.Id) throw new InvalidOperationException("Cannot merge a position into itself.");
-        if (await IsDescendantAsync(sourceId, targetId, tenantId, cancellationToken))
+        if (source.Name == ControllerSuccessionPolicy.ControllerPositionName)
+            throw new InvalidOperationException("The Controller position cannot be merged; reassign a successor first.");
+        if (await IsDescendantAsync(source, target, tenantId, cancellationToken))
             throw new InvalidOperationException("Cannot merge a position into its descendant.");
+
+        var subtree = await GetSubtreeAsync(source, tenantPositions, cancellationToken);
+        var expectedIds = tenantPositions.Where(position => position.Id == source.Id
+            || paths[position.Id].StartsWith($"{source.Path}.", StringComparison.Ordinal)).Select(position => position.Id).ToHashSet();
+        if (!subtree.Select(position => position.Id).ToHashSet().SetEquals(expectedIds))
+            throw new InvalidOperationException("Position paths do not match the organization hierarchy.");
+        var trackedById = tenantPositions.ToDictionary(position => position.Id);
+        var rebasedPaths = subtree.Where(position => position.Id != source.Id).ToDictionary(
+            position => position.Id, position => PositionPath.Rebase(source.Path, target.Path, position.Path));
+        foreach (var position in subtree.Where(position => position.Id != source.Id))
+            trackedById[position.Id].Path = rebasedPaths[position.Id];
+        foreach (var child in tenantPositions.Where(position => position.ParentPositionId == source.Id))
+            child.ParentPositionId = target.Id;
+        PositionPath.BuildPaths(tenantPositions);
+
         var periods = await db.EmploymentPeriods.Where(x => x.TenantId == tenantId && x.PositionId == sourceId && x.EndedAt == null).ToListAsync(cancellationToken);
         foreach (var period in periods) period.PositionId = targetId;
         var employees = await db.Employees.Where(x => x.TenantId == tenantId && x.Position == source.Name).ToListAsync(cancellationToken);
         foreach (var employee in employees) employee.Position = target.Name;
-        foreach (var child in await db.Positions.Where(x => x.TenantId == tenantId && x.ParentPositionId == sourceId).ToListAsync(cancellationToken))
-            child.ParentPositionId = targetId;
         source.Status = "Closed";
         source.Version++;
         target.Status = "Filled";
         target.Version++;
         await db.SaveChangesAsync(cancellationToken);
         await AuditAsync("position.merged", new { source_position_id = sourceId, target_position_id = targetId }, cancellationToken);
+        await mutation.CommitAsync(cancellationToken);
         return ToPosition(target);
     }
 
@@ -416,6 +359,7 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
             CapabilitiesJson = source.CapabilitiesJson, BudgetMinor = source.BudgetMinor / 2,
             ParentPositionId = source.ParentPositionId, Status = "Open"
         };
+        split.Path = PositionPath.Sibling(source.Path, source.Id, split.Id);
         source.BudgetMinor -= split.BudgetMinor;
         source.Version++;
         db.Positions.Add(split);
@@ -512,16 +456,23 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
     private static FairnessAuditDto ToFairnessDto(Data.FairnessAuditRecord x) =>
         new() { Id = x.Id, TenantId = x.TenantId, PositionId = x.PositionId, Period = x.Period, SampleSize = x.SampleSize, SelectionRateRatio = x.SelectionRateRatio, Status = x.Status, DetailsJson = x.DetailsJson };
 
-    private async Task<bool> IsDescendantAsync(Guid ancestorId, Guid candidateId, Guid tenantId,
+    private async Task<bool> IsDescendantAsync(PositionRecord ancestor, PositionRecord candidate, Guid tenantId,
         CancellationToken cancellationToken)
     {
-        var currentId = candidateId;
+        PositionPath.Validate(ancestor.Path, ancestor.Id);
+        PositionPath.Validate(candidate.Path, candidate.Id);
+        if (db.Database.IsNpgsql())
+            return await db.Positions
+                .FromSqlInterpolated<PositionRecord>($"SELECT * FROM \"Positions\" WHERE \"TenantId\" = {tenantId} AND \"Path\" <@ CAST({ancestor.Path} AS ltree)")
+                .AsNoTracking().AnyAsync(position => position.Id == candidate.Id, cancellationToken);
+
+        var currentId = candidate.Id;
         var visited = new HashSet<Guid>();
         while (visited.Add(currentId))
         {
             var current = await db.Positions.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == currentId, cancellationToken);
             if (current is null || current.ParentPositionId is not { } parentId) return false;
-            if (parentId == ancestorId) return true;
+            if (parentId == ancestor.Id) return true;
             currentId = parentId;
         }
         throw new InvalidOperationException("Organization hierarchy contains a cycle.");
@@ -529,14 +480,50 @@ public sealed class OrganizationService(RegentDbContext db, ITenantContext tenan
 
     private async Task<int> GetDepthAsync(PositionRecord position, Guid tenantId, CancellationToken cancellationToken)
     {
+        PositionPath.Validate(position.Path, position.Id);
+        if (db.Database.IsNpgsql())
+            return await db.Database.SqlQuery<int>($"SELECT nlevel(CAST({position.Path} AS ltree)) - 1 AS \"Value\"")
+                .SingleAsync(cancellationToken);
+
         var depth = 1;
         var current = position;
+        var visited = new HashSet<Guid> { position.Id };
         while (current.ParentPositionId is { } parentId)
         {
-            current = await db.Positions.AsNoTracking().SingleAsync(x => x.TenantId == tenantId && x.Id == parentId, cancellationToken);
+            if (!visited.Add(parentId)) throw new InvalidOperationException("Organization hierarchy contains a cycle.");
+            current = await db.Positions.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == parentId, cancellationToken)
+                ?? throw new InvalidOperationException("Organization hierarchy contains a missing or cross-tenant parent.");
             depth++;
+            if (depth > PositionPath.MaximumDepth) throw new InvalidOperationException("Organization depth cannot exceed 4.");
         }
+        if (depth != PositionPath.Depth(position.Path))
+            throw new InvalidOperationException("Stored position path does not match its hierarchy.");
         return depth;
+    }
+
+    private async Task<IReadOnlyList<PositionRecord>> GetSubtreeAsync(PositionRecord root,
+        IReadOnlyList<PositionRecord> tenantPositions, CancellationToken cancellationToken)
+    {
+        if (db.Database.IsNpgsql())
+            return await db.Positions
+                .FromSqlInterpolated<PositionRecord>($"SELECT * FROM \"Positions\" WHERE \"TenantId\" = {root.TenantId} AND \"Path\" <@ CAST({root.Path} AS ltree)")
+                .AsNoTracking().ToListAsync(cancellationToken);
+
+        var subtree = new List<PositionRecord> { root };
+        var visited = new HashSet<Guid> { root.Id };
+        var queue = new Queue<PositionRecord>();
+        queue.Enqueue(root);
+        while (queue.Count > 0)
+        {
+            var parent = queue.Dequeue();
+            foreach (var child in tenantPositions.Where(position => position.ParentPositionId == parent.Id))
+            {
+                if (!visited.Add(child.Id)) throw new InvalidOperationException("Organization hierarchy contains a cycle.");
+                subtree.Add(child);
+                queue.Enqueue(child);
+            }
+        }
+        return subtree;
     }
 
     private Task AuditAsync(string eventType, object payload, CancellationToken cancellationToken) =>

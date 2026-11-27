@@ -47,6 +47,7 @@ public sealed class PositionRecord
     public string CapabilitiesJson { get; set; } = "[]";
     public long BudgetMinor { get; set; }
     public Guid? ParentPositionId { get; set; }
+    public string Path { get; set; } = string.Empty;
     public string Status { get; set; } = "Open";
     public int Version { get; set; } = 1;
 }
@@ -155,6 +156,7 @@ public sealed class ProjectRecord
 public sealed class MilestoneRecord
 {
     public Guid Id { get; set; }
+    public Guid TenantId { get; set; }
     public Guid ProjectId { get; set; }
     public string Name { get; set; } = string.Empty;
     public DateTimeOffset TargetAt { get; set; }
@@ -234,6 +236,15 @@ public sealed class ApprovalRecord
     public Severity Severity { get; set; }
     public ApprovalState State { get; set; } = ApprovalState.Pending;
     public string Requester { get; set; } = string.Empty;
+    public Guid RequesterUserId { get; set; }
+    public Guid? TargetEmployeeId { get; set; }
+    public Guid? TargetCandidateId { get; set; }
+    public Guid? TargetPositionId { get; set; }
+    public string ActionHash { get; set; } = string.Empty;
+    public DateTimeOffset? ConsumedAt { get; set; }
+    public Guid? ConsumedBy { get; set; }
+    public Guid? DecidedBy { get; set; }
+    public DateTimeOffset? DecidedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset ExpiresAt { get; set; }
     public string OptionsJson { get; set; } = "[]";
@@ -277,6 +288,8 @@ public sealed class OutboxRecord
     public int Attempts { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? ProcessedAt { get; set; }
+    public DateTimeOffset? NextAttemptAt { get; set; }
+    public string? LastError { get; set; }
 }
 
 public sealed class InboxRecord
@@ -295,6 +308,7 @@ public sealed class SchemaVersionRecord
     public int Version { get; set; }
     public string Name { get; set; } = string.Empty;
     public DateTimeOffset AppliedAt { get; set; }
+    public string? Checksum { get; set; }
 }
 
 public sealed class AuditCheckpointRecord

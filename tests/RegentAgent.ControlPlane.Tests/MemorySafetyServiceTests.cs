@@ -52,7 +52,7 @@ public sealed class MemorySafetyServiceTests
             Assert.NotNull(finding.ReviewDueAt);
         });
         Assert.Empty(result.Hits);
-        Assert.Empty(await fixture.Vectors.GetAllAsync(CancellationToken.None));
+        Assert.Empty(await fixture.Vectors.GetAllAsync(Tenant, CancellationToken.None));
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class MemorySafetyServiceTests
         Assert.Single(result.Hits);
         Assert.Equal(corrected.Id, result.Hits[0].ClaimId);
         Assert.Equal(1, await fixture.Index.RebuildAsync(Tenant, CancellationToken.None));
-        Assert.Single(await fixture.Vectors.GetAllAsync(CancellationToken.None));
+        Assert.Single(await fixture.Vectors.GetAllAsync(Tenant, CancellationToken.None));
     }
 
     [Fact]
@@ -87,14 +87,17 @@ public sealed class MemorySafetyServiceTests
     {
         using var fixture = new MemoryFixture();
         var original = await fixture.Memory.CaptureAsync(Tenant, "personal",
-            "Private corrected launch fact", "source:private", 0.9, "trusted", "Alice", CancellationToken.None);
+            "Private corrected launch fact", "source:private", 0.9, "trusted", "Alice", CancellationToken.None,
+            authorUserId: "user-alice");
         var task = await fixture.Safety.CreateCorrectionAsync(original.Id, Tenant,
             new MemoryCorrectionRequest(original.Id, "Private corrected launch fact verified", "Evidence reviewed", "Boss"), CancellationToken.None);
 
         var corrected = await fixture.Safety.ApproveCorrectionAsync(task.Id, Tenant,
             new MemoryCorrectionApprovalRequest("Boss"), CancellationToken.None);
-        var alice = await fixture.Index.SearchHybridAsync(Tenant, "corrected launch", null, 10, "Alice", CancellationToken.None);
-        var bob = await fixture.Index.SearchHybridAsync(Tenant, "corrected launch", null, 10, "Bob", CancellationToken.None);
+        var alice = await fixture.Index.SearchHybridAsync(Tenant, "corrected launch", null, 10, "Alice",
+            CancellationToken.None, viewerUserId: "user-alice");
+        var bob = await fixture.Index.SearchHybridAsync(Tenant, "corrected launch", null, 10, "Bob",
+            CancellationToken.None, viewerUserId: "user-bob");
 
         Assert.Equal("Alice", corrected.Author);
         Assert.Contains(alice.Hits, hit => hit.ClaimId == corrected.Id);
@@ -136,7 +139,7 @@ public sealed class MemorySafetyServiceTests
         await fixture.Memory.DeleteAsync(claim.Id, Tenant, CancellationToken.None);
 
         Assert.Empty(await fixture.Claims.GetAllAsync(CancellationToken.None));
-        Assert.Empty(await fixture.Vectors.GetAllAsync(CancellationToken.None));
+        Assert.Empty(await fixture.Vectors.GetAllAsync(Tenant, CancellationToken.None));
         Assert.Empty(await fixture.Findings.GetAllAsync(CancellationToken.None));
         Assert.Empty(await fixture.Impacts.GetAllAsync(CancellationToken.None));
         Assert.Empty(await fixture.Corrections.GetAllAsync(CancellationToken.None));
@@ -182,20 +185,101 @@ public sealed class MemorySafetyServiceTests
     }
 
     [Fact]
-    public async Task Personal_memory_is_visible_only_to_its_author()
+    public async Task Personal_memory_is_visible_only_to_its_stable_author_identity()
     {
         using var fixture = new MemoryFixture();
         var personal = await fixture.Memory.CaptureAsync(Tenant, "personal", "Private launch notes", "source:private",
-            0.8, "trusted", "Alice", CancellationToken.None);
+            0.8, "trusted", "Alice", CancellationToken.None, authorUserId: "user-alice");
         await fixture.Memory.CaptureAsync(Tenant, "organization", "Public launch checklist", "source:public",
             0.8, "trusted", "Bob", CancellationToken.None);
 
-        var alice = await fixture.Index.SearchHybridAsync(Tenant, "launch", null, 10, "Alice", CancellationToken.None);
-        var bob = await fixture.Index.SearchHybridAsync(Tenant, "launch", null, 10, "Bob", CancellationToken.None);
+        var alice = await fixture.Index.SearchHybridAsync(Tenant, "launch", null, 10, "Alice",
+            CancellationToken.None, viewerUserId: "user-alice");
+        var bob = await fixture.Index.SearchHybridAsync(Tenant, "launch", null, 10, "Bob",
+            CancellationToken.None, viewerUserId: "user-bob");
 
         Assert.Contains(alice.Hits, hit => hit.ClaimId == personal.Id);
         Assert.DoesNotContain(bob.Hits, hit => hit.ClaimId == personal.Id);
-        Assert.Null(await fixture.Memory.GetAsync(personal.Id, Tenant, "Bob", CancellationToken.None));
+        Assert.Null(await fixture.Memory.GetAsync(personal.Id, Tenant, "Bob", CancellationToken.None,
+            viewerUserId: "user-bob"));
+    }
+
+    [Fact]
+    public async Task Personal_memory_acl_uses_stable_employee_ids()
+    {
+        using var fixture = new MemoryFixture();
+        var stable = await fixture.Memory.CaptureAsync(Tenant, "personal", "Stable private note", "source:stable",
+            0.8, "trusted", "Alice", CancellationToken.None, authorEmployeeId: "employee-a");
+        var other = await fixture.Memory.CaptureAsync(Tenant, "personal", "Other private note", "source:other",
+            0.8, "trusted", "Alice", CancellationToken.None, authorEmployeeId: "employee-b");
+
+        Assert.NotNull(await fixture.Memory.GetAsync(stable.Id, Tenant, "Different name", CancellationToken.None,
+            "employee-a"));
+        Assert.Null(await fixture.Memory.GetAsync(stable.Id, Tenant, "Alice", CancellationToken.None, "employee-b"));
+        var employeeBHits = (await fixture.Index.SearchHybridAsync(Tenant, "private note", null, 10, "Alice",
+            CancellationToken.None, "employee-b")).Hits;
+        Assert.Equal([other.Id], employeeBHits.Select(hit => hit.ClaimId));
+        Assert.NotNull(await fixture.Memory.GetAsync(other.Id, Tenant, "Alice", CancellationToken.None, "employee-b"));
+        Assert.Null(await fixture.Memory.GetAsync(stable.Id, Tenant, "Alice", CancellationToken.None, "employee-b"));
+
+        await fixture.Memory.IsolatePersonalClaimsAsync(Tenant, "Alice", CancellationToken.None, "employee-a");
+
+        Assert.Equal("Isolated", (await fixture.Claims.GetAsync(stable.Id, CancellationToken.None))!.Status);
+        Assert.Equal("Active", (await fixture.Claims.GetAsync(other.Id, CancellationToken.None))!.Status);
+    }
+
+    [Fact]
+    public async Task Same_display_name_users_cannot_read_each_others_personal_memory()
+    {
+        using var fixture = new MemoryFixture();
+        var alice = await fixture.Memory.CaptureAsync(Tenant, "personal", "Alice private note", "source:alice",
+            0.8, "trusted", "Same Name", CancellationToken.None, authorUserId: "user-alice");
+        var bob = await fixture.Memory.CaptureAsync(Tenant, "personal", "Bob private note", "source:bob",
+            0.8, "trusted", "Same Name", CancellationToken.None, authorUserId: "user-bob");
+
+        Assert.NotNull(await fixture.Memory.GetAsync(alice.Id, Tenant, "Same Name", CancellationToken.None,
+            viewerUserId: "user-alice"));
+        Assert.Null(await fixture.Memory.GetAsync(alice.Id, Tenant, "Same Name", CancellationToken.None,
+            viewerUserId: "user-bob"));
+        Assert.Null(await fixture.Memory.GetAsync(bob.Id, Tenant, "Same Name", CancellationToken.None,
+            viewerUserId: "user-alice"));
+        var bobHits = (await fixture.Index.SearchHybridAsync(Tenant, "private note", null, 10, "Same Name",
+            CancellationToken.None, viewerUserId: "user-bob")).Hits;
+        Assert.Equal([bob.Id], bobHits.Select(hit => hit.ClaimId));
+    }
+
+    [Fact]
+    public async Task Legacy_name_only_memory_requires_an_explicit_unambiguous_compatibility_path()
+    {
+        using var fixture = new MemoryFixture();
+        var legacy = await fixture.Memory.CaptureAsync(Tenant, "personal", "Legacy private note", "source:legacy",
+            0.8, "trusted", "Alice", CancellationToken.None);
+
+        Assert.Null(await fixture.Memory.GetAsync(legacy.Id, Tenant, "Alice", CancellationToken.None));
+        Assert.Empty(await fixture.Memory.SearchAsync(Tenant, "Legacy", "Alice", CancellationToken.None));
+        Assert.NotNull(await fixture.Memory.GetAsync(legacy.Id, Tenant, "Alice", CancellationToken.None,
+            allowLegacyNameFallback: true));
+        Assert.Single(await fixture.Memory.SearchAsync(Tenant, "Legacy", "Alice", CancellationToken.None,
+            allowLegacyNameFallback: true));
+
+        await fixture.Memory.IsolatePersonalClaimsAsync(Tenant, "Alice", CancellationToken.None,
+            allowLegacyNameFallback: true);
+        Assert.Equal("Isolated", (await fixture.Claims.GetAsync(legacy.Id, CancellationToken.None))!.Status);
+    }
+
+    [Fact]
+    public async Task Legacy_name_fallback_fails_closed_when_the_name_is_ambiguous()
+    {
+        using var fixture = new MemoryFixture();
+        var first = await fixture.Memory.CaptureAsync(Tenant, "personal", "First legacy note", "source:first",
+            0.8, "trusted", "Alice", CancellationToken.None);
+        await fixture.Memory.CaptureAsync(Tenant, "personal", "Second legacy note", "source:second",
+            0.8, "trusted", "Alice", CancellationToken.None);
+
+        Assert.Null(await fixture.Memory.GetAsync(first.Id, Tenant, "Alice", CancellationToken.None,
+            allowLegacyNameFallback: true));
+        Assert.Empty(await fixture.Memory.SearchAsync(Tenant, "legacy", "Alice", CancellationToken.None,
+            allowLegacyNameFallback: true));
     }
 
     [Fact]
@@ -255,13 +339,96 @@ public sealed class MemorySafetyServiceTests
     {
         using var fixture = new MemoryFixture();
         var claim = await fixture.Memory.CaptureAsync(Tenant, "personal", "Private employee notes", "source:private",
-            0.8, "trusted", "Alice", CancellationToken.None);
+            0.8, "trusted", "Alice", CancellationToken.None, authorEmployeeId: "employee-alice");
 
-        await fixture.Memory.IsolatePersonalClaimsAsync(Tenant, "Alice", CancellationToken.None);
-        var result = await fixture.Index.SearchHybridAsync(Tenant, "private employee", null, 10, "Alice", CancellationToken.None);
+        await fixture.Memory.IsolatePersonalClaimsAsync(Tenant, "Alice", CancellationToken.None, "employee-alice");
+        var result = await fixture.Index.SearchHybridAsync(Tenant, "private employee", null, 10, "Alice",
+            CancellationToken.None, "employee-alice");
 
         Assert.Empty(result.Hits);
         Assert.Equal("Isolated", (await fixture.Claims.GetAsync(claim.Id, CancellationToken.None))!.Status);
+    }
+
+    [Fact]
+    public async Task Offboarding_preserves_non_personal_claims_and_their_vectors()
+    {
+        using var fixture = new MemoryFixture();
+        var employeeId = Guid.NewGuid().ToString("D");
+        var periodId = Guid.NewGuid().ToString("D");
+        var candidate = await fixture.Memory.CaptureAsync(Tenant, "organization", "Shared candidate fact",
+            "source:candidate", 0.8, "trusted", "Employee", CancellationToken.None, requireReview: true,
+            authorEmployeeId: employeeId, authorEmploymentPeriodId: periodId);
+        var active = await fixture.Memory.CaptureAsync(Tenant, "organization", "Shared active fact",
+            "source:active", 0.8, "trusted", "Employee", CancellationToken.None,
+            authorEmployeeId: employeeId, authorEmploymentPeriodId: periodId);
+        var knowledge = await fixture.Memory.CaptureAsync(Tenant, "knowledge_base", "Shared knowledge fact",
+            "source:knowledge", 0.8, "trusted", "Employee", CancellationToken.None,
+            authorEmployeeId: employeeId, authorEmploymentPeriodId: periodId);
+        var personal = await fixture.Memory.CaptureAsync(Tenant, "personal", "Shared private fact",
+            "source:private", 0.8, "trusted", "Employee", CancellationToken.None,
+            authorEmployeeId: employeeId, authorEmploymentPeriodId: periodId);
+
+        Assert.Null(candidate.AuthorEmploymentPeriodId);
+        Assert.Null(active.AuthorEmployeeId);
+        Assert.Null(knowledge.AuthorEmploymentPeriodId);
+
+        await fixture.Memory.IsolatePersonalClaimsAsync(Tenant, "Employee", CancellationToken.None,
+            employeeId, authorEmploymentPeriodId: periodId);
+
+        Assert.Equal("Candidate", (await fixture.Claims.GetAsync(candidate.Id, CancellationToken.None))!.Status);
+        Assert.Equal("Active", (await fixture.Claims.GetAsync(active.Id, CancellationToken.None))!.Status);
+        Assert.Equal("Active", (await fixture.Claims.GetAsync(knowledge.Id, CancellationToken.None))!.Status);
+        Assert.Equal("Isolated", (await fixture.Claims.GetAsync(personal.Id, CancellationToken.None))!.Status);
+        Assert.NotNull(await fixture.Vectors.GetAsync(Tenant, candidate.Id, CancellationToken.None));
+        Assert.NotNull(await fixture.Vectors.GetAsync(Tenant, active.Id, CancellationToken.None));
+        Assert.NotNull(await fixture.Vectors.GetAsync(Tenant, knowledge.Id, CancellationToken.None));
+        Assert.Null(await fixture.Vectors.GetAsync(Tenant, personal.Id, CancellationToken.None));
+
+        await fixture.Safety.PublishAsync(candidate.Id, Tenant,
+            new MemoryPublishRequest("Boss", "Approve", "Evidence verified"), CancellationToken.None);
+        var result = await fixture.Index.SearchHybridAsync(Tenant, "Shared", null, 10, "Employee",
+            CancellationToken.None, employeeId, viewerEmploymentPeriodId: periodId);
+
+        Assert.Contains(result.Hits, hit => hit.ClaimId == candidate.Id);
+        Assert.Contains(result.Hits, hit => hit.ClaimId == active.Id);
+        Assert.Contains(result.Hits, hit => hit.ClaimId == knowledge.Id);
+        Assert.DoesNotContain(result.Hits, hit => hit.ClaimId == personal.Id);
+    }
+
+    [Fact]
+    public async Task Isolation_retries_vector_cleanup_after_status_was_persisted()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"memory-cleanup-{Guid.NewGuid():N}");
+        try
+        {
+            var claims = new JsonDocumentStore<MemoryClaim>(Path.Combine(root, "claims.json"));
+            var vectors = new FaultInjectingVectorStore(new JsonMemoryVectorStore(
+                new JsonDocumentStore<MemoryVectorRecord>(Path.Combine(root, "vectors.json"))));
+            var findings = new JsonDocumentStore<MemoryFinding>(Path.Combine(root, "findings.json"));
+            var graph = new MemoryGraphService(
+                new JsonDocumentStore<MemoryGraphNode>(Path.Combine(root, "nodes.json")),
+                new JsonDocumentStore<MemoryGraphEdge>(Path.Combine(root, "edges.json")));
+            var index = new MemoryIndexService(claims, vectors, findings, graph, TimeProvider.System);
+            var memory = new MemoryService(claims,
+                new JsonDocumentStore<CorrectionTask>(Path.Combine(root, "corrections.json")), index);
+            var claim = await memory.CaptureAsync(Tenant, "personal", "Retry private note", "source:retry",
+                0.8, "trusted", "Employee", CancellationToken.None, authorEmployeeId: "employee-1");
+            vectors.FailNextDelete = true;
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => memory.IsolatePersonalClaimsAsync(
+                Tenant, "Employee", CancellationToken.None, "employee-1"));
+
+            Assert.Equal("Isolated", (await claims.GetAsync(claim.Id, CancellationToken.None))!.Status);
+            Assert.NotNull(await vectors.GetAsync(Tenant, claim.Id, CancellationToken.None));
+
+            await memory.IsolatePersonalClaimsAsync(Tenant, "Employee", CancellationToken.None, "employee-1");
+
+            Assert.Null(await vectors.GetAsync(Tenant, claim.Id, CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
     }
 
     [Fact]
@@ -269,7 +436,8 @@ public sealed class MemorySafetyServiceTests
     {
         using var fixture = new MemoryFixture();
         var personal = await fixture.Memory.CaptureAsync(Tenant, "personal", "Reusable release lesson", "source:lesson",
-            0.8, "untrusted", "Alice", CancellationToken.None);
+            0.8, "untrusted", "Alice", CancellationToken.None, authorEmployeeId: "employee-alice",
+            authorUserId: "user-alice", authorEmploymentPeriodId: Guid.NewGuid().ToString("D"));
 
         var candidate = await fixture.Safety.NominateAsync(personal.Id, Tenant,
             new MemoryNominationRequest("position-release"), CancellationToken.None);
@@ -277,6 +445,9 @@ public sealed class MemorySafetyServiceTests
 
         Assert.Equal("organization", candidate.Scope);
         Assert.Equal("Candidate", candidate.Status);
+        Assert.Null(candidate.AuthorEmployeeId);
+        Assert.Null(candidate.AuthorUserId);
+        Assert.Null(candidate.AuthorEmploymentPeriodId);
         Assert.Equal(personal.Id, candidate.DerivedFromClaimId);
         Assert.Equal(personal.Confidence, candidate.Confidence);
         Assert.Equal(personal.Taint, candidate.Taint);
@@ -295,12 +466,40 @@ public sealed class MemorySafetyServiceTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => fixture.Memory.DeleteAsync(claim.Id, OtherTenant, CancellationToken.None));
     }
 
+    private sealed class FaultInjectingVectorStore(IMemoryVectorStore inner) : IMemoryVectorStore
+    {
+        public bool FailNextDelete { get; set; }
+
+        public Task<MemoryVectorRecord?> GetAsync(string tenantId, string claimId,
+            CancellationToken cancellationToken) => inner.GetAsync(tenantId, claimId, cancellationToken);
+
+        public Task PutAsync(MemoryVectorRecord record, CancellationToken cancellationToken) =>
+            inner.PutAsync(record, cancellationToken);
+
+        public Task DeleteAsync(string tenantId, string claimId, CancellationToken cancellationToken)
+        {
+            if (!FailNextDelete) return inner.DeleteAsync(tenantId, claimId, cancellationToken);
+            FailNextDelete = false;
+            throw new InvalidOperationException("Injected vector deletion failure.");
+        }
+
+        public Task<IReadOnlyList<MemoryVectorRecord>> GetAllAsync(string tenantId,
+            CancellationToken cancellationToken) => inner.GetAllAsync(tenantId, cancellationToken);
+
+        public Task<int> DeleteTenantAsync(string tenantId, CancellationToken cancellationToken) =>
+            inner.DeleteTenantAsync(tenantId, cancellationToken);
+
+        public Task<IReadOnlyList<MemoryVectorRecord>> SearchAsync(string tenantId, float[] queryVector,
+            IReadOnlyList<string> allowedClaimIds, int maxResults, CancellationToken cancellationToken) =>
+            inner.SearchAsync(tenantId, queryVector, allowedClaimIds, maxResults, cancellationToken);
+    }
+
     private sealed class MemoryFixture : IDisposable
     {
         private readonly string root = Path.Combine(Path.GetTempPath(), $"memory-safety-{Guid.NewGuid():N}");
         public JsonDocumentStore<MemoryClaim> Claims { get; }
         public JsonDocumentStore<CorrectionTask> Corrections { get; }
-        public JsonDocumentStore<MemoryVectorRecord> Vectors { get; }
+        public JsonMemoryVectorStore Vectors { get; }
         public JsonDocumentStore<MemoryFinding> Findings { get; }
         public JsonDocumentStore<MemoryImpactRecord> Impacts { get; }
         public JsonDocumentStore<MemoryContextBinding> Contexts { get; }
@@ -315,7 +514,7 @@ public sealed class MemorySafetyServiceTests
         {
             Claims = new JsonDocumentStore<MemoryClaim>(Path.Combine(root, "claims.json"));
             Corrections = new JsonDocumentStore<CorrectionTask>(Path.Combine(root, "corrections.json"));
-            Vectors = new JsonDocumentStore<MemoryVectorRecord>(Path.Combine(root, "vectors.json"));
+            Vectors = new JsonMemoryVectorStore(new JsonDocumentStore<MemoryVectorRecord>(Path.Combine(root, "vectors.json")));
             Findings = new JsonDocumentStore<MemoryFinding>(Path.Combine(root, "findings.json"));
             Impacts = new JsonDocumentStore<MemoryImpactRecord>(Path.Combine(root, "impacts.json"));
             Contexts = new JsonDocumentStore<MemoryContextBinding>(Path.Combine(root, "contexts.json"));

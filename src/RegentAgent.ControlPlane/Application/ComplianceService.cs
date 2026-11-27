@@ -16,21 +16,31 @@ public sealed record ComplianceProfile(
 
 public sealed class ComplianceService(JsonDocumentStore<ComplianceProfile> profiles)
 {
-    public async Task SeedAsync(CancellationToken cancellationToken)
-    {
-        const string tenantId = "11111111-1111-1111-1111-111111111111";
-        if (await profiles.GetAsync(tenantId, cancellationToken) is not null) return;
-        await profiles.PutAsync(tenantId, new ComplianceProfile(tenantId, "baseline",
-            ["OpenAI", "Anthropic"], ["global"], 180, "standard", false, false, 1, "Active"), cancellationToken);
-    }
+    private const string SeedTenantId = "11111111-1111-1111-1111-111111111111";
 
-    public Task<ComplianceProfile?> GetAsync(string tenantId, CancellationToken cancellationToken) => profiles.GetAsync(tenantId, cancellationToken);
+    public Task SeedAsync(CancellationToken cancellationToken) => GetAsync(SeedTenantId, cancellationToken);
 
-    public async Task<ComplianceProfile> UpdateAsync(string tenantId, ComplianceProfile update, CancellationToken cancellationToken)
+    public Task<ComplianceProfile> GetAsync(string tenantId, CancellationToken cancellationToken) =>
+        profiles.GetOrAddAsync(tenantId, () => CreateBaseline(tenantId), cancellationToken);
+
+    public Task<ComplianceProfile> UpdateAsync(string tenantId, ComplianceProfile update, CancellationToken cancellationToken) =>
+        profiles.MutateAsync(tenantId, current =>
+        {
+            var baseline = current ?? CreateBaseline(tenantId);
+            if (update.Version != baseline.Version)
+                throw new VersionConflictException();
+            return update with { TenantId = tenantId, Version = baseline.Version + 1, Status = "Active" };
+        }, cancellationToken);
+
+    private static ComplianceProfile CreateBaseline(string tenantId) => new(
+        tenantId, "baseline", ["OpenAI", "Anthropic"], ["global"], 180, "standard", false, false, 1, "Active");
+}
+
+public sealed class VersionConflictException : Exception
+{
+    public const string Code = "VERSION_CONFLICT";
+
+    public VersionConflictException() : base("The resource version is stale.")
     {
-        var current = await profiles.GetAsync(tenantId, cancellationToken) ?? throw new KeyNotFoundException("Compliance profile not found.");
-        var next = update with { TenantId = tenantId, Version = current.Version + 1, Status = "Active" };
-        await profiles.PutAsync(tenantId, next, cancellationToken);
-        return next;
     }
 }

@@ -38,9 +38,17 @@ public sealed class RegentDbContext(DbContextOptions<RegentDbContext> options) :
         {
             entity.Property(x => x.Stage).HasConversion<string>();
             entity.Property(x => x.Health).HasConversion<string>();
-            entity.HasMany(x => x.Milestones).WithOne().HasForeignKey(x => x.ProjectId);
+            entity.HasAlternateKey(x => new { x.TenantId, x.Id });
+            entity.HasMany(x => x.Milestones).WithOne()
+                .HasForeignKey(x => new { x.TenantId, x.ProjectId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id });
             entity.HasMany(x => x.Tasks).WithOne().HasForeignKey(x => x.ProjectId);
             entity.HasIndex(x => new { x.TenantId, x.UpdatedAt });
+        });
+
+        modelBuilder.Entity<MilestoneRecord>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.ProjectId });
         });
 
         modelBuilder.Entity<CharterRecord>(entity =>
@@ -50,6 +58,7 @@ public sealed class RegentDbContext(DbContextOptions<RegentDbContext> options) :
 
         modelBuilder.Entity<PositionRecord>(entity =>
         {
+            entity.Property(x => x.Path).HasColumnType(Database.IsNpgsql() ? "ltree" : "text").IsRequired();
             entity.HasIndex(x => new { x.TenantId, x.Name });
         });
 

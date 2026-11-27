@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace RegentAgent.Contracts.Identity;
 
 public sealed record RegisterRequest(string Email, string Password, string DisplayName, string CompanyName);
@@ -11,6 +13,34 @@ public sealed record AuthResult(string Email, string DisplayName, Guid UserId, G
 public sealed record RecoveryRequest(string Email, string Code, string NewPassword);
 public sealed record SessionDto(Guid Id, Guid TenantId, DateTimeOffset CreatedAt, DateTimeOffset ExpiresAt, string Status,
     string AuthMethod = "Password", string SessionKind = "Standard");
+public enum CollaborationAccessScope
+{
+    None,
+    Participant,
+    Observer
+}
+
+public sealed record EffectiveAccessDto(
+    [property: JsonPropertyName("can_read_chat")] bool CanReadChat,
+    [property: JsonPropertyName("can_read_collaboration")] bool CanReadCollaboration,
+    [property: JsonPropertyName("collaboration_scope")] CollaborationAccessScope CollaborationScope);
+
+public sealed record TenantSessionSummaryDto(
+    [property: JsonPropertyName("email")] string Email,
+    [property: JsonPropertyName("display_name")] string DisplayName,
+    [property: JsonPropertyName("tenant_id")] Guid TenantId,
+    [property: JsonPropertyName("role")] string Role,
+    [property: JsonPropertyName("auth_method")] string AuthMethod,
+    [property: JsonPropertyName("session_kind")] string SessionKind,
+    [property: JsonPropertyName("capabilities")] IReadOnlyList<string> Capabilities,
+    [property: JsonPropertyName("effective_access")] EffectiveAccessDto EffectiveAccess);
+public sealed record OperatorSessionSummaryDto(
+    [property: JsonPropertyName("email")] string Email,
+    [property: JsonPropertyName("display_name")] string DisplayName,
+    [property: JsonPropertyName("role")] string Role,
+    [property: JsonPropertyName("auth_method")] string AuthMethod,
+    [property: JsonPropertyName("session_kind")] string SessionKind,
+    [property: JsonPropertyName("capabilities")] IReadOnlyList<string> Capabilities);
 public sealed record ExternalLoginRequest(Guid TenantId, string Issuer, string Subject, string Email, string DisplayName,
     string? Code = null, string? IdToken = null, string? CodeVerifier = null, string? Nonce = null);
 public sealed record StartExternalLoginRequest(Guid TenantId, string? RedirectUri = null);

@@ -17,10 +17,22 @@ public sealed class ApiContractMiddleware(RequestDelegate next)
         context.Response.Headers["X-Request-Id"] = requestId;
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
         var path = context.Request.Path.Value ?? string.Empty;
-        var isApi = path.StartsWith("/v1", StringComparison.Ordinal) || path.StartsWith("/agent/v1", StringComparison.Ordinal);
+        var isApi = path.StartsWith("/v1", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/agent/v1", StringComparison.OrdinalIgnoreCase);
         var isWrite = HttpMethods.IsPost(context.Request.Method) || HttpMethods.IsPut(context.Request.Method)
             || HttpMethods.IsPatch(context.Request.Method) || HttpMethods.IsDelete(context.Request.Method);
         if (!isApi || !isWrite || HttpMethods.IsOptions(context.Request.Method))
+        {
+            await next(context);
+            return;
+        }
+
+        var body = await ReadRequestBodyAsync(context);
+        if (!await ValidateUniqueJsonPropertiesAsync(context, body)) return;
+
+        // These authority-sensitive actions must evaluate the current actor instead of replaying a response
+        // cached for another actor. Approval execution owns its actor-scoped idempotency and target checks.
+        if (IsApprovalDecision(path) || IsToolDisclosure(path) || await IsApprovalGatedRouteAsync(context, body))
         {
             await next(context);
             return;
@@ -37,11 +49,6 @@ public sealed class ApiContractMiddleware(RequestDelegate next)
             await ProblemAsync(context, 401, "UNAUTHENTICATED", "A tenant identity is required.");
             return;
         }
-        context.Request.EnableBuffering();
-        using var requestBuffer = new MemoryStream();
-        await context.Request.Body.CopyToAsync(requestBuffer, context.RequestAborted);
-        context.Request.Body.Position = 0;
-        var body = requestBuffer.ToArray();
         var ifMatch = context.Request.Headers["If-Match"].ToString();
         if ((HttpMethods.IsPut(context.Request.Method) || HttpMethods.IsPatch(context.Request.Method)
             || HttpMethods.IsDelete(context.Request.Method)) && !await ValidateIfMatchAsync(context, ifMatch, body))
@@ -110,6 +117,117 @@ public sealed class ApiContractMiddleware(RequestDelegate next)
             await db.SaveChangesAsync(context.RequestAborted);
             throw;
         }
+    }
+
+    private static async Task<byte[]> ReadRequestBodyAsync(HttpContext context)
+    {
+        context.Request.EnableBuffering();
+        using var buffer = new MemoryStream();
+        await context.Request.Body.CopyToAsync(buffer, context.RequestAborted);
+        var body = buffer.ToArray();
+        context.Request.Body.Position = 0;
+        return body;
+    }
+
+    private static async Task<bool> ValidateUniqueJsonPropertiesAsync(HttpContext context, byte[] body)
+    {
+        var firstNonWhitespace = body.FirstOrDefault(value => !char.IsWhiteSpace((char)value));
+        if (firstNonWhitespace != (byte)'{' && firstNonWhitespace != (byte)'[') return true;
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            if (!ContainsDuplicateProperty(document.RootElement)) return true;
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+
+        await ProblemAsync(context, StatusCodes.Status400BadRequest, "INVALID_ARGUMENT",
+            "JSON request bodies must not contain duplicate property names.");
+        return false;
+    }
+
+    private static bool ContainsDuplicateProperty(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in element.EnumerateObject())
+                if (!names.Add(property.Name) || ContainsDuplicateProperty(property.Value))
+                    return true;
+            return false;
+        }
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in element.EnumerateArray())
+                if (ContainsDuplicateProperty(item))
+                    return true;
+        }
+        return false;
+    }
+
+    private static bool IsApprovalDecision(string path)
+    {
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length == 4 && string.Equals(segments[0], "v1", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[1], "approvals", StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(segments[2], out _) && string.Equals(segments[3], "decision", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsToolDisclosure(string path)
+    {
+        var segments = path.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length == 4 && string.Equals(segments[0], "v1", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[1], "agent-evolution", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[2], "tools", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(segments[3], "disclose", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<bool> IsApprovalGatedRouteAsync(HttpContext context, byte[] body)
+    {
+        if (!HttpMethods.IsPost(context.Request.Method)) return false;
+        var segments = (context.Request.Path.Value ?? string.Empty)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 4 && string.Equals(segments[0], "v1", StringComparison.OrdinalIgnoreCase)
+            && Guid.TryParse(segments[2], out _))
+        {
+            if (string.Equals(segments[1], "employees", StringComparison.OrdinalIgnoreCase)
+                && (string.Equals(segments[3], "offboard", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(segments[3], "rehire", StringComparison.OrdinalIgnoreCase)))
+                return true;
+            if (string.Equals(segments[1], "candidates", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(segments[3], "hire", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        if (segments.Length != 2 || !string.Equals(segments[0], "v1", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(segments[1], "performance-actions", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            return document.RootElement.ValueKind == JsonValueKind.Object
+                && TryGetPropertyIgnoreCase(document.RootElement, "actionType", out var actionType)
+                && actionType.ValueKind == JsonValueKind.String
+                && string.Equals(actionType.GetString(), "Terminate", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string name, out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)) continue;
+            value = property.Value;
+            return true;
+        }
+        value = default;
+        return false;
     }
 
     private static async Task<bool> ValidateIfMatchAsync(HttpContext context, string value, byte[] body)

@@ -5,7 +5,7 @@ namespace RegentAgent.Memory;
 
 public sealed class MemoryIndexService(
     JsonDocumentStore<MemoryClaim> claims,
-    JsonDocumentStore<MemoryVectorRecord> vectors,
+    IMemoryVectorStore vectors,
     JsonDocumentStore<MemoryFinding> findings,
     MemoryGraphService graph,
     TimeProvider clock)
@@ -17,61 +17,61 @@ public sealed class MemoryIndexService(
     {
         if (string.IsNullOrWhiteSpace(claim.Content)) throw new InvalidOperationException("Memory content is required.");
         var hash = LocalEmbeddingProvider.ContentHash(claim.Content);
-        var existing = await vectors.GetAsync(claim.Id, cancellationToken);
+        var tenant = MemoryVectorFormat.ValidateTenantId(claim.TenantId);
+        var tenantId = tenant.ToString("D");
+        var existing = await vectors.GetAsync(tenantId, claim.Id, cancellationToken);
         if (existing is null)
         {
-            await vectors.PutAsync(claim.Id, new MemoryVectorRecord(
-                claim.Id, claim.TenantId, hash, LocalEmbeddingProvider.ModelVersion,
+            await vectors.PutAsync(new MemoryVectorRecord(
+                claim.Id, tenantId, hash, LocalEmbeddingProvider.ModelVersion,
                 LocalEmbeddingProvider.Embed(claim.Content), clock.GetUtcNow()), cancellationToken);
         }
         else
         {
-            if (existing.TenantId != claim.TenantId) throw new UnauthorizedAccessException();
+            if (MemoryVectorFormat.ValidateTenantId(existing.TenantId) != tenant) throw new UnauthorizedAccessException();
             if (existing.ContentHash != hash || existing.ModelVersion != LocalEmbeddingProvider.ModelVersion)
-                await vectors.PutAsync(claim.Id, existing with
+                await vectors.PutAsync(existing with
                 {
                     ContentHash = hash, ModelVersion = LocalEmbeddingProvider.ModelVersion,
                     Vector = LocalEmbeddingProvider.Embed(claim.Content), IndexedAt = clock.GetUtcNow()
                 }, cancellationToken);
         }
-        await graph.EnsureClaimNodeAsync(claim.TenantId, claim.Id, claim.Content[..Math.Min(claim.Content.Length, 80)], cancellationToken);
+        await graph.EnsureClaimNodeAsync(tenantId, claim.Id, claim.Content[..Math.Min(claim.Content.Length, 80)], cancellationToken);
     }
 
-    public async Task RemoveFromRecallAsync(string tenantId, string claimId, CancellationToken cancellationToken)
-    {
-        var vector = await vectors.GetAsync(claimId, cancellationToken);
-        if (vector is not null)
-        {
-            if (vector.TenantId != tenantId) throw new UnauthorizedAccessException();
-            await vectors.DeleteAsync(claimId, cancellationToken);
-        }
-    }
+    public Task RemoveFromRecallAsync(string tenantId, string claimId, CancellationToken cancellationToken) =>
+        vectors.DeleteAsync(CanonicalTenantId(tenantId), claimId, cancellationToken);
 
     public async Task DeleteClaimAsync(string tenantId, string claimId, CancellationToken cancellationToken)
     {
-        await RemoveFromRecallAsync(tenantId, claimId, cancellationToken);
-        await graph.DeleteClaimAsync(tenantId, claimId, cancellationToken);
+        var canonicalTenantId = CanonicalTenantId(tenantId);
+        await vectors.DeleteAsync(canonicalTenantId, claimId, cancellationToken);
+        await graph.DeleteClaimAsync(canonicalTenantId, claimId, cancellationToken);
     }
 
     public async Task ReplaceClaimAsync(string tenantId, string oldClaimId, MemoryClaim corrected,
         CancellationToken cancellationToken)
     {
-        if (corrected.TenantId != tenantId) throw new UnauthorizedAccessException();
-        var edges = await graph.GetClaimEdgesAsync(tenantId, oldClaimId, cancellationToken);
-        await DeleteClaimAsync(tenantId, oldClaimId, cancellationToken);
+        var tenant = MemoryVectorFormat.ValidateTenantId(tenantId);
+        if (MemoryVectorFormat.ValidateTenantId(corrected.TenantId) != tenant) throw new UnauthorizedAccessException();
+        var canonicalTenantId = tenant.ToString("D");
+        var edges = await graph.GetClaimEdgesAsync(canonicalTenantId, oldClaimId, cancellationToken);
+        await DeleteClaimAsync(canonicalTenantId, oldClaimId, cancellationToken);
         await IndexClaimAsync(corrected, cancellationToken);
         foreach (var edge in edges)
-            await graph.AddEdgeAsync(new MemoryGraphEdge(Guid.NewGuid().ToString("N"), tenantId,
+            await graph.AddEdgeAsync(new MemoryGraphEdge(Guid.NewGuid().ToString("N"), canonicalTenantId,
                 edge.FromClaimId == oldClaimId ? corrected.Id : edge.FromClaimId,
                 edge.ToClaimId == oldClaimId ? corrected.Id : edge.ToClaimId, edge.Relation), cancellationToken);
     }
 
     public async Task<int> RebuildAsync(string tenantId, CancellationToken cancellationToken)
     {
-        var existing = (await vectors.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId).ToArray();
-        foreach (var vector in existing) await vectors.DeleteAsync(vector.ClaimId, cancellationToken);
+        var tenant = MemoryVectorFormat.ValidateTenantId(tenantId);
+        var canonicalTenantId = tenant.ToString("D");
+        await vectors.DeleteTenantAsync(canonicalTenantId, cancellationToken);
         var tenantClaims = (await claims.GetAllAsync(cancellationToken))
-            .Where(x => x.TenantId == tenantId && x.Status == "Active").OrderBy(x => x.Id, StringComparer.Ordinal).ToArray();
+            .Where(x => MemoryVectorFormat.ValidateTenantId(x.TenantId) == tenant && x.Status == "Active")
+            .OrderBy(x => x.Id, StringComparer.Ordinal).ToArray();
         foreach (var claim in tenantClaims) await IndexClaimAsync(claim, cancellationToken);
         return tenantClaims.Length;
     }
@@ -79,19 +79,22 @@ public sealed class MemoryIndexService(
     public async Task<IReadOnlyList<string>> FindConflictsAsync(string claimId, string tenantId,
         CancellationToken cancellationToken)
     {
+        var tenant = MemoryVectorFormat.ValidateTenantId(tenantId);
+        var canonicalTenantId = tenant.ToString("D");
         var claim = await claims.GetAsync(claimId, cancellationToken) ?? throw new KeyNotFoundException("Claim not found.");
-        if (claim.TenantId != tenantId) throw new UnauthorizedAccessException();
+        if (MemoryVectorFormat.ValidateTenantId(claim.TenantId) != tenant) throw new UnauthorizedAccessException();
         if (claim.Status is not ("Active" or "Disputed")) return [];
         await IndexClaimAsync(claim, cancellationToken);
-        var vector = await vectors.GetAsync(claimId, cancellationToken);
+        var vector = await vectors.GetAsync(canonicalTenantId, claimId, cancellationToken);
         if (vector is null) return [];
-        var candidates = (await claims.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId
-            && x.Id != claimId && x.Scope == claim.Scope && x.Status is "Active" or "Disputed").ToArray();
+        var candidates = (await claims.GetAllAsync(cancellationToken)).Where(x => MemoryVectorFormat.ValidateTenantId(x.TenantId) == tenant
+            && x.Id != claimId && x.Scope == claim.Scope && (x.Status is "Active" or "Disputed")
+        ).ToArray();
         var conflicts = new List<string>();
         foreach (var candidate in candidates)
         {
             await IndexClaimAsync(candidate, cancellationToken);
-            var candidateVector = await vectors.GetAsync(candidate.Id, cancellationToken);
+            var candidateVector = await vectors.GetAsync(canonicalTenantId, candidate.Id, cancellationToken);
             if (candidateVector is not null && candidate.Content != claim.Content
                 && LocalEmbeddingProvider.Cosine(vector.Vector, candidateVector.Vector) > ConflictThreshold)
                 conflicts.Add(candidate.Id);
@@ -104,27 +107,36 @@ public sealed class MemoryIndexService(
         SearchHybridAsync(tenantId, query, scope, maxResults, null, cancellationToken);
 
     public async Task<MemorySearchResult> SearchHybridAsync(string tenantId, string query, string? scope,
-        int maxResults, string? viewer, CancellationToken cancellationToken)
+        int maxResults, string? viewer, CancellationToken cancellationToken, string? viewerEmployeeId = null,
+        string? viewerUserId = null, bool allowLegacyNameFallback = false, string? viewerEmploymentPeriodId = null)
     {
         if (string.IsNullOrWhiteSpace(query)) throw new InvalidOperationException("Search query is required.");
         if (maxResults is < 1 or > 50) throw new InvalidOperationException("maxResults must be between 1 and 50.");
-        var candidates = (await claims.GetAllAsync(cancellationToken))
-            .Where(x => x.TenantId == tenantId && x.Status is "Active" or "Disputed"
-                && (x.Scope != "personal" || x.Author == viewer)
+        var tenant = MemoryVectorFormat.ValidateTenantId(tenantId);
+        var canonicalTenantId = tenant.ToString("D");
+        var tenantClaims = (await claims.GetAllAsync(cancellationToken))
+            .Where(x => MemoryVectorFormat.ValidateTenantId(x.TenantId) == tenant).ToArray();
+        var allowLegacyFallback = allowLegacyNameFallback
+            && PersonalMemoryAccess.LegacyNameIsUnambiguous(tenantClaims, canonicalTenantId, viewer);
+        var candidates = tenantClaims
+            .Where(x => x.Status is "Active" or "Disputed"
+                && PersonalMemoryAccess.CanRead(x, viewer, viewerEmployeeId, viewerUserId, allowLegacyFallback,
+                    viewerEmploymentPeriodId)
                 && (scope is null || x.Scope == scope))
-            .OrderBy(x => x.Id, StringComparer.Ordinal).Take(200).ToArray();
+            .OrderBy(x => x.Id, StringComparer.Ordinal).Take(MemoryVectorFormat.MaximumSearchResults).ToArray();
         foreach (var claim in candidates) await IndexClaimAsync(claim, cancellationToken);
 
         var queryVector = LocalEmbeddingProvider.Embed(query);
         var queryTokens = LocalEmbeddingProvider.Tokenize(query).ToHashSet(StringComparer.Ordinal);
         var vectorMap = new Dictionary<string, MemoryVectorRecord>(StringComparer.Ordinal);
-        foreach (var claim in candidates)
+        if (candidates.Length > 0)
         {
-            var vector = await vectors.GetAsync(claim.Id, cancellationToken);
-            if (vector is not null) vectorMap[claim.Id] = vector;
+            var vectorHits = await vectors.SearchAsync(canonicalTenantId, queryVector,
+                candidates.Select(claim => claim.Id).ToArray(), candidates.Length, cancellationToken);
+            foreach (var vector in vectorHits) vectorMap[vector.ClaimId] = vector;
         }
         var activeFindings = (await findings.GetAllAsync(cancellationToken))
-            .Where(x => x.TenantId == tenantId && x.Status is "Open" or "Appealed" or "Quarantined").ToArray();
+            .Where(x => MemoryVectorFormat.ValidateTenantId(x.TenantId) == tenant && x.Status is "Open" or "Appealed" or "Quarantined").ToArray();
 
         var scored = candidates.Select(claim =>
         {
@@ -147,7 +159,7 @@ public sealed class MemoryIndexService(
         var graphBoosts = new Dictionary<string, double>(StringComparer.Ordinal);
         foreach (var seed in scored.OrderByDescending(x => x.Score).Take(3))
         {
-            var related = await graph.QueryAsync(tenantId, seed.Claim.Id, 2, 20, cancellationToken);
+            var related = await graph.QueryAsync(canonicalTenantId, seed.Claim.Id, 2, 20, cancellationToken);
             foreach (var node in related.Nodes)
             {
                 if (node.ClaimId == seed.Claim.Id || graphExpanded.Contains(node.ClaimId)) continue;
@@ -173,6 +185,9 @@ public sealed class MemoryIndexService(
         }
         return new MemorySearchResult(hits, candidates.Length, LocalEmbeddingProvider.ModelVersion);
     }
+
+    private static string CanonicalTenantId(string tenantId) =>
+        MemoryVectorFormat.ValidateTenantId(tenantId).ToString("D");
 
     private static Dictionary<string, List<string>> FindConflicts(IReadOnlyList<MemoryClaim> claims,
         IReadOnlyDictionary<string, MemoryVectorRecord> vectors)

@@ -47,6 +47,16 @@ using RegentAgent.Contracts.Runtime;
 using RegentAgent.Storage;
 
 var builder = WebApplication.CreateBuilder(args);
+var allowDemoLogin = builder.Configuration.GetValue<bool>("Identity:AllowDemoLogin");
+var storageProvider = (builder.Configuration["Storage:Provider"] ?? "Sqlite").Trim().ToLowerInvariant();
+if (storageProvider is not ("sqlite" or "postgres" or "inmemory"))
+    throw new InvalidOperationException("Storage provider must be Sqlite, Postgres, or InMemory.");
+var useInMemoryStorage = builder.Configuration.GetValue<bool>("Storage:UseInMemory")
+    || storageProvider.Equals("InMemory", StringComparison.OrdinalIgnoreCase);
+var usePostgresStorage = !useInMemoryStorage && storageProvider.Equals("Postgres", StringComparison.OrdinalIgnoreCase);
+var postgresConnectionString = usePostgresStorage ? builder.Configuration.GetConnectionString("Postgres") : null;
+if (usePostgresStorage && string.IsNullOrWhiteSpace(postgresConnectionString))
+    throw new InvalidOperationException("Postgres connection string is required.");
 builder.Services.AddRegentObservability(builder.Configuration);
 builder.Services.AddAgentIdentity(builder.Configuration);
 var runnerToken = builder.Configuration["Runner:Token"];
@@ -61,16 +71,25 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.SnakeCaseLower));
 });
 
-builder.Services.AddOpenApi("v1");
+builder.Services.AddOpenApi("v1", options =>
+{
+    options.AddDocumentTransformer((document, context, cancellationToken) =>
+    {
+        document.Servers = [];
+        return Task.CompletedTask;
+    });
+});
 builder.Services.AddSignalR();
 var httpContextAccessor = new HttpContextAccessor();
 builder.Services.AddSingleton<IHttpContextAccessor>(httpContextAccessor);
 builder.Services.AddScoped<ITenantContext, TenantContext>();
+builder.Services.AddSingleton<ITenantPurgeStateProvider>(provider => new PersistedTenantPurgeStateProvider(
+    provider.GetRequiredService<IServiceScopeFactory>(), "data/modules/lifecycle.json"));
 var operationsDataPath = builder.Configuration["Data:OperationsPath"]
     ?? (builder.Environment.IsDevelopment()
         ? Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", "data", "ops"))
         : "data/ops");
-builder.Services.AddSingleton(new JsonDocumentStore<AlertRecord>(Path.Combine(operationsDataPath, "alerts.json")));
+AddPurgeFencedJsonStore<AlertRecord>(builder.Services, Path.Combine(operationsDataPath, "alerts.json"));
 builder.Services.AddScoped<DashboardService>();
 builder.Services.AddScoped<CollaborationVisualizationService>();
 var collaborationOptions = new CollaborationOptions();
@@ -95,7 +114,18 @@ builder.Services.AddScoped<IAgentToolHandler, PerformanceToolHandler>();
 builder.Services.AddScoped<IAgentToolHandler, EvaluationToolHandler>();
 builder.Services.AddScoped<IAgentToolHandler, AgentEvolutionToolHandler>();
 builder.Services.AddScoped<IAgentToolHandler, TaskGovernanceToolHandler>();
-builder.Services.AddSingleton<IAuthorizationHandler, CapabilityAuthorizationHandler>();
+builder.Services.AddScoped<MembershipAuthority>();
+builder.Services.AddScoped<IAuthorizationHandler, CurrentMembershipAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, MembershipRoleAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, CapabilityAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, ObserverReadAuthorizationHandler>();
+builder.Services.AddScoped<IAuthorizationHandler, ApprovalDecisionAuthorizationHandler>();
+builder.Services.AddScoped<ToolDisclosureAuthorityFactory>();
+builder.Services.AddScoped<ApprovalAuthority>();
+builder.Services.AddScoped<ApprovalExecutionService>();
+builder.Services.AddScoped<IOutboxEventHandler, ApprovalExecutionOutboxHandler>();
+builder.Services.AddSingleton<TenantHubConnectionRegistry>();
+builder.Services.AddHostedService<TenantHubSessionRevalidator>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<EmployeeService>();
 builder.Services.AddScoped<ApprovalService>();
@@ -106,16 +136,24 @@ builder.Services.AddScoped<TenantService>();
 builder.Services.AddScoped<OrganizationService>();
 builder.Services.AddScoped<AuditIntegrityService>();
 builder.Services.AddScoped<MemoryEventService>();
-builder.Services.AddSingleton(new JsonDocumentStore<LocalizationSettings>("data/modules/localization.json"));
+AddPurgeFencedJsonStore<LocalizationSettings>(builder.Services, "data/modules/localization.json");
 builder.Services.AddSingleton<LocalizationService>();
-builder.Services.AddSingleton(sp => new DeliveryService(
-    new JsonDocumentStore<ProjectDeliveryState>("data/modules/project-delivery.json"), sp.GetRequiredService<TimeProvider>()));
+builder.Services.AddScoped<IDeliveryArtifactVerifier, DeliveryArtifactVerifier>();
+AddPurgeFencedJsonStore<ProjectDeliveryState>(builder.Services, "data/modules/project-delivery.json");
+builder.Services.AddScoped(sp => new DeliveryService(
+    sp.GetRequiredService<JsonDocumentStore<ProjectDeliveryState>>(), sp.GetRequiredService<TimeProvider>(),
+    sp.GetRequiredService<IDeliveryArtifactVerifier>()));
 builder.Services.AddScoped<DeliveryRuntimeProjectionService>();
 builder.Services.AddSingleton(sp => new LocalArtifactSigner("data/security/tool-signing-key.pem"));
 builder.Services.AddSingleton(sp => new GovernanceService(
-    new JsonDocumentStore<GovernanceState>("data/modules/governance.json"),
+    CreatePurgeFencedJsonStore<GovernanceState>(sp, "data/modules/governance.json"),
     sp.GetRequiredService<LocalArtifactSigner>(), sp.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton(new JsonDocumentStore<DataLifecycleState>("data/modules/lifecycle.json"));
+AddPurgeFencedJsonStore<DataLifecycleState>(builder.Services, "data/modules/lifecycle.json");
+builder.Services.AddSingleton<IDocumentStore<DataLifecycleState>>(provider =>
+    provider.GetRequiredService<JsonDocumentStore<DataLifecycleState>>());
+builder.Services.AddSingleton<TenantObjectUploadTracker>();
+builder.Services.AddScoped<TenantPurgeWriteInterceptor>();
+builder.Services.AddScoped<ITenantRuntimeAdmission, ControlPlaneTenantRuntimeAdmission>();
 builder.Services.AddScoped<DataLifecycleService>();
 var modelCatalogMode = builder.Configuration["ModelCatalog:Mode"] ?? "local";
 var modelsDevOptions = new ModelsDevCatalogOptions
@@ -137,57 +175,65 @@ builder.Services.AddSingleton<IModelCatalogSource>(provider => modelCatalogMode.
         provider.GetRequiredService<ModelsDevCatalogOptions>(), provider.GetRequiredService<TimeProvider>()),
     _ => throw new InvalidOperationException("Model catalog mode must be local or models-dev.")
 });
-builder.Services.AddSingleton(new JsonDocumentStore<ModelPoolState>("data/modules/model-pool.json"));
+AddPurgeFencedJsonStore<ModelPoolState>(builder.Services, "data/modules/model-pool.json");
 builder.Services.AddSingleton(sp => new ModelOperationsService(
     sp.GetRequiredService<JsonDocumentStore<ModelPoolState>>(), sp.GetRequiredService<TimeProvider>(),
     sp.GetRequiredService<IModelCatalogSource>()));
 builder.Services.AddSingleton(sp => new RuntimePolicyService(
-    new JsonDocumentStore<RuntimePolicyState>("data/modules/runtime-policy.json"), sp.GetRequiredService<TimeProvider>()));
+    CreatePurgeFencedJsonStore<RuntimePolicyState>(sp, "data/modules/runtime-policy.json"), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new WorkflowService(
-    new JsonDocumentStore<WorkflowDefinition>("data/modules/workflows.json"),
-    new JsonDocumentStore<WorkflowRun>("data/modules/workflow-runs.json")));
-builder.Services.AddSingleton(new JsonDocumentStore<MemoryClaim>("data/modules/memory.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<CorrectionTask>("data/modules/corrections.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<MemoryVectorRecord>("data/modules/memory-vectors.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<MemoryFinding>("data/modules/memory-findings.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<MemoryImpactRecord>("data/modules/memory-impacts.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<MemoryContextBinding>("data/modules/memory-contexts.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<MemoryGraphNode>("data/modules/memory-graph-nodes.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<MemoryGraphEdge>("data/modules/memory-graph-edges.json"));
+    CreatePurgeFencedJsonStore<WorkflowDefinition>(sp, "data/modules/workflows.json"),
+    CreatePurgeFencedJsonStore<WorkflowRun>(sp, "data/modules/workflow-runs.json")));
+AddPurgeFencedJsonStore<MemoryClaim>(builder.Services, "data/modules/memory.json");
+AddPurgeFencedJsonStore<CorrectionTask>(builder.Services, "data/modules/corrections.json");
+if (usePostgresStorage)
+    builder.Services.AddSingleton<IMemoryVectorStore>(_ => new PostgresMemoryVectorStore(postgresConnectionString!));
+else
+    builder.Services.AddSingleton<IMemoryVectorStore>(sp => new JsonMemoryVectorStore(
+        CreatePurgeFencedJsonStore<MemoryVectorRecord>(sp, "data/modules/memory-vectors.json")));
+AddPurgeFencedJsonStore<MemoryFinding>(builder.Services, "data/modules/memory-findings.json");
+AddPurgeFencedJsonStore<MemoryImpactRecord>(builder.Services, "data/modules/memory-impacts.json");
+AddPurgeFencedJsonStore<MemoryContextBinding>(builder.Services, "data/modules/memory-contexts.json");
+AddPurgeFencedJsonStore<MemoryGraphNode>(builder.Services, "data/modules/memory-graph-nodes.json");
+AddPurgeFencedJsonStore<MemoryGraphEdge>(builder.Services, "data/modules/memory-graph-edges.json");
 builder.Services.AddSingleton<MemoryGraphService>();
 builder.Services.AddSingleton<MemoryIndexService>();
 builder.Services.AddSingleton<MemorySafetyService>();
 builder.Services.AddSingleton<MemoryService>();
+builder.Services.AddSingleton<IPersonalMemoryIsolation>(sp => sp.GetRequiredService<MemoryService>());
 builder.Services.AddSingleton(sp => new PerformanceService(
-    new JsonDocumentStore<KpiSnapshot>("data/modules/kpis.json"),
-    new JsonDocumentStore<PerformanceReview>("data/modules/reviews.json")));
+    CreatePurgeFencedJsonStore<KpiSnapshot>(sp, "data/modules/kpis.json"),
+    CreatePurgeFencedJsonStore<PerformanceReview>(sp, "data/modules/reviews.json")));
 builder.Services.AddSingleton(sp => new ImprovementService(
-    new JsonDocumentStore<ImprovementProposal>("data/modules/improvements.json")));
+    CreatePurgeFencedJsonStore<ImprovementProposal>(sp, "data/modules/improvements.json")));
 builder.Services.AddSingleton(sp => new PerformanceActionService(
-    new JsonDocumentStore<PerformanceActionRecord>("data/modules/performance-actions.json")));
+    CreatePurgeFencedJsonStore<PerformanceActionRecord>(sp, "data/modules/performance-actions.json"), sp.GetRequiredService<TimeProvider>()));
 builder.Services.AddSingleton(sp => new AgentEvolutionService(
-    new JsonDocumentStore<AgentEvolutionState>("data/modules/agent-evolution.json"), sp.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton(sp => new AgentRuntimeService(
-    new JsonDocumentStore<AgentContextSnapshot>("data/modules/agent-contexts.json"), sp.GetRequiredService<TimeProvider>()));
+    CreatePurgeFencedJsonStore<AgentEvolutionState>(sp, "data/modules/agent-evolution.json"), sp.GetRequiredService<TimeProvider>()));
+AddPurgeFencedJsonStore<AgentContextSnapshot>(builder.Services, "data/modules/agent-contexts.json");
+builder.Services.AddSingleton<IDocumentStore<AgentContextSnapshot>>(provider =>
+    provider.GetRequiredService<JsonDocumentStore<AgentContextSnapshot>>());
+builder.Services.AddScoped<AgentRuntimeService>();
 builder.Services.AddSingleton(sp => new TaskGovernanceService(
-    new JsonDocumentStore<TaskGovernanceState>("data/modules/task-governance.json"), sp.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton(sp => new ComplianceService(
-    new JsonDocumentStore<ComplianceProfile>("data/modules/compliance.json")));
+    CreatePurgeFencedJsonStore<TaskGovernanceState>(sp, "data/modules/task-governance.json"), sp.GetRequiredService<TimeProvider>()));
+AddPurgeFencedJsonStore<ComplianceProfile>(builder.Services, "data/modules/compliance.json");
+builder.Services.AddSingleton<ComplianceService>();
 builder.Services.AddSingleton<CommunicationRouter>();
 builder.Services.AddSingleton(sp => new ChatService(
-    new JsonDocumentStore<Conversation>("data/modules/conversations.json"),
-    new JsonDocumentStore<ChatMessage>("data/modules/messages.json")));
+    CreatePurgeFencedJsonStore<Conversation>(sp, "data/modules/conversations.json"),
+    CreatePurgeFencedJsonStore<ChatMessage>(sp, "data/modules/messages.json")));
 builder.Services.AddSingleton(sp => new EvaluationService(
-    new JsonDocumentStore<BenchmarkSuite>("data/modules/suites.json"),
-    new JsonDocumentStore<EvaluationRun>("data/modules/evaluations.json"),
-    new JsonDocumentStore<JudgeAssignment>("data/modules/judges.json")));
+    CreatePurgeFencedJsonStore<BenchmarkSuite>(sp, "data/modules/suites.json"),
+    CreatePurgeFencedJsonStore<EvaluationRun>(sp, "data/modules/evaluations.json"),
+    CreatePurgeFencedJsonStore<JudgeAssignment>(sp, "data/modules/judges.json")));
 builder.Services.AddSingleton(sp => new EvaluationQaService(
-    new JsonDocumentStore<EvaluationQaState>("data/modules/evaluation-qa.json")));
+    CreatePurgeFencedJsonStore<EvaluationQaState>(sp, "data/modules/evaluation-qa.json")));
 var objectProvider = builder.Configuration["Storage:ObjectProvider"] ?? "Local";
 if (objectProvider.Equals("Local", StringComparison.OrdinalIgnoreCase))
 {
-    builder.Services.AddSingleton<IObjectStore>(provider =>
-        new LocalFileObjectStore(provider.GetRequiredService<IConfiguration>()["Storage:ObjectRoot"] ?? "data/objects"));
+    builder.Services.AddSingleton<IObjectStore>(provider => new TenantPurgeObjectStore(
+        new LocalFileObjectStore(provider.GetRequiredService<IConfiguration>()["Storage:ObjectRoot"] ?? "data/objects"),
+        provider.GetRequiredService<TenantObjectUploadTracker>(), provider.GetRequiredService<ITenantPurgeStateProvider>()));
 }
 else if (objectProvider.Equals("S3", StringComparison.OrdinalIgnoreCase))
 {
@@ -203,7 +249,9 @@ else if (objectProvider.Equals("S3", StringComparison.OrdinalIgnoreCase))
         MaxRetries = builder.Configuration.GetValue("Storage:S3:MaxRetries", 2)
     };
     s3Options.Validate();
-    builder.Services.AddSingleton<IObjectStore>(S3ObjectStore.Create(s3Options));
+    builder.Services.AddSingleton<IObjectStore>(provider => new TenantPurgeObjectStore(
+        S3ObjectStore.Create(s3Options), provider.GetRequiredService<TenantObjectUploadTracker>(),
+        provider.GetRequiredService<ITenantPurgeStateProvider>()));
 }
 else throw new InvalidOperationException("Object storage provider must be Local or S3.");
 var auditAnchorProvider = builder.Configuration["Audit:AnchorProvider"] ?? "Local";
@@ -215,17 +263,17 @@ else if (auditAnchorProvider.Equals("ObjectStore", StringComparison.OrdinalIgnor
 else throw new InvalidOperationException("Audit anchor provider must be Local or ObjectStore.");
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<LoginRateLimiter>();
-builder.Services.AddSingleton(new JsonDocumentStore<CredentialRecord>("data/modules/credentials.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<AuthSessionRecord>("data/modules/sessions.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<RecoveryCodeRecord>("data/modules/recovery-codes.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<UserTenantProfileRecord>("data/modules/profiles.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<IdentityProviderRecord>("data/modules/identity-providers.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<InvitationRecord>("data/modules/invitations.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<OwnershipDelegationRecord>("data/modules/ownership-delegations.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<ExternalIdentityBindingRecord>("data/modules/external-identity-bindings.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<ExternalLoginTransactionRecord>("data/modules/external-login-transactions.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<AuthenticationPolicyRecord>("data/modules/authentication-policies.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<EmergencyAccessCredentialRecord>("data/modules/emergency-access-credentials.json"));
+AddPurgeFencedJsonStore<CredentialRecord>(builder.Services, "data/modules/credentials.json");
+AddPurgeFencedJsonStore<AuthSessionRecord>(builder.Services, "data/modules/sessions.json");
+AddPurgeFencedJsonStore<RecoveryCodeRecord>(builder.Services, "data/modules/recovery-codes.json");
+AddPurgeFencedJsonStore<UserTenantProfileRecord>(builder.Services, "data/modules/profiles.json");
+AddPurgeFencedJsonStore<IdentityProviderRecord>(builder.Services, "data/modules/identity-providers.json");
+AddPurgeFencedJsonStore<InvitationRecord>(builder.Services, "data/modules/invitations.json");
+AddPurgeFencedJsonStore<OwnershipDelegationRecord>(builder.Services, "data/modules/ownership-delegations.json");
+AddPurgeFencedJsonStore<ExternalIdentityBindingRecord>(builder.Services, "data/modules/external-identity-bindings.json");
+AddPurgeFencedJsonStore<ExternalLoginTransactionRecord>(builder.Services, "data/modules/external-login-transactions.json");
+AddPurgeFencedJsonStore<AuthenticationPolicyRecord>(builder.Services, "data/modules/authentication-policies.json");
+AddPurgeFencedJsonStore<EmergencyAccessCredentialRecord>(builder.Services, "data/modules/emergency-access-credentials.json");
 var externalIdentityOptions = new ExternalIdentityOptions
 {
     Mode = builder.Configuration["Identity:Mode"] ?? "local",
@@ -264,48 +312,45 @@ builder.Services.AddSingleton<IExternalIdentityProvider>(provider => new OidcExt
     provider.GetRequiredService<ExternalIdentityOptions>(), provider.GetRequiredService<IExternalIdentitySecretProvider>()));
 builder.Services.AddSingleton<IExternalIdentityProviderResolver, ExternalIdentityProviderResolver>();
 builder.Services.AddScoped<IdentityService>();
+builder.Services.AddScoped<ITenantSessionValidator>(provider => provider.GetRequiredService<IdentityService>());
 var billingProvider = builder.Configuration["Billing:Provider"] ?? "local";
 if (!billingProvider.Equals("local", StringComparison.OrdinalIgnoreCase))
     throw new InvalidOperationException("External payment adapter is not configured; use local mode for self-hosted billing.");
 builder.Services.AddSingleton<ISubscriptionPaymentAdapter, LocalSubscriptionPaymentAdapter>();
-builder.Services.AddSingleton(new JsonDocumentStore<BillingStateRecord>("data/modules/billing.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<DataExportDto>("data/modules/exports.json"));
+AddPurgeFencedJsonStore<BillingStateRecord>(builder.Services, "data/modules/billing.json");
+AddPurgeFencedJsonStore<DataExportDto>(builder.Services, "data/modules/exports.json");
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddScoped<ITenantQuotaGuard>(provider => provider.GetRequiredService<BillingService>());
 builder.Services.AddScoped<DataExportService>();
-builder.Services.AddSingleton(new JsonDocumentStore<ButlerReport>("data/modules/butler-reports.json"));
-builder.Services.AddSingleton(new JsonDocumentStore<ReportSchedule>("data/modules/report-schedules.json"));
+AddPurgeFencedJsonStore<ButlerReport>(builder.Services, "data/modules/butler-reports.json");
+AddPurgeFencedJsonStore<ReportSchedule>(builder.Services, "data/modules/report-schedules.json");
 builder.Services.AddScoped<ButlerService>();
 builder.Services.AddHostedService<ButlerReportWorker>();
 builder.Services.AddHostedService<DataLifecycleWorker>();
 
-builder.Services.AddDbContext<RegentDbContext>(options =>
+builder.Services.AddDbContext<RegentDbContext>((serviceProvider, options) =>
 {
-    var provider = builder.Configuration["Storage:Provider"] ?? "Sqlite";
-    if (provider.Trim().ToLowerInvariant() is not ("sqlite" or "postgres" or "inmemory"))
-        throw new InvalidOperationException("Storage provider must be Sqlite, Postgres, or InMemory.");
-    if (builder.Configuration.GetValue<bool>("Storage:UseInMemory") || provider.Equals("InMemory", StringComparison.OrdinalIgnoreCase))
+    if (useInMemoryStorage)
     {
         options.UseInMemoryDatabase("regent-controlplane");
     }
-    else if (provider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
+    else if (storageProvider.Equals("Sqlite", StringComparison.OrdinalIgnoreCase))
     {
         Directory.CreateDirectory("data");
         options.UseSqlite(builder.Configuration.GetConnectionString("Sqlite") ?? "Data Source=data/regent.db");
     }
     else
     {
-        var connection = builder.Configuration.GetConnectionString("Postgres");
-        if (string.IsNullOrWhiteSpace(connection)) throw new InvalidOperationException("Postgres connection string is required.");
-        options.UseNpgsql(connection).AddInterceptors(new TenantRlsConnectionInterceptor(httpContextAccessor));
+        options.UseNpgsql(postgresConnectionString!).AddInterceptors(new TenantRlsConnectionInterceptor(httpContextAccessor));
     }
+    options.AddInterceptors([serviceProvider.GetRequiredService<TenantPurgeWriteInterceptor>()]);
 });
 
+RegisterTenantStore<AlertRecord>(builder.Services, Path.Combine(operationsDataPath, "alerts.json"));
 RegisterTenantStore<WorkflowDefinition>(builder.Services, "data/modules/workflows.json");
 RegisterTenantStore<WorkflowRun>(builder.Services, "data/modules/workflow-runs.json");
 RegisterTenantStore<MemoryClaim>(builder.Services, "data/modules/memory.json");
 RegisterTenantStore<CorrectionTask>(builder.Services, "data/modules/corrections.json");
-RegisterTenantStore<MemoryVectorRecord>(builder.Services, "data/modules/memory-vectors.json");
 RegisterTenantStore<MemoryFinding>(builder.Services, "data/modules/memory-findings.json");
 RegisterTenantStore<MemoryImpactRecord>(builder.Services, "data/modules/memory-impacts.json");
 RegisterTenantStore<MemoryContextBinding>(builder.Services, "data/modules/memory-contexts.json");
@@ -324,8 +369,9 @@ RegisterTenantStore<EvaluationQaState>(builder.Services, "data/modules/evaluatio
 RegisterTenantStore<ComplianceProfile>(builder.Services, "data/modules/compliance.json");
 RegisterTenantStore<LocalizationSettings>(builder.Services, "data/modules/localization.json");
 RegisterTenantStore<ProjectDeliveryState>(builder.Services, "data/modules/project-delivery.json");
+RegisterTenantStore<DataExportDto>(builder.Services, "data/modules/exports.json");
 RegisterTenantStore<GovernanceState>(builder.Services, "data/modules/governance.json");
-RegisterTenantStore<DataLifecycleState>(builder.Services, "data/modules/lifecycle.json");
+// Lifecycle state contains purge tombstones and must not be deleted by generic tenant-store purge.
 RegisterTenantStore<ModelPoolState>(builder.Services, "data/modules/model-pool.json");
 RegisterTenantStore<RuntimePolicyState>(builder.Services, "data/modules/runtime-policy.json");
 RegisterTenantStore<AuthSessionRecord>(builder.Services, "data/modules/sessions.json");
@@ -333,8 +379,14 @@ RegisterTenantStore<IdentityProviderRecord>(builder.Services, "data/modules/iden
 RegisterTenantStore<InvitationRecord>(builder.Services, "data/modules/invitations.json");
 RegisterTenantStore<OwnershipDelegationRecord>(builder.Services, "data/modules/ownership-delegations.json");
 RegisterTenantStore<UserTenantProfileRecord>(builder.Services, "data/modules/profiles.json");
+RegisterTenantStore<ExternalIdentityBindingRecord>(builder.Services, "data/modules/external-identity-bindings.json");
+RegisterTenantStore<ExternalLoginTransactionRecord>(builder.Services, "data/modules/external-login-transactions.json");
+RegisterTenantStore<AuthenticationPolicyRecord>(builder.Services, "data/modules/authentication-policies.json");
+RegisterTenantStore<EmergencyAccessCredentialRecord>(builder.Services, "data/modules/emergency-access-credentials.json");
+RegisterTenantStore<BillingStateRecord>(builder.Services, "data/modules/billing.json");
 RegisterTenantStore<ButlerReport>(builder.Services, "data/modules/butler-reports.json");
 RegisterTenantStore<ReportSchedule>(builder.Services, "data/modules/report-schedules.json");
+RegisterTenantStore<AgentContextSnapshot>(builder.Services, "data/modules/agent-contexts.json");
 RegisterTenantStore<AgentEvolutionState>(builder.Services, "data/modules/agent-evolution.json");
 RegisterTenantStore<TaskGovernanceState>(builder.Services, "data/modules/task-governance.json");
 builder.Services.AddScoped<TenantPurgeService>();
@@ -369,12 +421,22 @@ builder.Services.AddAuthorization(options =>
 {
     options.FallbackPolicy = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser().Build();
-    options.AddPolicy("MemoryGovernor", policy => policy.RequireRole("Owner", "CoOwner"));
+    options.AddPolicy(ControlPlanePolicies.TenantMember, policy => policy.RequireAuthenticatedUser()
+        .AddRequirements(new CurrentMembershipRequirement()));
+    options.AddPolicy("MemoryGovernor", policy => policy.RequireAuthenticatedUser()
+        .AddRequirements(new MembershipRoleRequirement("Owner", "CoOwner")));
     options.AddPolicy("Agent", policy => policy.RequireAuthenticatedUser().RequireClaim("employee_id"));
-    options.AddPolicy("DashboardRead", policy => policy.AddRequirements(new CapabilityRequirement("dashboard.read")));
-    options.AddPolicy("ReportsRead", policy => policy.AddRequirements(new CapabilityRequirement("reports.read")));
-    options.AddPolicy("EmployeesRead", policy => policy.AddRequirements(new CapabilityRequirement("employees.read")));
-    options.AddPolicy("CollaborationRead", policy => policy.AddRequirements(new CapabilityRequirement("collaboration.read")));
+    options.AddPolicy("DashboardRead", policy => policy.RequireAuthenticatedUser().AddRequirements(new CapabilityRequirement("dashboard.read")));
+    options.AddPolicy("ReportsRead", policy => policy.RequireAuthenticatedUser().AddRequirements(new CapabilityRequirement("reports.read")));
+    options.AddPolicy("EmployeesRead", policy => policy.RequireAuthenticatedUser().AddRequirements(new CapabilityRequirement("employees.read")));
+    options.AddPolicy(ControlPlanePolicies.TenantWriter, policy => policy.RequireAuthenticatedUser()
+        .AddRequirements(new CapabilityRequirement(ControlPlanePolicies.TenantWriteCapability)));
+    options.AddPolicy(ControlPlanePolicies.ApprovalDecider, policy => policy.RequireAuthenticatedUser()
+        .AddRequirements(new ApprovalDecisionRequirement()));
+    options.AddPolicy(ControlPlanePolicies.ChatRead, policy => policy.RequireAuthenticatedUser()
+        .AddRequirements(new ObserverReadRequirement(ControlPlanePolicies.ChatReadCapability)));
+    options.AddPolicy(ControlPlanePolicies.CollaborationRead, policy => policy.RequireAuthenticatedUser()
+        .AddRequirements(new ObserverReadRequirement(ControlPlanePolicies.CollaborationReadCapability)));
 });
 
 builder.Services.AddCors(options =>
@@ -386,6 +448,34 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+if (args.Length >= 2 && args[0] == "--purge-tenants")
+{
+    if (args[1] != "PURGE")
+    {
+        Console.Error.WriteLine("Explicit PURGE confirmation is required.");
+        Environment.ExitCode = 2;
+        return;
+    }
+    var tenantIds = args.Skip(2).ToArray();
+    if (tenantIds.Length == 0 || tenantIds.Any(value => !Guid.TryParse(value, out var id) || id == Guid.Empty))
+    {
+        Console.Error.WriteLine("One or more valid tenant IDs are required.");
+        Environment.ExitCode = 2;
+        return;
+    }
+    await using var scope = app.Services.CreateAsyncScope();
+    var lifecycleService = scope.ServiceProvider.GetRequiredService<DataLifecycleService>();
+    var rlsScope = scope.ServiceProvider.GetRequiredService<TenantRlsScope>();
+    foreach (var tenantId in tenantIds.Select(Guid.Parse).Distinct())
+    {
+        var proof = await rlsScope.ExecuteAsync(tenantId, null,
+            token => lifecycleService.PurgeTenantNowAsync(tenantId, "Controlled admin smoke tenant cleanup", token),
+            CancellationToken.None);
+        Console.WriteLine($"purged tenant={tenantId} proof={proof.Id}");
+    }
+    return;
+}
+
 app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
 {
     var exception = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>()?.Error;
@@ -395,6 +485,8 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
         LoginRateExceededException => (StatusCodes.Status429TooManyRequests, "RATE_LIMITED", exception.Message),
         Microsoft.AspNetCore.Http.BadHttpRequestException => (StatusCodes.Status400BadRequest, "INVALID_REQUEST", "Request body is invalid."),
         UnauthorizedAccessException => (StatusCodes.Status403Forbidden, "FORBIDDEN", "Access denied."),
+        IdempotencyConflictException => (StatusCodes.Status409Conflict, "IDEMPOTENCY_CONFLICT", "The idempotency key was already used with a different request."),
+        VersionConflictException => (StatusCodes.Status412PreconditionFailed, VersionConflictException.Code, "The resource version is stale."),
         InvalidOperationException => (StatusCodes.Status409Conflict, "INVALID_STATE", exception.Message),
         _ => (StatusCodes.Status500InternalServerError, "INTERNAL_ERROR", "An unexpected error occurred.")
     };
@@ -403,14 +495,14 @@ app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
     await context.Response.WriteAsJsonAsync(new { request_id = context.TraceIdentifier, error = new { code, message, retryable = false } });
 }));
 
-if (app.Environment.IsDevelopment())
+if (!usePostgresStorage && app.Environment.IsDevelopment())
 {
     await using var scope = app.Services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<RegentDbContext>();
     await db.Database.EnsureCreatedAsync();
     await LocalSchemaUpgrade.ApplyAsync(db, CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<SchemaVersionService>().ValidateAsync(CancellationToken.None);
-    await DbInitializer.InitializeAsync(db, CancellationToken.None);
+    await DbInitializer.InitializeAsync(db, CancellationToken.None, scope.ServiceProvider.GetRequiredService<TimeProvider>());
     await scope.ServiceProvider.GetRequiredService<AuditIntegrityService>().BackfillAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<WorkflowService>().SeedAsync(CancellationToken.None);
     await scope.ServiceProvider.GetRequiredService<MemoryService>().SeedAsync(CancellationToken.None);
@@ -429,7 +521,11 @@ else
     await using var scope = app.Services.CreateAsyncScope();
     var db = scope.ServiceProvider.GetRequiredService<RegentDbContext>();
     await scope.ServiceProvider.GetRequiredService<SchemaVersionService>().ValidateAsync(CancellationToken.None, false);
-    await PostgresRlsValidator.ValidateAsync(db, CancellationToken.None);
+    if (usePostgresStorage)
+    {
+        await PostgresSchemaValidator.ValidateAsync(db, CancellationToken.None);
+        await PostgresRlsValidator.ValidateAsync(db, CancellationToken.None);
+    }
 }
 
 app.UseCors("frontend");
@@ -453,8 +549,11 @@ app.Use(async (context, next) =>
             var employee = await db.Employees.AsNoTracking().SingleOrDefaultAsync(x =>
                 x.TenantId == identity.TenantId && x.Id == identity.EmployeeId, context.RequestAborted);
             var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == identity.TenantId, context.RequestAborted);
+            var hasActiveCredentialEpoch = identity.CredentialEpoch is { } epoch
+                && await db.EmploymentPeriods.AsNoTracking().AnyAsync(x => x.TenantId == identity.TenantId
+                    && x.EmployeeId == identity.EmployeeId && x.Id == epoch && x.EndedAt == null, context.RequestAborted);
             if (employee is null || employee.State == RegentAgent.Contracts.Enums.EmployeeState.Terminated
-                || tenant is null || tenant.Status != "Active")
+                || !hasActiveCredentialEpoch || tenant is null || tenant.Status != "Active")
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 return;
@@ -493,21 +592,17 @@ app.Use(async (context, next) =>
     var sessionId = context.User.FindFirstValue("session_id");
     if (context.User.Identity?.IsAuthenticated == true && Guid.TryParse(sessionId, out var id))
     {
-        var store = context.RequestServices.GetRequiredService<JsonDocumentStore<AuthSessionRecord>>();
-        var session = await store.GetAsync(id.ToString(), context.RequestAborted);
-        var clock = context.RequestServices.GetRequiredService<TimeProvider>();
-        var now = clock.GetUtcNow();
-        var lastActivity = session?.LastActivityAt ?? session?.CreatedAt ?? now;
-        if (session is null || session.Status != "Active" || session.ExpiresAt <= now
-            || session.UserId != CurrentUserId(context) || session.TenantId != Guid.Parse(CurrentTenant(context))
-            || now - lastActivity > TimeSpan.FromMinutes(session.IdleTimeoutMinutes))
+        var identity = context.RequestServices.GetRequiredService<IdentityService>();
+        var session = await identity.GetActiveSessionAsync(id, CurrentUserId(context), Guid.Parse(CurrentTenant(context)), context.RequestAborted);
+        if (session is null)
         {
             await context.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
             return;
         }
-        if (session.SessionKind == "Emergency" && !EmergencyRequestAllowed(context.Request.Path,
-            context.Request.Method, session.TenantId, session.AllowedActionsJson))
+        var now = context.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow();
+        if (!TenantSessionAccessPolicy.RequestAllowed(session, context.Request.Path,
+                context.Request.Method, session.TenantId))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             return;
@@ -527,12 +622,13 @@ app.Use(async (context, next) =>
             }
         }
         session.LastActivityAt = now;
-        await store.PutAsync(session.Id.ToString(), session, context.RequestAborted);
+        await context.RequestServices.GetRequiredService<JsonDocumentStore<AuthSessionRecord>>()
+            .PutAsync(session.Id.ToString(), session, context.RequestAborted);
     }
     await next();
 });
-app.UseMiddleware<ApiContractMiddleware>();
 app.UseAuthorization();
+app.UseMiddleware<ApiContractMiddleware>();
 app.MapOpenApi("/openapi/{documentName}.json").AllowAnonymous();
 
 app.MapGet("/health/live", () => Results.Ok(new { status = "live" })).AllowAnonymous();
@@ -542,33 +638,35 @@ app.MapGet("/health/ready", async (RegentDbContext db, CancellationToken cancell
     return ready ? Results.Ok(new { status = "ready" }) : Results.StatusCode(503);
 }).AllowAnonymous();
 
-app.MapPost("/auth/dev-login", async (DevLoginRequest request, RegentDbContext db, IdentityService identity,
-    TenantRlsScope rlsScope, HttpContext context, CancellationToken cancellationToken) =>
+if (app.Environment.IsDevelopment() && allowDemoLogin)
 {
-    if (!app.Environment.IsDevelopment())
+    app.MapPost("/auth/dev-login", async (DevLoginRequest request, RegentDbContext db, IdentityService identity,
+        TenantRlsScope rlsScope, HttpContext context, CancellationToken cancellationToken) =>
     {
-        return Results.NotFound();
-    }
+        var email = request.Email.Trim().ToLowerInvariant();
+        var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
+        if (user is null) return ApiResults.Problem(RegentAgent.Contracts.Results.Error.Unauthorized("Unknown development user."), context.TraceIdentifier);
+        var memberships = await rlsScope.ExecuteAsync(null, user.Id, token => db.Memberships.AsNoTracking()
+            .Join(db.Users.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new { m.TenantId, m.Role, u.Id, u.Email, u.DisplayName })
+            .Where(x => x.Id == user.Id)
+            .ToListAsync(token), cancellationToken);
+        var membership = memberships.FirstOrDefault(x => request.TenantId is null || x.TenantId == request.TenantId)
+            ?? memberships.FirstOrDefault();
+        if (membership is null)
+        {
+            return ApiResults.Problem(RegentAgent.Contracts.Results.Error.Unauthorized("Unknown development user."), context.TraceIdentifier);
+        }
 
-    var email = request.Email.Trim().ToLowerInvariant();
-    var user = await db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Email == email, cancellationToken);
-    if (user is null) return ApiResults.Problem(RegentAgent.Contracts.Results.Error.Unauthorized("Unknown development user."), context.TraceIdentifier);
-    var memberships = await rlsScope.ExecuteAsync(null, user.Id, token => db.Memberships.AsNoTracking()
-        .Join(db.Users.AsNoTracking(), m => m.UserId, u => u.Id, (m, u) => new { m.TenantId, m.Role, u.Id, u.Email, u.DisplayName })
-        .Where(x => x.Id == user.Id)
-        .ToListAsync(token), cancellationToken);
-    var membership = memberships.FirstOrDefault(x => request.TenantId is null || x.TenantId == request.TenantId)
-        ?? memberships.FirstOrDefault();
-    if (membership is null)
-    {
-        return ApiResults.Problem(RegentAgent.Contracts.Results.Error.Unauthorized("Unknown development user."), context.TraceIdentifier);
-    }
-
-    var session = await identity.StartTenantSessionAsync(membership.Id, membership.TenantId, cancellationToken, "Development");
-    var displayName = await identity.DisplayNameAsync(membership.Id, membership.TenantId, membership.DisplayName, cancellationToken);
-    await SignInTenantAsync(context, membership.Id, membership.TenantId, displayName, membership.Role, session.Id);
-    return Results.Ok(new { email = membership.Email, display_name = displayName, tenant_id = membership.TenantId, role = membership.Role });
-}).AllowAnonymous();
+        var session = await identity.StartTenantSessionAsync(membership.Id, membership.TenantId, cancellationToken, "Development");
+        var displayName = await identity.DisplayNameAsync(membership.Id, membership.TenantId, membership.DisplayName, cancellationToken);
+        await SignInTenantAsync(context, membership.Id, membership.TenantId, displayName, membership.Role, session.Id);
+        return Results.Ok(new { email = membership.Email, display_name = displayName, tenant_id = membership.TenantId, role = membership.Role });
+    }).Accepts<DevLoginRequest>("application/json").AllowAnonymous();
+}
+else
+{
+    app.MapPost("/auth/dev-login", () => Results.NotFound()).AllowAnonymous();
+}
 
 app.MapPost("/auth/register", async (RegisterRequest request, IdentityService identity,
     HttpContext context, CancellationToken cancellationToken) =>
@@ -620,6 +718,17 @@ app.MapGet("/auth/{provider}/callback", async (string provider, string code, str
         ?? "http://localhost:5173");
 }).AllowAnonymous();
 
+app.MapGet("/auth/me", async (HttpContext context, IdentityService identity,
+    CancellationToken cancellationToken) =>
+{
+    if (!Guid.TryParse(context.User.FindFirstValue("session_id"), out var sessionId)
+        || !Guid.TryParse(context.User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)
+        || !Guid.TryParse(context.User.FindFirstValue("tenant_id"), out var tenantId)) return Results.Unauthorized();
+    var summary = await identity.GetSessionSummaryAsync(sessionId, userId, tenantId, cancellationToken,
+        context.User.FindFirstValue("employee_id"));
+    return summary is null ? Results.Unauthorized() : Results.Ok(summary);
+}).Produces<TenantSessionSummaryDto>().Produces(StatusCodes.Status401Unauthorized).RequireAuthorization();
+
 app.MapGet("/auth/sessions", async (HttpContext context, IdentityService identity,
     CancellationToken cancellationToken) => Results.Ok(await identity.ListSessionsAsync(
         Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier)!), cancellationToken)))
@@ -651,13 +760,19 @@ app.MapPost("/auth/dev-agent-token", async (DevAgentTokenRequest request, Regent
     if (!app.Environment.IsDevelopment()) return Results.NotFound();
     var valid = await rlsScope.ExecuteAsync(request.TenantId, null, async token =>
     {
-        if (!await db.Employees.AnyAsync(x => x.TenantId == request.TenantId && x.Id == request.EmployeeId, token)) return false;
+        if (!await db.Employees.AnyAsync(x => x.TenantId == request.TenantId && x.Id == request.EmployeeId
+                && x.State != RegentAgent.Contracts.Enums.EmployeeState.Terminated, token)) return false;
+        if (!await db.EmploymentPeriods.AnyAsync(x => x.TenantId == request.TenantId
+                && x.EmployeeId == request.EmployeeId && x.EndedAt == null, token)) return false;
         return request.TaskId is not { } taskId || await db.Tasks.AnyAsync(x => x.TenantId == request.TenantId && x.Id == taskId, token);
     }, cancellationToken);
     if (!valid) return Results.NotFound();
     var scopes = request.Scopes is { Count: > 0 } ? request.Scopes : AgentScopes.Baseline;
+    var credentialEpoch = await rlsScope.ExecuteAsync(request.TenantId, null, token =>
+        db.EmploymentPeriods.AsNoTracking().Where(x => x.TenantId == request.TenantId
+            && x.EmployeeId == request.EmployeeId && x.EndedAt == null).Select(x => (Guid?)x.Id).SingleAsync(token), cancellationToken);
     var issued = tokens.Issue(new AgentAssignmentRequest(request.TenantId, request.EmployeeId, request.TaskId,
-        request.RunnerId ?? "dev-runner", scopes));
+        request.RunnerId ?? "dev-runner", scopes, credentialEpoch));
     return Results.Ok(new { token = issued.Token, identity = issued.Identity });
 }).AllowAnonymous();
 
@@ -678,7 +793,7 @@ app.MapPost("/auth/switch-tenant", async (SwitchTenantRequest request, RegentDbC
     return Results.Ok(new { tenant_id = membership.TenantId, display_name = displayName });
 }).RequireAuthorization();
 
-var api = app.MapGroup("/v1").RequireAuthorization();
+var api = app.MapGroup("/v1").RequireAuthorization(ControlPlanePolicies.TenantMember);
 
 api.MapPost("/butler/ask", async (ButlerQuestionRequest request, HttpContext context,
     ButlerService service, CancellationToken cancellationToken) =>
@@ -690,18 +805,18 @@ api.MapGet("/butler/reports", async (HttpContext context, ButlerService service,
 api.MapPost("/butler/reports", async (GenerateReportRequest request, HttpContext context,
     ButlerService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GenerateReportAsync(Guid.Parse(CurrentTenant(context)), request.Kind, cancellationToken)))
-    .Produces<ButlerReport>().WithTags("Butler");
+    .Produces<ButlerReport>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Butler");
 api.MapPost("/butler/reports/{reportId:guid}/retry", async (Guid reportId, HttpContext context,
     ButlerService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RetryReportAsync(Guid.Parse(CurrentTenant(context)), reportId, cancellationToken)))
-    .Produces<ButlerReport>().WithTags("Butler");
+    .Produces<ButlerReport>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Butler");
 api.MapGet("/butler/schedules", async (HttpContext context, ButlerService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListSchedulesAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<IReadOnlyList<ReportSchedule>>().WithTags("Butler");
 api.MapPost("/butler/schedules", async (CreateReportScheduleRequest request, HttpContext context,
     ButlerService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.SaveScheduleAsync(Guid.Parse(CurrentTenant(context)), request, cancellationToken)))
-    .Produces<ReportSchedule>().WithTags("Butler");
+    .Produces<ReportSchedule>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Butler");
 
 api.MapGet("/profile/display-suffix", async (HttpContext context, IdentityService identity,
     CancellationToken cancellationToken) => Results.Ok(new DisplaySuffixDto(await identity.GetDisplaySuffixAsync(
@@ -719,7 +834,7 @@ api.MapGet("/tenants/{tenantId:guid}/invitations", async (Guid tenantId, HttpCon
 api.MapPost("/tenants/{tenantId:guid}/invitations", async (Guid tenantId, InvitationRequest request,
     HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
     Results.Ok(await identity.CreateInvitationAsync(CurrentUserId(context), tenantId, request, cancellationToken)))
-    .Produces<InvitationDto>().WithTags("Identity");
+    .Produces<InvitationDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Identity");
 api.MapGet("/tenants/{tenantId:guid}/ownership-delegations", async (Guid tenantId, HttpContext context,
     IdentityService identity, CancellationToken cancellationToken) =>
     Results.Ok(await identity.ListOwnershipDelegationsAsync(CurrentUserId(context), tenantId, cancellationToken)))
@@ -728,17 +843,17 @@ api.MapPost("/tenants/{tenantId:guid}/ownership-delegations", async (Guid tenant
     CreateOwnershipDelegationRequest request, HttpContext context, IdentityService identity,
     CancellationToken cancellationToken) => Results.Ok(await identity.CreateOwnershipDelegationAsync(
         CurrentUserId(context), tenantId, request, cancellationToken)))
-    .Produces<OwnershipDelegationDto>().WithTags("Identity");
+    .Produces<OwnershipDelegationDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Identity");
 api.MapDelete("/tenants/{tenantId:guid}/ownership-delegations/{delegationId:guid}", async (Guid tenantId,
     Guid delegationId, HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
 {
     await identity.RevokeOwnershipDelegationAsync(CurrentUserId(context), tenantId, delegationId, cancellationToken);
     return Results.NoContent();
-}).WithTags("Identity");
+}).RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Identity");
 api.MapPut("/tenants/{tenantId:guid}/identity-providers/{provider}", async (Guid tenantId, string provider,
     IdentityProviderDto request, HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
     Results.Ok(await identity.ConfigureProviderAsync(CurrentUserId(context), tenantId, request with { Provider = provider }, cancellationToken)))
-    .Produces<IdentityProviderDto>().WithTags("Identity");
+    .Produces<IdentityProviderDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Identity");
 api.MapGet("/tenants/{tenantId:guid}/identity-providers/{provider}", async (Guid tenantId, string provider,
     HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
     Results.Ok(await identity.GetIdentityProviderAsync(CurrentUserId(context), tenantId, provider, cancellationToken)))
@@ -746,7 +861,7 @@ api.MapGet("/tenants/{tenantId:guid}/identity-providers/{provider}", async (Guid
 api.MapPost("/tenants/{tenantId:guid}/identity-providers/{provider}/activate", async (Guid tenantId, string provider,
     HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
     Results.Ok(await identity.ActivateProviderAsync(CurrentUserId(context), tenantId, provider, cancellationToken)))
-    .Produces<IdentityProviderDto>().WithTags("Identity");
+    .Produces<IdentityProviderDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Identity");
 api.MapGet("/tenants/{tenantId:guid}/authentication-policy", async (Guid tenantId,
     HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
     Results.Ok(await identity.GetAuthenticationPolicyAsync(CurrentUserId(context), tenantId, cancellationToken)))
@@ -754,21 +869,21 @@ api.MapGet("/tenants/{tenantId:guid}/authentication-policy", async (Guid tenantI
 api.MapPut("/tenants/{tenantId:guid}/authentication-policy", async (Guid tenantId, AuthenticationPolicyDto request,
     HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
     Results.Ok(await identity.UpdateAuthenticationPolicyAsync(CurrentUserId(context), tenantId, request, cancellationToken)))
-    .Produces<AuthenticationPolicyDto>().WithTags("Identity");
+    .Produces<AuthenticationPolicyDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Identity");
 api.MapPut("/tenants/{tenantId:guid}/oidc/group-mapping", async (Guid tenantId, UpdateGroupMappingRequest request,
     HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
 {
     await identity.UpdateGroupMappingAsync(CurrentUserId(context), tenantId, request.GroupMappingJson, cancellationToken);
     return Results.NoContent();
-}).Produces(StatusCodes.Status204NoContent).WithTags("Identity");
+}).Produces(StatusCodes.Status204NoContent).RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Identity");
 api.MapPost("/tenants/{tenantId:guid}/oidc/group-mapping/refresh", async (Guid tenantId,
     HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
     Results.Ok(await identity.RefreshGroupMappingsAsync(CurrentUserId(context), tenantId, cancellationToken)))
-    .Produces<GroupMappingRefreshResult>().WithTags("Identity");
+    .Produces<GroupMappingRefreshResult>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Identity");
 api.MapPost("/tenants/{tenantId:guid}/emergency-access", async (Guid tenantId,
     HttpContext context, IdentityService identity, CancellationToken cancellationToken) =>
     Results.Ok(await identity.ConfigureEmergencyAccessAsync(CurrentUserId(context), tenantId, cancellationToken)))
-    .Produces<EmergencyAccessDto>().WithTags("Identity");
+    .Produces<EmergencyAccessDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Identity");
 
 api.MapGet("/billing/plans", () => Results.Ok(BillingPlans.All)).Produces<IReadOnlyList<PlanDefinition>>().WithTags("Billing");
 api.MapGet("/billing", async (HttpContext context, BillingService billing, CancellationToken cancellationToken) =>
@@ -776,14 +891,16 @@ api.MapGet("/billing", async (HttpContext context, BillingService billing, Cance
     .Produces<BillingSummaryDto>().WithTags("Billing");
 api.MapPost("/billing/checkout", async (CheckoutRequest request, HttpContext context, BillingService billing,
     CancellationToken cancellationToken) => Results.Ok(await billing.CheckoutAsync(CurrentUserId(context),
-        Guid.Parse(CurrentTenant(context)), request, cancellationToken))).Produces<BillingInvoiceDto>().WithTags("Billing");
+        Guid.Parse(CurrentTenant(context)), request, cancellationToken))).Produces<BillingInvoiceDto>()
+        .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Billing");
 api.MapPost("/billing/invoices/{invoiceId:guid}/pay-local", async (Guid invoiceId, LocalPaymentRequest request,
     HttpContext context, BillingService billing, CancellationToken cancellationToken) =>
     Results.Ok(await billing.PayLocalAsync(CurrentUserId(context), Guid.Parse(CurrentTenant(context)),
-        invoiceId, request, cancellationToken))).Produces<BillingInvoiceDto>().WithTags("Billing");
+        invoiceId, request, cancellationToken))).Produces<BillingInvoiceDto>()
+        .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Billing");
 api.MapPost("/exports", async (HttpContext context, DataExportService exports, CancellationToken cancellationToken) =>
     Results.Ok(await exports.CreateAsync(CurrentUserId(context), Guid.Parse(CurrentTenant(context)), cancellationToken)))
-    .Produces<DataExportDto>().WithTags("Data Export");
+    .Produces<DataExportDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Data Export");
 api.MapGet("/exports", async (HttpContext context, DataExportService exports, CancellationToken cancellationToken) =>
     Results.Ok(await exports.ListAsync(CurrentUserId(context), Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<IReadOnlyList<DataExportDto>>().WithTags("Data Export");
@@ -794,7 +911,7 @@ api.MapGet("/exports/{exportId:guid}/content", async (Guid exportId, HttpContext
 api.MapPost("/exports/{exportId:guid}/validate", async (Guid exportId, HttpContext context, DataExportService exports,
     CancellationToken cancellationToken) => Results.Ok(await exports.ValidateAsync(CurrentUserId(context),
         Guid.Parse(CurrentTenant(context)), exportId, cancellationToken)))
-    .Produces<DataExportValidationDto>().WithTags("Data Export");
+    .Produces<DataExportValidationDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Data Export");
 
 api.MapGet("/tenants", async (TenantService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListForUserAsync(cancellationToken))).Produces<IReadOnlyList<TenantDto>>().WithTags("Tenancy");
@@ -806,88 +923,111 @@ api.MapGet("/charter/templates", async (OrganizationService service, Cancellatio
 api.MapGet("/charter", async (OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetCharterAsync(cancellationToken))).Produces<CharterDto>().WithTags("Organization");
 api.MapPut("/charter", async (CharterDto charter, OrganizationService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.UpdateCharterAsync(charter, cancellationToken))).Produces<CharterDto>().WithTags("Organization");
+    Results.Ok(await service.UpdateCharterAsync(charter, cancellationToken))).Produces<CharterDto>()
+    .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Organization");
 api.MapPost("/company/start", async (OrganizationService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.StartCompanyAsync(cancellationToken))).Produces<EmployeeSummary>().WithTags("Organization");
+    Results.Ok(await service.StartCompanyAsync(cancellationToken))).Produces<EmployeeSummary>()
+    .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Organization");
 api.MapGet("/positions", async (OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListPositionsAsync(cancellationToken))).Produces<IReadOnlyList<PositionDto>>().WithTags("Organization");
 api.MapPost("/positions", async (PositionDto position, OrganizationService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.CreatePositionAsync(position, cancellationToken))).Produces<PositionDto>().WithTags("Organization");
+    Results.Ok(await service.CreatePositionAsync(position, cancellationToken))).Produces<PositionDto>()
+    .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Organization");
 api.MapPut("/positions/{positionId:guid}/status", async (Guid positionId, PositionStatusRequest request,
     OrganizationService service, CancellationToken cancellationToken) => Results.Ok(await service.SetPositionStatusAsync(
-        positionId, request.Status, cancellationToken))).Produces<PositionDto>().WithTags("Organization");
+        positionId, request.Status, cancellationToken))).Produces<PositionDto>()
+    .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Organization");
 api.MapPost("/positions/{sourceId:guid}/merge/{targetId:guid}", async (Guid sourceId, Guid targetId,
     OrganizationService service, CancellationToken cancellationToken) => Results.Ok(await service.MergePositionsAsync(
-        sourceId, targetId, cancellationToken))).Produces<PositionDto>().WithTags("Organization");
+        sourceId, targetId, cancellationToken))).Produces<PositionDto>()
+    .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Organization");
 api.MapPost("/positions/{positionId:guid}/split", async (Guid positionId, SplitPositionRequest request,
     OrganizationService service, CancellationToken cancellationToken) => Results.Ok(await service.SplitPositionAsync(
-        positionId, request.Name, request.Responsibilities, cancellationToken))).Produces<PositionDto>().WithTags("Organization");
+        positionId, request.Name, request.Responsibilities, cancellationToken))).Produces<PositionDto>()
+    .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Organization");
 api.MapPost("/employees/{employeeId:guid}/assignments", async (Guid employeeId, AssignPositionRequest request,
     OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.AssignAsync(employeeId, request.PositionId, cancellationToken)))
-    .Produces<EmploymentPeriodDto>().WithTags("Organization");
+    .Produces<EmploymentPeriodDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Organization");
 api.MapPost("/delegations", async (CreateDelegationRequest request, OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.DelegateAsync(request.DelegateEmployeeId, request.SubtreePositionId,
         request.Actions, request.BudgetLimitMinor, request.Minutes, cancellationToken)))
-    .Produces<OrgDelegationDto>().WithTags("Organization");
+    .Produces<OrgDelegationDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Organization");
 api.MapDelete("/delegations/{id:guid}", async (Guid id, OrganizationService service, CancellationToken cancellationToken) =>
 {
     await service.RevokeDelegationAsync(id, cancellationToken);
     return Results.NoContent();
-}).WithTags("Organization");
+}).RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Organization");
 api.MapPost("/employees/{employeeId:guid}/offboard", async (Guid employeeId, OffboardRequest request,
-    OrganizationService service, MemoryService memory, RegentDbContext db, HttpContext context,
+    ApprovalExecutionService service, ApprovalAuthority authority, HttpContext context, CancellationToken cancellationToken) =>
+{
+    await authority.EnsureCanExecuteAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context),
+        ApprovalActionTypes.EmployeeOffboard, cancellationToken);
+    await service.OffboardAsync(employeeId, request.ApprovalId, RequiredIdempotencyKey(context), cancellationToken);
+    return Results.NoContent();
+}).Produces(StatusCodes.Status204NoContent).RequireAuthorization(ControlPlanePolicies.ApprovalDecider).WithTags("Organization");
+api.MapPost("/employees/{employeeId:guid}/rehire", async (Guid employeeId, RehireRequest request,
+    ApprovalExecutionService service, ApprovalAuthority authority, RegentDbContext db, HttpContext context,
     CancellationToken cancellationToken) =>
 {
-    await service.OffboardAsync(employeeId, request.ApprovalId, cancellationToken);
-    var employee = await db.Employees.AsNoTracking().SingleAsync(x => x.Id == employeeId, cancellationToken);
-    await memory.IsolatePersonalClaimsAsync(CurrentTenant(context), employee.DisplayName, cancellationToken);
-    return Results.NoContent();
-}).WithTags("Organization");
-api.MapPost("/employees/{employeeId:guid}/rehire", async (Guid employeeId, RehireRequest request,
-    OrganizationService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.RehireAsync(employeeId, request.PositionId, request.ApprovalId, cancellationToken)))
-    .Produces<EmployeeSummary>().WithTags("Organization");
+    await authority.EnsureCanExecuteAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context),
+        ApprovalActionTypes.HiringRehire, cancellationToken);
+    var result = await service.RehireAsync(employeeId, request.PositionId, request.ApprovalId,
+        RequiredIdempotencyKey(context), cancellationToken);
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    var employee = await db.Employees.AsNoTracking().SingleAsync(
+        x => x.TenantId == tenantId && x.Id == result.EmployeeId, cancellationToken);
+    return Results.Ok(Mappings.ToSummary(employee, Freshness.Fresh));
+}).Produces<EmployeeSummary>().RequireAuthorization(ControlPlanePolicies.ApprovalDecider).WithTags("Organization");
 api.MapGet("/candidates", async (OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListCandidatesAsync(cancellationToken))).Produces<IReadOnlyList<CandidateDto>>().WithTags("Recruitment");
 api.MapPost("/candidates", async (CreateCandidateRequest request, OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CreateCandidateAsync(request.PositionId, request.DisplayName, request.ModelVersion,
-        request.JobDescription, cancellationToken))).Produces<CandidateDto>().WithTags("Recruitment");
+        request.JobDescription, cancellationToken))).Produces<CandidateDto>()
+    .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Recruitment");
 api.MapPost("/candidates/{candidateId:guid}/reject", async (Guid candidateId, RejectCandidateRequest request,
     OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RejectCandidateAsync(candidateId, request.Reason, cancellationToken)))
-    .Produces<CandidateDto>().WithTags("Recruitment");
+    .Produces<CandidateDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Recruitment");
 api.MapPost("/candidates/{candidateId:guid}/retry", async (Guid candidateId, OrganizationService service,
     CancellationToken cancellationToken) => Results.Ok(await service.RetryCandidateAsync(candidateId, cancellationToken)))
-    .Produces<CandidateDto>().WithTags("Recruitment");
+    .Produces<CandidateDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Recruitment");
 api.MapPost("/candidates/{candidateId:guid}/assessment", async (Guid candidateId, CandidateAssessmentDto assessment,
     OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.AssessCandidateAsync(candidateId, assessment, cancellationToken)))
-    .Produces<CandidateDto>().WithTags("Recruitment");
+    .Produces<CandidateDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Recruitment");
 api.MapPost("/candidates/{candidateId:guid}/hire", async (Guid candidateId, HireCandidateRequest request,
-    OrganizationService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.HireCandidateAsync(candidateId, request.ApprovalId, cancellationToken)))
-    .Produces<EmployeeSummary>().WithTags("Recruitment");
+    ApprovalExecutionService service, ApprovalAuthority authority, RegentDbContext db, HttpContext context,
+    CancellationToken cancellationToken) =>
+{
+    await authority.EnsureCanExecuteAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context),
+        ApprovalActionTypes.HiringHire, cancellationToken);
+    var result = await service.HireAsync(candidateId, request.ApprovalId, RequiredIdempotencyKey(context), cancellationToken);
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    var employee = await db.Employees.AsNoTracking().SingleAsync(
+        x => x.TenantId == tenantId && x.Id == result.EmployeeId, cancellationToken);
+    return Results.Ok(Mappings.ToSummary(employee, Freshness.Fresh));
+}).Produces<EmployeeSummary>().RequireAuthorization(ControlPlanePolicies.ApprovalDecider).WithTags("Recruitment");
 api.MapGet("/recruitment/interviews", async (Guid? candidateId, OrganizationService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListInterviewStagesAsync(candidateId, cancellationToken)))
     .Produces<IReadOnlyList<InterviewStageDto>>().WithTags("Recruitment");
 api.MapPost("/recruitment/interviews", async (InterviewStageDto stage, OrganizationService service,
     CancellationToken cancellationToken) => Results.Ok(await service.RecordInterviewStageAsync(stage, cancellationToken)))
-    .Produces<InterviewStageDto>().WithTags("Recruitment");
+    .Produces<InterviewStageDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Recruitment");
 api.MapGet("/recruitment/appeals", async (OrganizationService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListCandidateAppealsAsync(cancellationToken)))
     .Produces<IReadOnlyList<CandidateAppealDto>>().WithTags("Recruitment");
 api.MapPost("/recruitment/appeals", async (CandidateAppealDto appeal, OrganizationService service,
     CancellationToken cancellationToken) => Results.Ok(await service.AppealCandidateAsync(appeal, cancellationToken)))
-    .Produces<CandidateAppealDto>().WithTags("Recruitment");
+    .Produces<CandidateAppealDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Recruitment");
 api.MapPost("/recruitment/appeals/{appealId:guid}/resolve", async (Guid appealId, ResolveAppealRequest request,
     OrganizationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ResolveCandidateAppealAsync(appealId, request.Resolution, cancellationToken)))
-    .Produces<CandidateAppealDto>().WithTags("Recruitment");
+    .Produces<CandidateAppealDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Recruitment");
 api.MapPost("/recruitment/fairness-audits", async (FairnessAuditRequest request, OrganizationService service,
     CancellationToken cancellationToken) => Results.Ok(await service.RunFairnessAuditAsync(request.PositionId,
         request.Period, request.SampleSize, request.SelectionRateRatio, cancellationToken)))
-    .Produces<FairnessAuditDto>().WithTags("Recruitment");
+    .Produces<FairnessAuditDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Recruitment");
 api.MapGet("/recruitment/fairness-audits", async (OrganizationService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListFairnessAuditsAsync(cancellationToken)))
     .Produces<IReadOnlyList<FairnessAuditDto>>().WithTags("Recruitment");
@@ -910,6 +1050,7 @@ api.MapGet("/projects/{id:guid}", async (Guid id, ProjectService service, Cancel
 }).Produces<ProjectDetail>(StatusCodes.Status200OK).Produces(StatusCodes.Status404NotFound).WithTags("Projects");
 
 var delivery = api.MapGroup("/projects/{projectId:guid}/delivery");
+var deliveryWrites = delivery.MapGroup("").RequireAuthorization(ControlPlanePolicies.TenantWriter);
 delivery.AddEndpointFilter(async (context, next) =>
 {
     var projectId = Guid.Parse(context.HttpContext.GetRouteValue("projectId")!.ToString()!);
@@ -920,125 +1061,148 @@ delivery.AddEndpointFilter(async (context, next) =>
 delivery.MapGet("", async (Guid projectId, HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), projectId, cancellationToken)))
     .Produces<ProjectDeliveryState>().WithTags("Delivery");
-delivery.MapPost("/findings", async (Guid projectId, ResearchFinding finding, HttpContext context,
+deliveryWrites.MapPost("/findings", async (Guid projectId, ResearchFinding finding, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.AddFindingAsync(Guid.Parse(CurrentTenant(context)), projectId, finding, cancellationToken)))
     .Produces<ResearchFinding>().WithTags("Delivery");
-delivery.MapPost("/briefs", async (Guid projectId, ProductBrief brief, HttpContext context,
+deliveryWrites.MapPost("/briefs", async (Guid projectId, ProductBrief brief, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CreateBriefAsync(Guid.Parse(CurrentTenant(context)), projectId, brief, cancellationToken)))
     .Produces<ProductBrief>().WithTags("Delivery");
-delivery.MapPost("/briefs/{briefId:guid}/decision", async (Guid projectId, Guid briefId, DecisionRequest request,
+deliveryWrites.MapPost("/briefs/{briefId:guid}/decision", async (Guid projectId, Guid briefId, DecisionRequest request,
     HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.DecideAsync(Guid.Parse(CurrentTenant(context)), projectId, briefId, request.Decision,
-        request.Rationale, request.EvidenceIds, request.Reround, request.Decider, cancellationToken)))
+        request.Rationale, request.EvidenceIds, request.Reround, CurrentActor(context), cancellationToken)))
     .Produces<GoNoGoDecision>().WithTags("Delivery");
-delivery.MapPost("/requirements", async (Guid projectId, DeliveryRequirement requirement, HttpContext context,
+deliveryWrites.MapPost("/requirements", async (Guid projectId, DeliveryRequirement requirement, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CreateRequirementAsync(Guid.Parse(CurrentTenant(context)), projectId, requirement, cancellationToken)))
     .Produces<DeliveryRequirement>().WithTags("Delivery");
-delivery.MapPost("/requirements/{requirementId:guid}/ready", async (Guid projectId, Guid requirementId,
+deliveryWrites.MapPost("/requirements/{requirementId:guid}/ready", async (Guid projectId, Guid requirementId,
     ReadyRequirementRequest request, HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReadyRequirementAsync(Guid.Parse(CurrentTenant(context)), projectId, requirementId,
         request.TotalWeight, cancellationToken))).Produces<DeliveryRequirement>().WithTags("Delivery");
-delivery.MapPost("/plans", async (Guid projectId, DecompositionPlan plan, HttpContext context,
+deliveryWrites.MapPost("/plans", async (Guid projectId, DecompositionPlan plan, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.ProposePlanAsync(Guid.Parse(CurrentTenant(context)), projectId, plan, cancellationToken)))
+    Results.Ok(await service.ProposePlanAsync(Guid.Parse(CurrentTenant(context)), projectId, plan, CurrentActor(context), cancellationToken)))
     .Produces<DecompositionPlan>().WithTags("Delivery");
-delivery.MapPost("/plans/{planId:guid}/approve", async (Guid projectId, Guid planId, ApprovePlanRequest request,
+deliveryWrites.MapPost("/plans/{planId:guid}/approve", async (Guid projectId, Guid planId, ApprovePlanRequest request,
     HttpContext context, DeliveryService service, DeliveryRuntimeProjectionService projection,
     CancellationToken cancellationToken) =>
 {
     var tenantId = Guid.Parse(CurrentTenant(context));
     var approved = await service.ApprovePlanAsync(tenantId, projectId, planId,
-        request.Approver, request.ApprovalId, cancellationToken);
+        CurrentActor(context), request.ApprovalId, cancellationToken);
     await projection.SyncApprovedPlanAsync(tenantId, projectId, approved, cancellationToken);
     return Results.Ok(approved);
 }).Produces<DecompositionPlan>().WithTags("Delivery");
-delivery.MapPost("/tasks/{taskId:guid}/claim", async (Guid projectId, Guid taskId, ClaimTaskRequest request,
+deliveryWrites.MapPost("/tasks/{taskId:guid}/claim", async (Guid projectId, Guid taskId, ClaimTaskRequest request,
     HttpContext context, DeliveryService service, DeliveryRuntimeProjectionService projection,
     CancellationToken cancellationToken) =>
 {
     var tenantId = Guid.Parse(CurrentTenant(context));
-    var task = await service.ClaimTaskAsync(tenantId, projectId, taskId, request.Assignee, cancellationToken);
-    await projection.SyncRuntimeStatusAsync(tenantId, taskId, "Assigned", task.Assignee ?? string.Empty, cancellationToken);
+    var employeeId = CurrentOptionalEmployeeId(context);
+    var task = employeeId is { } stableEmployeeId
+        ? await service.ClaimTaskAsync(tenantId, projectId, taskId, CurrentActor(context), stableEmployeeId, cancellationToken)
+        : await service.ClaimTaskAsync(tenantId, projectId, taskId, CurrentActor(context), cancellationToken);
+    await projection.SyncRuntimeStatusAsync(tenantId, taskId, "Assigned", task.Assignee ?? string.Empty,
+        cancellationToken, employeeId);
     return Results.Ok(task);
 }).Produces<DeliveryTask>().WithTags("Delivery");
-delivery.MapPost("/tasks/{taskId:guid}/submit", async (Guid projectId, Guid taskId, SubmitTaskRequest request,
+deliveryWrites.MapPost("/tasks/{taskId:guid}/submit", async (Guid projectId, Guid taskId, SubmitTaskRequest request,
     HttpContext context, DeliveryService service, DeliveryRuntimeProjectionService projection,
     CancellationToken cancellationToken) =>
 {
     var tenantId = Guid.Parse(CurrentTenant(context));
-    var task = await service.SubmitTaskAsync(tenantId, projectId, taskId, request.Author, cancellationToken);
-    await projection.SyncRuntimeStatusAsync(tenantId, taskId, "InReview", task.Assignee ?? string.Empty, cancellationToken);
+    var employeeId = CurrentOptionalEmployeeId(context);
+    var task = employeeId is { } stableEmployeeId
+        ? await service.SubmitTaskAsync(tenantId, projectId, taskId, CurrentActor(context), stableEmployeeId, cancellationToken)
+        : await service.SubmitTaskAsync(tenantId, projectId, taskId, CurrentActor(context), cancellationToken);
+    await projection.SyncRuntimeStatusAsync(tenantId, taskId, "InReview", task.Assignee ?? string.Empty,
+        cancellationToken, employeeId);
     return Results.Ok(task);
 }).Produces<DeliveryTask>().WithTags("Delivery");
-delivery.MapPost("/tasks/{taskId:guid}/complete", async (Guid projectId, Guid taskId, DoneEvidence evidence,
+delivery.MapGet("/tasks/{taskId:guid}/artifacts", async (Guid projectId, Guid taskId, ArtifactService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.ListForTaskAsync(projectId, taskId, cancellationToken)))
+    .Produces<IReadOnlyList<ArtifactDto>>().WithTags("Delivery");
+deliveryWrites.MapPost("/tasks/{taskId:guid}/complete", async (Guid projectId, Guid taskId, DoneEvidence evidence,
     HttpContext context, DeliveryService service, DeliveryRuntimeProjectionService projection,
     CancellationToken cancellationToken) =>
 {
     var tenantId = Guid.Parse(CurrentTenant(context));
+    evidence.Validator = CurrentActor(context);
     var completed = await service.CompleteTaskAsync(tenantId, projectId, taskId, evidence, cancellationToken);
     await projection.SyncRuntimeStatusAsync(tenantId, taskId, "Done", string.Empty, cancellationToken);
     return Results.Ok(completed);
 }).Produces<DoneEvidence>().WithTags("Delivery");
-delivery.MapPost("/defects", async (Guid projectId, Defect defect, HttpContext context,
+deliveryWrites.MapPost("/defects", async (Guid projectId, Defect defect, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.ReportDefectAsync(Guid.Parse(CurrentTenant(context)), projectId, defect, cancellationToken)))
+{
+    defect.ReportedBy = CurrentActor(context);
+    return Results.Ok(await service.ReportDefectAsync(Guid.Parse(CurrentTenant(context)), projectId, defect, cancellationToken));
+})
     .Produces<Defect>().WithTags("Delivery");
-delivery.MapPost("/defects/{defectId:guid}/fix", async (Guid projectId, Guid defectId, FixDefectRequest request,
+deliveryWrites.MapPost("/defects/{defectId:guid}/fix", async (Guid projectId, Guid defectId, FixDefectRequest request,
     HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.FixDefectAsync(Guid.Parse(CurrentTenant(context)), projectId, defectId,
-        request.Fixer, request.Evidence, cancellationToken))).Produces<Defect>().WithTags("Delivery");
-delivery.MapPost("/defects/{defectId:guid}/retest", async (Guid projectId, Guid defectId, RetestDefectRequest request,
+        CurrentActor(context), request.Evidence, cancellationToken))).Produces<Defect>().WithTags("Delivery");
+deliveryWrites.MapPost("/defects/{defectId:guid}/retest", async (Guid projectId, Guid defectId, RetestDefectRequest request,
     HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RetestDefectAsync(Guid.Parse(CurrentTenant(context)), projectId, defectId,
-        request.Passed, request.Retester, cancellationToken))).Produces<Defect>().WithTags("Delivery");
-delivery.MapPost("/reviews", async (Guid projectId, Review review, HttpContext context,
+        request.Passed, CurrentActor(context), cancellationToken))).Produces<Defect>().WithTags("Delivery");
+deliveryWrites.MapPost("/reviews", async (Guid projectId, Review review, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.AddReviewAsync(Guid.Parse(CurrentTenant(context)), projectId, review, cancellationToken)))
+{
+    review.Reviewer = CurrentActor(context);
+    return Results.Ok(await service.AddReviewAsync(Guid.Parse(CurrentTenant(context)), projectId, review, cancellationToken));
+})
     .Produces<Review>().WithTags("Delivery");
-delivery.MapPost("/acceptance-reports", async (Guid projectId, AcceptanceReport report, HttpContext context,
+deliveryWrites.MapPost("/acceptance-reports", async (Guid projectId, AcceptanceReport report, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.AddAcceptanceReportAsync(Guid.Parse(CurrentTenant(context)), projectId, report, cancellationToken)))
+{
+    report.Reviewer = CurrentActor(context);
+    report.AuthorEmployeeId = null;
+    return Results.Ok(await service.AddAcceptanceReportAsync(Guid.Parse(CurrentTenant(context)), projectId, report, cancellationToken));
+})
     .Produces<AcceptanceReport>().WithTags("Delivery");
-delivery.MapPost("/releases", async (Guid projectId, ReleaseRequest request, HttpContext context,
+deliveryWrites.MapPost("/releases", async (Guid projectId, ReleaseRequest request, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReleaseAsync(Guid.Parse(CurrentTenant(context)), projectId, request.Version,
         request.ArtifactRef, cancellationToken))).Produces<ReleaseRecord>().WithTags("Delivery");
-delivery.MapPost("/releases/{releaseId:guid}/observe", async (Guid projectId, Guid releaseId, ObserveReleaseRequest request,
+deliveryWrites.MapPost("/releases/{releaseId:guid}/observe", async (Guid projectId, Guid releaseId, ObserveReleaseRequest request,
     HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ObserveReleaseAsync(Guid.Parse(CurrentTenant(context)), projectId, releaseId,
         request.Healthy, request.MetricsJson, cancellationToken))).Produces<ReleaseRecord>().WithTags("Delivery");
-delivery.MapPost("/terminate", async (Guid projectId, Retrospective retrospective, HttpContext context,
+deliveryWrites.MapPost("/terminate", async (Guid projectId, Retrospective retrospective, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.TerminateProjectAsync(Guid.Parse(CurrentTenant(context)), projectId, retrospective, cancellationToken)))
     .Produces<Retrospective>().WithTags("Delivery");
-delivery.MapPost("/releases/{releaseId:guid}/rollback", async (Guid projectId, Guid releaseId,
+deliveryWrites.MapPost("/releases/{releaseId:guid}/rollback", async (Guid projectId, Guid releaseId,
     RollbackRequest request, HttpContext context, DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RollbackAsync(Guid.Parse(CurrentTenant(context)), projectId, releaseId,
         request.TargetVersion, cancellationToken))).Produces<ReleaseRecord>().WithTags("Delivery");
-delivery.MapPost("/retrospectives", async (Guid projectId, Retrospective retrospective, HttpContext context,
+deliveryWrites.MapPost("/retrospectives", async (Guid projectId, Retrospective retrospective, HttpContext context,
     DeliveryService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.AddRetrospectiveAsync(Guid.Parse(CurrentTenant(context)), projectId, retrospective, cancellationToken)))
     .Produces<Retrospective>().WithTags("Delivery");
 
 var governance = api.MapGroup("/governance");
+var governanceWrites = governance.MapGroup("").RequireAuthorization(ControlPlanePolicies.TenantWriter);
 governance.MapGet("", async (HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<GovernanceState>().WithTags("Governance");
-governance.MapPost("/tools", async (ToolManifest tool, HttpContext context, GovernanceService service,
+governanceWrites.MapPost("/tools", async (ToolManifest tool, HttpContext context, GovernanceService service,
     CancellationToken cancellationToken) => Results.Ok(await service.RegisterToolAsync(Guid.Parse(CurrentTenant(context)), tool, cancellationToken)))
     .Produces<ToolManifest>().WithTags("Governance");
-governance.MapPost("/tools/{toolId:guid}/admit", async (Guid toolId, AdmitToolRequest request,
+governanceWrites.MapPost("/tools/{toolId:guid}/admit", async (Guid toolId, AdmitToolRequest request,
     HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.AdmitToolAsync(Guid.Parse(CurrentTenant(context)), toolId, request.Reviewer, cancellationToken)))
     .Produces<ToolAdmissionReview>().WithTags("Governance");
-governance.MapDelete("/tools/{toolId:guid}", async (Guid toolId, HttpContext context,
+governanceWrites.MapDelete("/tools/{toolId:guid}", async (Guid toolId, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RevokeToolAsync(Guid.Parse(CurrentTenant(context)), toolId, cancellationToken)))
     .Produces<ToolManifest>().WithTags("Governance");
-governance.MapPost("/tool-calls/authorize", async (ToolAuthorizationRequest request, HttpContext context,
+governanceWrites.MapPost("/tool-calls/authorize", async (ToolAuthorizationRequest request, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
 {
     var tenantId = Guid.Parse(CurrentTenant(context));
@@ -1049,65 +1213,65 @@ governance.MapPost("/tool-calls/authorize", async (ToolAuthorizationRequest requ
 governance.MapGet("/tools/{toolId:guid}/impact", async (Guid toolId, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.GetToolImpactAsync(
         Guid.Parse(CurrentTenant(context)), toolId, cancellationToken))).Produces<ToolRevocationImpact>().WithTags("Governance");
-governance.MapPost("/injections/scan", async (ScanContentRequest request, GovernanceService service,
+governanceWrites.MapPost("/injections/scan", async (ScanContentRequest request, GovernanceService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ScanInjectionAsync(request.Content, cancellationToken)))
     .Produces<InjectionScanResult>().WithTags("Governance");
-governance.MapPost("/dlp/redact", async (RedactContentRequest request, HttpContext context,
+governanceWrites.MapPost("/dlp/redact", async (RedactContentRequest request, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RedactAsync(Guid.Parse(CurrentTenant(context)), request.Content, cancellationToken)))
     .Produces<DlpRedactionResult>().WithTags("Governance");
-governance.MapPost("/dlp/delete", async (DeleteDlpTokensRequest request, HttpContext context,
+governanceWrites.MapPost("/dlp/delete", async (DeleteDlpTokensRequest request, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
 {
     await service.DeleteDlpTokensAsync(Guid.Parse(CurrentTenant(context)), request.Tokens, cancellationToken);
     return Results.NoContent();
 }).WithTags("Governance");
-governance.MapPost("/content-safety/review", async (ReviewContentRequest request, HttpContext context,
+governanceWrites.MapPost("/content-safety/review", async (ReviewContentRequest request, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReviewContentAsync(Guid.Parse(CurrentTenant(context)), request.ContentRef, request.Content, cancellationToken)))
     .Produces<ContentSafetyFinding>().WithTags("Governance");
-governance.MapPost("/content-safety/appeals", async (ContentAppealRequest request, HttpContext context,
+governanceWrites.MapPost("/content-safety/appeals", async (ContentAppealRequest request, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.AppealAsync(Guid.Parse(CurrentTenant(context)), request, cancellationToken)))
     .Produces<ContentSafetyFinding>().WithTags("Governance");
-governance.MapPost("/content-safety/findings/{findingId:guid}/resolve", async (Guid findingId, bool upheld,
+governanceWrites.MapPost("/content-safety/findings/{findingId:guid}/resolve", async (Guid findingId, bool upheld,
     HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ResolveAppealAsync(Guid.Parse(CurrentTenant(context)), findingId, upheld, cancellationToken)))
     .Produces<ContentSafetyFinding>().WithTags("Governance");
 governance.MapGet("/incidents", async (HttpContext context, GovernanceService service,
     CancellationToken cancellationToken) => Results.Ok((await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)).Incidents))
     .Produces<IReadOnlyList<SecurityIncident>>().WithTags("Governance");
-governance.MapPost("/incidents", async (SecurityIncident incident, HttpContext context,
+governanceWrites.MapPost("/incidents", async (SecurityIncident incident, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CreateIncidentAsync(Guid.Parse(CurrentTenant(context)), incident, cancellationToken)))
     .Produces<SecurityIncident>().WithTags("Governance");
-governance.MapPost("/incidents/{incidentId:guid}/contain", async (Guid incidentId, ContainIncidentRequest request,
+governanceWrites.MapPost("/incidents/{incidentId:guid}/contain", async (Guid incidentId, ContainIncidentRequest request,
     HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ContainIncidentAsync(Guid.Parse(CurrentTenant(context)), incidentId, request.Action, cancellationToken)))
     .Produces<SecurityIncident>().WithTags("Governance");
-governance.MapPost("/incidents/{incidentId:guid}/recover", async (Guid incidentId, RecoverIncidentRequest request,
+governanceWrites.MapPost("/incidents/{incidentId:guid}/recover", async (Guid incidentId, RecoverIncidentRequest request,
     HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RecoverIncidentAsync(Guid.Parse(CurrentTenant(context)), incidentId, request.Summary, cancellationToken)))
     .Produces<SecurityIncident>().WithTags("Governance");
-governance.MapPost("/incidents/{incidentId:guid}/evidence", async (Guid incidentId, SealEvidenceRequest request,
+governanceWrites.MapPost("/incidents/{incidentId:guid}/evidence", async (Guid incidentId, SealEvidenceRequest request,
     HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.SealIncidentEvidenceAsync(Guid.Parse(CurrentTenant(context)), incidentId,
         request.Evidence, cancellationToken))).Produces<SecurityIncident>().WithTags("Governance");
 governance.MapGet("/incidents/{incidentId:guid}/evidence/verify", async (Guid incidentId, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.VerifyIncidentEvidenceAsync(
         Guid.Parse(CurrentTenant(context)), incidentId, cancellationToken))).Produces<EvidenceVerificationDto>().WithTags("Governance");
-governance.MapPost("/incidents/{incidentId:guid}/close", async (Guid incidentId, CloseIncidentRequest request,
+governanceWrites.MapPost("/incidents/{incidentId:guid}/close", async (Guid incidentId, CloseIncidentRequest request,
     HttpContext context, GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CloseIncidentAsync(Guid.Parse(CurrentTenant(context)), incidentId, request.Retrospective, cancellationToken)))
     .Produces<SecurityIncident>().WithTags("Governance");
 governance.MapGet("/approval-delegations", async (HttpContext context, GovernanceService service,
     CancellationToken cancellationToken) => Results.Ok((await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)).ApprovalDelegations))
     .Produces<IReadOnlyList<ApprovalDelegation>>().WithTags("Governance");
-governance.MapPost("/approval-delegations", async (ApprovalDelegation delegation, HttpContext context,
+governanceWrites.MapPost("/approval-delegations", async (ApprovalDelegation delegation, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CreateApprovalDelegationAsync(Guid.Parse(CurrentTenant(context)), delegation, cancellationToken)))
     .Produces<ApprovalDelegation>().WithTags("Governance");
-governance.MapDelete("/approval-delegations/{id:guid}", async (Guid id, HttpContext context,
+governanceWrites.MapDelete("/approval-delegations/{id:guid}", async (Guid id, HttpContext context,
     GovernanceService service, CancellationToken cancellationToken) =>
     {
         await service.RevokeApprovalDelegationAsync(Guid.Parse(CurrentTenant(context)), id, cancellationToken);
@@ -1122,136 +1286,139 @@ governance.MapGet("/approval-delegations/resolve", async (string primary, string
     .Produces<ApprovalResolutionDto>().WithTags("Governance");
 
 var lifecycle = api.MapGroup("/lifecycle");
+var lifecycleWrites = lifecycle.MapGroup("").RequireAuthorization(ControlPlanePolicies.TenantWriter);
 lifecycle.MapGet("", async (HttpContext context, DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<DataLifecycleState>().WithTags("Lifecycle");
-lifecycle.MapPost("/deletions", async (SoftDeleteRequest request, HttpContext context,
+lifecycleWrites.MapPost("/deletions", async (SoftDeleteRequest request, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.SoftDeleteAsync(Guid.Parse(CurrentTenant(context)), request.ResourceType,
         request.ResourceId, request.Reason, cancellationToken))).Produces<DeletionRequestRecord>().WithTags("Lifecycle");
-lifecycle.MapPost("/deletions/{requestId:guid}/restore", async (Guid requestId, HttpContext context,
+lifecycleWrites.MapPost("/deletions/{requestId:guid}/restore", async (Guid requestId, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RestoreAsync(Guid.Parse(CurrentTenant(context)), requestId, cancellationToken)))
     .Produces<DeletionRequestRecord>().WithTags("Lifecycle");
-lifecycle.MapPost("/deletions/{requestId:guid}/purge", async (Guid requestId, PurgeRequest request,
+lifecycleWrites.MapPost("/deletions/{requestId:guid}/purge", async (Guid requestId, PurgeRequest request,
     HttpContext context, DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.PurgeAsync(Guid.Parse(CurrentTenant(context)), requestId, request.Confirmation, cancellationToken)))
     .Produces<DeletionProof>().WithTags("Lifecycle");
 lifecycle.MapGet("/legal-holds", async (HttpContext context, DataLifecycleService service,
     CancellationToken cancellationToken) => Results.Ok((await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)).LegalHolds))
     .Produces<IReadOnlyList<LegalHoldRecord>>().WithTags("Lifecycle");
-lifecycle.MapPost("/legal-holds", async (LegalHoldRecord hold, HttpContext context,
+lifecycleWrites.MapPost("/legal-holds", async (LegalHoldRecord hold, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CreateLegalHoldAsync(Guid.Parse(CurrentTenant(context)), hold, cancellationToken)))
     .Produces<LegalHoldRecord>().WithTags("Lifecycle");
-lifecycle.MapPost("/legal-holds/{holdId:guid}/release", async (Guid holdId, HttpContext context,
+lifecycleWrites.MapPost("/legal-holds/{holdId:guid}/release", async (Guid holdId, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReleaseLegalHoldAsync(Guid.Parse(CurrentTenant(context)), holdId, cancellationToken)))
     .Produces<LegalHoldRecord>().WithTags("Lifecycle");
 lifecycle.MapGet("/retention-policies", async (HttpContext context, DataLifecycleService service,
     CancellationToken cancellationToken) => Results.Ok((await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)).RetentionPolicies))
     .Produces<IReadOnlyList<RetentionPolicyRecord>>().WithTags("Lifecycle");
-lifecycle.MapPost("/retention-policies", async (RetentionPolicyRecord policy, HttpContext context,
+lifecycleWrites.MapPost("/retention-policies", async (RetentionPolicyRecord policy, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CreateRetentionPolicyAsync(Guid.Parse(CurrentTenant(context)), policy, cancellationToken)))
     .Produces<RetentionPolicyRecord>().WithTags("Lifecycle");
-lifecycle.MapPost("/archives", async (ArchiveRequest request, HttpContext context,
+lifecycleWrites.MapPost("/archives", async (ArchiveRequest request, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ArchiveAsync(Guid.Parse(CurrentTenant(context)), request.Period, request.Tier,
         request.RecordCount, cancellationToken))).Produces<ArchiveManifest>().WithTags("Lifecycle");
-lifecycle.MapPost("/archives/{archiveId:guid}/restore", async (Guid archiveId, HttpContext context,
+lifecycleWrites.MapPost("/archives/{archiveId:guid}/restore", async (Guid archiveId, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RestoreArchiveAsync(Guid.Parse(CurrentTenant(context)), archiveId, cancellationToken)))
     .Produces<ArchiveManifest>().WithTags("Lifecycle");
-lifecycle.MapPost("/backups", async (BackupRequest request, HttpContext context,
+lifecycleWrites.MapPost("/backups", async (BackupRequest request, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.BackupAsync(Guid.Parse(CurrentTenant(context)), request.Profile,
         request.RpoMinutes, request.RtoMinutes, cancellationToken))).Produces<BackupRunRecord>().WithTags("Lifecycle");
-lifecycle.MapPost("/backups/{backupId:guid}/verify-restore", async (Guid backupId, HttpContext context,
+lifecycleWrites.MapPost("/backups/{backupId:guid}/verify-restore", async (Guid backupId, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.VerifyRestoreAsync(Guid.Parse(CurrentTenant(context)), backupId, cancellationToken)))
     .Produces<BackupRunRecord>().WithTags("Lifecycle");
-lifecycle.MapPost("/rights", async (RightsRecord rights, HttpContext context,
+lifecycleWrites.MapPost("/rights", async (RightsRecord rights, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RecordRightsAsync(Guid.Parse(CurrentTenant(context)), rights, cancellationToken)))
     .Produces<RightsRecord>().WithTags("Lifecycle");
-lifecycle.MapPost("/licenses", async (LicenseRecord license, HttpContext context,
+lifecycleWrites.MapPost("/licenses", async (LicenseRecord license, HttpContext context,
     DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RecordLicenseAsync(Guid.Parse(CurrentTenant(context)), license, cancellationToken)))
     .Produces<LicenseRecord>().WithTags("Lifecycle");
-lifecycle.MapPost("/run-due", async (DataLifecycleService service, CancellationToken cancellationToken) =>
+lifecycleWrites.MapPost("/run-due", async (DataLifecycleService service, CancellationToken cancellationToken) =>
     Results.Ok(new { purged = await service.RunDuePurgeAsync(cancellationToken) })).WithTags("Lifecycle");
 lifecycle.MapGet("/evaluation", async (HttpContext context, DataLifecycleService service,
     CancellationToken cancellationToken) => Results.Ok(await service.EvaluateAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<LifecycleEvaluation>().WithTags("Lifecycle");
 
 var modelApi = api.MapGroup("/models");
+var modelWrites = modelApi.MapGroup("").RequireAuthorization(ControlPlanePolicies.TenantWriter);
 modelApi.MapGet("/pool", async (HttpContext context, ModelOperationsService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken))).Produces<ModelPoolState>().WithTags("Models");
-modelApi.MapPost("/catalog", async (ModelCatalogEntry entry, HttpContext context,
+modelWrites.MapPost("/catalog", async (ModelCatalogEntry entry, HttpContext context,
     ModelOperationsService service, CancellationToken cancellationToken) => Results.Ok(await service.AddModelAsync(
         Guid.Parse(CurrentTenant(context)), entry, cancellationToken))).Produces<ModelCatalogEntry>().WithTags("Models");
-modelApi.MapPut("/catalog/{provider}/{modelId}/rotate", async (string provider, string modelId, RotateModelRequest request,
+modelWrites.MapPut("/catalog/{provider}/{modelId}/rotate", async (string provider, string modelId, RotateModelRequest request,
     HttpContext context, ModelOperationsService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RotateModelAsync(Guid.Parse(CurrentTenant(context)), provider, modelId,
         request.Version, request.Protocol, cancellationToken))).Produces<ModelCatalogEntry>().WithTags("Models");
-modelApi.MapDelete("/catalog/{provider}/{modelId}", async (string provider, string modelId,
+modelWrites.MapDelete("/catalog/{provider}/{modelId}", async (string provider, string modelId,
     HttpContext context, ModelOperationsService service, CancellationToken cancellationToken) =>
 {
     await service.DeleteModelAsync(Guid.Parse(CurrentTenant(context)), provider, modelId, cancellationToken);
     return Results.NoContent();
 }).WithTags("Models");
-modelApi.MapPost("/snapshots/refresh", async (RefreshSnapshotRequest request, HttpContext context,
+modelWrites.MapPost("/snapshots/refresh", async (RefreshSnapshotRequest request, HttpContext context,
     ModelOperationsService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RefreshSnapshotAsync(Guid.Parse(CurrentTenant(context)), request.Date, cancellationToken)))
     .Produces<ModelPoolState>().WithTags("Models");
-modelApi.MapPost("/prices", async (ManualModelPrice price, HttpContext context, ModelOperationsService service,
+modelWrites.MapPost("/prices", async (ManualModelPrice price, HttpContext context, ModelOperationsService service,
     CancellationToken cancellationToken) => Results.Ok(await service.SetManualPriceAsync(Guid.Parse(CurrentTenant(context)), price, cancellationToken)))
     .Produces<ManualModelPrice>().WithTags("Models");
-modelApi.MapPost("/tiers", async (ModelTierAssignment assignment, HttpContext context, ModelOperationsService service,
+modelWrites.MapPost("/tiers", async (ModelTierAssignment assignment, HttpContext context, ModelOperationsService service,
     CancellationToken cancellationToken) => Results.Ok(await service.AssignTierAsync(Guid.Parse(CurrentTenant(context)), assignment, cancellationToken)))
     .Produces<ModelTierAssignment>().WithTags("Models");
-modelApi.MapPost("/bindings", async (EmployeeModelBinding binding, HttpContext context, ModelOperationsService service,
+modelWrites.MapPost("/bindings", async (EmployeeModelBinding binding, HttpContext context, ModelOperationsService service,
     CancellationToken cancellationToken) => Results.Ok(await service.BindEmployeeAsync(Guid.Parse(CurrentTenant(context)), binding, cancellationToken)))
     .Produces<EmployeeModelBinding>().WithTags("Models");
-modelApi.MapPost("/bindings/{employeeId:guid}/restore", async (Guid employeeId, EmployeeModelBinding checkpoint,
+modelWrites.MapPost("/bindings/{employeeId:guid}/restore", async (Guid employeeId, EmployeeModelBinding checkpoint,
     HttpContext context, ModelOperationsService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.RestoreBindingAsync(Guid.Parse(CurrentTenant(context)), employeeId, checkpoint, cancellationToken)))
     .Produces<EmployeeModelBinding>().WithTags("Models");
-modelApi.MapPost("/unavailable", async (ModelUnavailableRequest request, HttpContext context, ModelOperationsService service,
+modelWrites.MapPost("/unavailable", async (ModelUnavailableRequest request, HttpContext context, ModelOperationsService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ReportUnavailableAsync(Guid.Parse(CurrentTenant(context)),
         request.EmployeeId, request.Provider, request.ModelId, request.ConsecutiveFailures, request.UnavailableMinutes, cancellationToken)))
     .Produces<ModelUnavailableEvent>().WithTags("Models");
-modelApi.MapPost("/test", async (TestModelRequest request, HttpContext context, ModelOperationsService service,
+modelWrites.MapPost("/test", async (TestModelRequest request, HttpContext context, ModelOperationsService service,
     CancellationToken cancellationToken) => Results.Ok(await service.TestModelAsync(Guid.Parse(CurrentTenant(context)),
         request.Provider, request.ModelId, cancellationToken))).Produces<ModelTestResult>().WithTags("Models");
 
 var policyApi = api.MapGroup("/runtime-policy");
+var policyWrites = policyApi.MapGroup("").RequireAuthorization(ControlPlanePolicies.TenantWriter);
 policyApi.MapGet("", async (HttpContext context, RuntimePolicyService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken))).Produces<RuntimePolicyState>().WithTags("Runtime Policy");
-policyApi.MapPost("/costs", async (CostEntry cost, HttpContext context, RuntimePolicyService service,
+policyWrites.MapPost("/costs", async (CostEntry cost, HttpContext context, RuntimePolicyService service,
     CancellationToken cancellationToken) => Results.Ok(await service.RecordCostAsync(Guid.Parse(CurrentTenant(context)), cost, cancellationToken)))
     .Produces<CostEntry>().WithTags("Runtime Policy");
-policyApi.MapPost("/costs/{costId:guid}/corrections", async (Guid costId, CorrectCostRequest request,
+policyWrites.MapPost("/costs/{costId:guid}/corrections", async (Guid costId, CorrectCostRequest request,
     HttpContext context, RuntimePolicyService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CorrectCostAsync(Guid.Parse(CurrentTenant(context)), costId, request.Delta, request.Reason, cancellationToken)))
     .Produces<CostEntry>().WithTags("Runtime Policy");
 policyApi.MapGet("/costs/summary", async (Guid? projectId, HttpContext context, RuntimePolicyService service,
     CancellationToken cancellationToken) => Results.Ok(await service.SummaryAsync(Guid.Parse(CurrentTenant(context)), projectId, cancellationToken)))
     .Produces<CostSummaryDto>().WithTags("Runtime Policy");
-policyApi.MapPost("/budgets", async (BudgetPolicy budget, HttpContext context, RuntimePolicyService service,
+policyWrites.MapPost("/budgets", async (BudgetPolicy budget, HttpContext context, RuntimePolicyService service,
     CancellationToken cancellationToken) => Results.Ok(await service.SetBudgetAsync(Guid.Parse(CurrentTenant(context)), budget, cancellationToken)))
     .Produces<BudgetPolicy>().WithTags("Runtime Policy");
-policyApi.MapPost("/allocation-rules", async (AllocationRule rule, HttpContext context, RuntimePolicyService service,
+policyWrites.MapPost("/allocation-rules", async (AllocationRule rule, HttpContext context, RuntimePolicyService service,
     CancellationToken cancellationToken) => Results.Ok(await service.AddAllocationRuleAsync(Guid.Parse(CurrentTenant(context)), rule, cancellationToken)))
     .Produces<AllocationRule>().WithTags("Runtime Policy");
-policyApi.MapPut("/schedule", async (WorkSchedule schedule, HttpContext context, RuntimePolicyService service,
+policyWrites.MapPut("/schedule", async (WorkSchedule schedule, HttpContext context, RuntimePolicyService service,
     CancellationToken cancellationToken) => Results.Ok(await service.UpdateScheduleAsync(Guid.Parse(CurrentTenant(context)), schedule, cancellationToken)))
     .Produces<WorkSchedule>().WithTags("Runtime Policy");
-policyApi.MapPost("/dispatch", async (DispatchRequest request, HttpContext context, RuntimePolicyService service,
+policyWrites.MapPost("/dispatch", async (DispatchRequest request, HttpContext context, RuntimePolicyService service,
     CancellationToken cancellationToken) => Results.Ok(await service.DecideDispatchAsync(Guid.Parse(CurrentTenant(context)), request.Now, request.Emergency, cancellationToken)))
     .Produces<DispatchDecision>().WithTags("Runtime Policy");
-policyApi.MapPut("/capacity", async (CapacityPolicy capacity, HttpContext context, RuntimePolicyService service,
+policyWrites.MapPut("/capacity", async (CapacityPolicy capacity, HttpContext context, RuntimePolicyService service,
     CancellationToken cancellationToken) => Results.Ok(await service.UpdateCapacityAsync(Guid.Parse(CurrentTenant(context)), capacity, cancellationToken)))
     .Produces<CapacityPolicy>().WithTags("Runtime Policy");
 policyApi.MapGet("/capacity/admission", async (int queueDepth, HttpContext context, RuntimePolicyService service,
@@ -1278,20 +1445,15 @@ api.MapGet("/employees/{id:guid}/timeline", async (Guid id, EmployeeService serv
 api.MapGet("/outbox", async (HttpContext context, OutboxService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<IReadOnlyList<OutboxRecord>>().WithTags("Messaging");
-api.MapPost("/outbox", async (PublishEventRequest request, HttpContext context,
-    OutboxService service, CancellationToken cancellationToken) => Results.Ok(await service.PublishAsync(
-        Guid.Parse(CurrentTenant(context)), request.EventType, request.Payload, cancellationToken)))
-    .Produces<OutboxRecord>().WithTags("Messaging");
-api.MapPost("/outbox/process", async (OutboxService service, CancellationToken cancellationToken) =>
-    Results.Ok(new { processed = await service.ProcessAsync(cancellationToken) })).WithTags("Messaging");
 api.MapGet("/schema/version", async (SchemaVersionService service, CancellationToken cancellationToken) =>
     Results.Ok(new { version = SchemaVersionService.CurrentVersion })).WithTags("System");
 
 api.MapPost("/approvals", async (CreateApprovalDto input, ApprovalService service,
     CancellationToken cancellationToken) => Results.Ok(await service.CreateAsync(input, cancellationToken)))
-    .Produces<ApprovalDto>().WithTags("Approvals");
+    .Produces<ApprovalDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Approvals");
 api.MapPost("/approvals/expire-due", async (ApprovalExpiryService service, CancellationToken cancellationToken) =>
-    Results.Ok(new { expired = await service.ExpireDueAsync(cancellationToken) })).WithTags("Approvals");
+    Results.Ok(new { expired = await service.ExpireDueAsync(cancellationToken) }))
+    .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Approvals");
 api.MapGet("/audit/verify", async (HttpContext context, AuditIntegrityService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.VerifyAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<AuditVerificationDto>().WithTags("Audit");
@@ -1301,7 +1463,7 @@ api.MapGet("/audit/anchors/verify", async (HttpContext context, AuditIntegritySe
 api.MapPost("/audit/checkpoints", async (AuditCheckpointRequest request, HttpContext context,
     AuditIntegrityService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.CheckpointAsync(Guid.Parse(CurrentTenant(context)), request.Profile, cancellationToken)))
-    .Produces<AuditCheckpointDto>().WithTags("Audit");
+    .Produces<AuditCheckpointDto>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Audit");
 
 api.MapGet("/approvals/{id:guid}", async (Guid id, ApprovalService service, CancellationToken cancellationToken) =>
 {
@@ -1310,26 +1472,23 @@ api.MapGet("/approvals/{id:guid}", async (Guid id, ApprovalService service, Canc
 }).Produces<ApprovalDto>(StatusCodes.Status200OK).Produces(StatusCodes.Status404NotFound).WithTags("Governance");
 
 api.MapPost("/approvals/{id:guid}/decision", async (Guid id, ApprovalDecision decision,
-    ApprovalService service, IHubContext<TenantHub> hub, HttpContext context, CancellationToken cancellationToken) =>
+    ApprovalService service, ApprovalAuthority authority, IHubContext<TenantHub> hub, HttpContext context,
+    CancellationToken cancellationToken) =>
 {
-    if (!context.Request.Headers.TryGetValue("Idempotency-Key", out var key) || string.IsNullOrWhiteSpace(key))
-    {
-        return ApiResults.Problem(RegentAgent.Contracts.Results.Error.Validation("Idempotency-Key is required."), context.TraceIdentifier);
-    }
-
-    var result = await service.DecideAsync(new ApprovalId(id), decision, cancellationToken, key.ToString());
+    var approval = await service.GetAsync(new ApprovalId(id), cancellationToken);
+    if (approval is null) return Results.NotFound();
+    await authority.EnsureCanDecideAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context),
+        approval.ActionType, cancellationToken);
+    var key = RequiredIdempotencyKey(context);
+    var result = await service.DecideAsync(new ApprovalId(id), decision, cancellationToken, key);
     if (!result.IsSuccess)
     {
         return ApiResults.Problem(result.Error!, context.TraceIdentifier);
     }
 
-    var tenantId = context.User.FindFirstValue("tenant_id");
-    if (!string.IsNullOrWhiteSpace(tenantId))
-    {
-        await hub.Clients.Group(tenantId).SendAsync("approval.changed", result.Value, cancellationToken);
-    }
+    await new TenantHubNotifier(hub).ApprovalChangedAsync(CurrentTenant(context), result.Value!.Id, cancellationToken);
     return Results.Ok(result.Value);
-}).Produces<ApprovalDto>(StatusCodes.Status200OK).WithTags("Governance");
+}).Produces<ApprovalDto>(StatusCodes.Status200OK).RequireAuthorization(ControlPlanePolicies.ApprovalDecider).WithTags("Governance");
 
 api.MapGet("/notifications", async (HttpContext context, RegentDbContext db,
     CancellationToken cancellationToken) =>
@@ -1380,10 +1539,11 @@ api.MapPut("/localization", async (LocalizationSettings settings, HttpContext co
         CurrentTenant(context), settings, cancellationToken))).Produces<LocalizationSettings>().WithTags("Localization");
 api.MapGet("/compliance/profile", async (HttpContext context, ComplianceService service,
     CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(CurrentTenant(context), cancellationToken)))
-    .WithTags("Compliance");
+    .Produces<ComplianceProfile>().WithTags("Compliance");
 api.MapPut("/compliance/profile", async (ComplianceProfile profile, HttpContext context,
     ComplianceService service, CancellationToken cancellationToken) =>
-    Results.Ok(await service.UpdateAsync(CurrentTenant(context), profile, cancellationToken))).WithTags("Compliance");
+    Results.Ok(await service.UpdateAsync(CurrentTenant(context), profile, cancellationToken)))
+    .Produces<ComplianceProfile>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Compliance");
 
 api.MapGet("/workflows", async (HttpContext context, WorkflowService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken))).Produces<IReadOnlyList<WorkflowDefinition>>().WithTags("Workflows");
@@ -1395,7 +1555,7 @@ api.MapPost("/workflows", async (CreateWorkflowRequest request, HttpContext cont
     await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "workflow.captured", CurrentUser(context),
         new { workflow_id = workflow.Id, version = workflow.Version, scope_position_id = workflow.ScopePositionId }, cancellationToken);
     return Results.Ok(workflow);
-}).Produces<WorkflowDefinition>().WithTags("Workflows");
+}).Produces<WorkflowDefinition>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Workflows");
 api.MapPost("/workflows/{id}/nominate", async (string id, HttpContext context, WorkflowService service,
     AuditIntegrityService audit, CancellationToken cancellationToken) =>
 {
@@ -1403,7 +1563,7 @@ api.MapPost("/workflows/{id}/nominate", async (string id, HttpContext context, W
     await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "workflow.nominated", CurrentUser(context),
         new { workflow_id = workflow.Id, parent_workflow_id = workflow.ParentWorkflowId, version = workflow.Version }, cancellationToken);
     return Results.Ok(workflow);
-}).Produces<WorkflowDefinition>().WithTags("Workflows");
+}).Produces<WorkflowDefinition>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Workflows");
 api.MapPost("/workflows/{id}/review", async (string id, ReviewWorkflowRequest request, HttpContext context,
     WorkflowService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
 {
@@ -1412,7 +1572,7 @@ api.MapPost("/workflows/{id}/review", async (string id, ReviewWorkflowRequest re
     await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "workflow.reviewed", CurrentUser(context),
         new { workflow_id = workflow.Id, decision = request.Decision, reviewer_id = request.Reviewer }, cancellationToken);
     return Results.Ok(workflow);
-}).Produces<WorkflowDefinition>().WithTags("Workflows");
+}).Produces<WorkflowDefinition>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Workflows");
 api.MapPost("/workflows/{id}/runs", async (string id, HttpContext context, WorkflowService service,
     CancellationToken cancellationToken) => Results.Ok(await service.StartAsync(id, CurrentTenant(context), cancellationToken)))
     .WithTags("Workflows");
@@ -1420,14 +1580,16 @@ api.MapPost("/workflow-runs/{id}/advance", async (string id, WorkflowService ser
     CancellationToken cancellationToken) => Results.Ok(await service.AdvanceAsync(id, cancellationToken))).WithTags("Workflows");
 
 api.MapGet("/memories", async (string? query, HttpContext context, MemoryService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.SearchAsync(CurrentTenant(context), query, CurrentUser(context), cancellationToken)))
+    CancellationToken cancellationToken) => Results.Ok(await service.SearchAsync(CurrentTenant(context), query,
+        CurrentUser(context), cancellationToken, viewerUserId: CurrentUserId(context).ToString())))
     .Produces<IReadOnlyList<MemoryClaim>>().WithTags("Memory");
 api.MapPost("/memories", async (MemoryCaptureRequest request, HttpContext context, MemoryService service,
     MemorySafetyService safety, MemoryEventService events, CancellationToken cancellationToken) =>
 {
     var tenantId = CurrentTenant(context);
     var claim = await service.CaptureAsync(tenantId, request.Scope, request.Content, request.SourceRef,
-        request.Confidence, request.Taint, CurrentUser(context), cancellationToken, requireReview: request.Scope != "personal");
+        request.Confidence, request.Taint, CurrentUser(context), cancellationToken, requireReview: request.Scope != "personal",
+        authorUserId: CurrentUserId(context).ToString());
     var findings = await safety.ListClaimFindingsAsync(claim.Id, tenantId, cancellationToken);
     await events.RecordAsync(Guid.Parse(tenantId), CurrentUserId(context), CurrentUser(context), "memory.claim.captured",
         new { claim_id = claim.Id, scope = claim.Scope, version = claim.Version, taint = claim.Taint, finding_count = findings.Count },
@@ -1440,12 +1602,14 @@ api.MapPost("/memories", async (MemoryCaptureRequest request, HttpContext contex
 }).Produces<MemoryClaim>().WithTags("Memory");
 api.MapGet("/memories/search", async (string query, string? scope, int? maxResults, HttpContext context,
     MemoryIndexService index, CancellationToken cancellationToken) => Results.Ok(await index.SearchHybridAsync(
-        CurrentTenant(context), query, scope, maxResults ?? 10, CurrentUser(context), cancellationToken)))
+        CurrentTenant(context), query, scope, maxResults ?? 10, CurrentUser(context), cancellationToken,
+        viewerUserId: CurrentUserId(context).ToString())))
     .Produces<MemorySearchResult>().WithTags("Memory");
 api.MapGet("/memories/{id}", async (string id, HttpContext context, MemoryService service,
     CancellationToken cancellationToken) =>
     {
-        var claim = await service.GetAsync(id, CurrentTenant(context), CurrentUser(context), cancellationToken);
+        var claim = await service.GetAsync(id, CurrentTenant(context), CurrentUser(context), cancellationToken,
+            viewerUserId: CurrentUserId(context).ToString());
         return claim is null ? Results.NotFound() : Results.Ok(claim);
     })
     .Produces<MemoryClaim>().Produces(StatusCodes.Status404NotFound).WithTags("Memory");
@@ -1467,7 +1631,8 @@ api.MapPost("/memory/claims/{id}/nominate", async (string id, MemoryNominationRe
     HttpContext context, MemoryService memory, MemorySafetyService safety, MemoryEventService events,
     CancellationToken cancellationToken) =>
 {
-    if (await memory.GetAsync(id, CurrentTenant(context), CurrentUser(context), cancellationToken) is null)
+    if (await memory.GetAsync(id, CurrentTenant(context), CurrentUser(context), cancellationToken,
+        viewerUserId: CurrentUserId(context).ToString()) is null)
         return Results.NotFound();
     var candidate = await safety.NominateAsync(id, CurrentTenant(context), request, cancellationToken);
     await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
@@ -1580,14 +1745,16 @@ api.MapPost("/memory/corrections/{id}/approve", async (string id, MemoryCorrecti
 }).Produces<MemoryClaim>().RequireAuthorization("MemoryGovernor").WithTags("Memory");
 api.MapGet("/memory/claims/{id}/impact", async (string id, HttpContext context, MemorySafetyService safety,
     MemoryService memory, CancellationToken cancellationToken) =>
-    await memory.GetAsync(id, CurrentTenant(context), CurrentUser(context), cancellationToken) is null
+    await memory.GetAsync(id, CurrentTenant(context), CurrentUser(context), cancellationToken,
+        viewerUserId: CurrentUserId(context).ToString()) is null
         ? Results.NotFound() : Results.Ok(await safety.GetImpactAsync(id, CurrentTenant(context), cancellationToken)))
     .Produces<IReadOnlyList<MemoryImpactRecord>>().WithTags("Memory");
 api.MapPost("/memory/claims/{id}/impact", async (string id, MemoryImpactRequest request,
     HttpContext context, MemorySafetyService safety, MemoryService memory, MemoryEventService events,
     CancellationToken cancellationToken) =>
 {
-    if (await memory.GetAsync(id, CurrentTenant(context), CurrentUser(context), cancellationToken) is null)
+    if (await memory.GetAsync(id, CurrentTenant(context), CurrentUser(context), cancellationToken,
+        viewerUserId: CurrentUserId(context).ToString()) is null)
         return Results.NotFound();
     var impact = await safety.RecordImpactAsync(id, CurrentTenant(context), request, cancellationToken);
     await events.RecordAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context), CurrentUser(context),
@@ -1649,7 +1816,7 @@ api.MapPost("/improvements", async (CreateImprovementRequest request, HttpContex
     await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "improvement.proposed", CurrentUser(context),
         new { proposal_id = proposal.Id, employee_id = proposal.EmployeeId, category = proposal.Category }, cancellationToken);
     return Results.Ok(proposal);
-}).Produces<ImprovementProposal>().WithTags("Performance");
+}).Produces<ImprovementProposal>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Performance");
 api.MapPost("/improvements/{id}/review", async (string id, ReviewImprovementRequest request,
     HttpContext context, ImprovementService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
 {
@@ -1658,92 +1825,99 @@ api.MapPost("/improvements/{id}/review", async (string id, ReviewImprovementRequ
     await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "improvement.reviewed", CurrentUser(context),
         new { proposal_id = proposal.Id, approved = request.Approved, reviewer_id = request.Reviewer }, cancellationToken);
     return Results.Ok(proposal);
-}).Produces<ImprovementProposal>().WithTags("Performance");
+}).Produces<ImprovementProposal>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Performance");
 
-api.MapPost("/agent-runtime/context", async (BuildContextRequest request, AgentRuntimeService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.BuildContextAsync(request.TaskId,
+api.MapPost("/agent-runtime/context", async (BuildContextRequest request, HttpContext context, AgentRuntimeService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.BuildContextAsync(Guid.Parse(CurrentTenant(context)), request.TaskId,
         request.SystemPrefix, request.TenantMemory, request.TaskGrantJson, request.ToolResultRefs,
         request.CheckpointJson, request.Compressed, cancellationToken))).Produces<AgentContextSnapshot>().WithTags("Agent Runtime");
-api.MapPost("/agent-runtime/tool-loop", async (ToolLoopRequest request, AgentRuntimeService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.RunToolLoopAsync(request, cancellationToken)))
+api.MapPost("/agent-runtime/tool-loop", async (ToolLoopRequest request, HttpContext context, AgentRuntimeService service,
+    CancellationToken cancellationToken) => Results.Ok(await service.RunToolLoopAsync(Guid.Parse(CurrentTenant(context)), request, cancellationToken)))
     .Produces<ToolLoopResult>().WithTags("Agent Runtime");
-api.MapGet("/task-governance", async (HttpContext context, TaskGovernanceService service,
+var taskGovernance = api.MapGroup("/task-governance");
+var taskGovernanceWrites = taskGovernance.MapGroup("").RequireAuthorization(ControlPlanePolicies.TenantWriter);
+taskGovernance.MapGet("", async (HttpContext context, TaskGovernanceService service,
     CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<TaskGovernanceState>().WithTags("Task Governance");
-api.MapPost("/task-governance/task-types", async (TaskTypeDefinition definition, HttpContext context,
+taskGovernanceWrites.MapPost("/task-types", async (TaskTypeDefinition definition, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.RegisterTaskTypeAsync(
         Guid.Parse(CurrentTenant(context)), definition, cancellationToken))).Produces<TaskTypeDefinition>().WithTags("Task Governance");
-api.MapPost("/task-governance/capabilities", async (CapabilityAssessment assessment, HttpContext context,
+taskGovernanceWrites.MapPost("/capabilities", async (CapabilityAssessment assessment, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.AssessAsync(
         Guid.Parse(CurrentTenant(context)), assessment, cancellationToken))).Produces<CapabilityAssessment>().WithTags("Task Governance");
-api.MapPost("/task-governance/claim-score", async (ClaimScoreRequest request, HttpContext context,
+taskGovernanceWrites.MapPost("/claim-score", async (ClaimScoreRequest request, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.ScoreClaimAsync(
         Guid.Parse(CurrentTenant(context)), request.EmployeeId, request.TaskType, request.CurrentWip, request.WipLimit,
         request.HistorySuccess, request.ToolFit, request.CostEfficiency, request.Independent, cancellationToken)))
     .Produces<ClaimScoreDto>().WithTags("Task Governance");
-api.MapPost("/task-governance/auto-assign", async (AutoAssignRequest request, HttpContext context,
+taskGovernanceWrites.MapPost("/auto-assign", async (AutoAssignRequest request, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.AutoAssignAsync(
         Guid.Parse(CurrentTenant(context)), request, cancellationToken))).Produces<AutoAssignResult>().WithTags("Task Governance");
-api.MapPost("/task-governance/tasks/{taskId:guid}/reassign", async (Guid taskId, ReassignTaskRequest request,
+taskGovernanceWrites.MapPost("/tasks/{taskId:guid}/reassign", async (Guid taskId, ReassignTaskRequest request,
     HttpContext context, TaskGovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ReassignTaskAsync(Guid.Parse(CurrentTenant(context)), taskId, request.EmployeeId,
         request.Reason, request.ApprovalId, cancellationToken))).Produces<TaskAssignmentRecord>().WithTags("Task Governance");
-api.MapPost("/task-governance/ledger", async (WorkLedgerEntry entry, HttpContext context,
+taskGovernanceWrites.MapPost("/ledger", async (WorkLedgerEntry entry, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.RecordWorkAsync(
         Guid.Parse(CurrentTenant(context)), entry, cancellationToken))).Produces<WorkLedgerEntry>().WithTags("Task Governance");
-api.MapPost("/task-governance/reviews", async (ReviewTaskRecord review, HttpContext context,
+taskGovernanceWrites.MapPost("/reviews", async (ReviewTaskRecord review, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.CreateReviewAsync(
         Guid.Parse(CurrentTenant(context)), review, cancellationToken))).Produces<ReviewTaskRecord>().WithTags("Task Governance");
-api.MapPost("/task-governance/reviews/{reviewId:guid}/approve", async (Guid reviewId, ApproveReviewRequest request,
+taskGovernanceWrites.MapPost("/reviews/{reviewId:guid}/approve", async (Guid reviewId, ApproveReviewRequest request,
     HttpContext context, TaskGovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ApproveReviewAsync(Guid.Parse(CurrentTenant(context)), reviewId, request.Approver, cancellationToken)))
     .Produces<ReviewTaskRecord>().WithTags("Task Governance");
-api.MapPost("/task-governance/debates", async (DebateTaskRecord debate, HttpContext context,
+taskGovernanceWrites.MapPost("/debates", async (DebateTaskRecord debate, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.CreateDebateAsync(
         Guid.Parse(CurrentTenant(context)), debate, cancellationToken))).Produces<DebateTaskRecord>().WithTags("Task Governance");
-api.MapPost("/task-governance/debates/{debateId:guid}/decide", async (Guid debateId, DecideDebateRequest request,
+taskGovernanceWrites.MapPost("/debates/{debateId:guid}/decide", async (Guid debateId, DecideDebateRequest request,
     HttpContext context, TaskGovernanceService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.DecideDebateAsync(Guid.Parse(CurrentTenant(context)), debateId, request.Decision, cancellationToken)))
     .Produces<DebateTaskRecord>().WithTags("Task Governance");
-api.MapPost("/task-governance/adjudications", async (AdjudicationTaskRecord adjudication, HttpContext context,
+taskGovernanceWrites.MapPost("/adjudications", async (AdjudicationTaskRecord adjudication, HttpContext context,
     TaskGovernanceService service, CancellationToken cancellationToken) => Results.Ok(await service.AdjudicateAsync(
         Guid.Parse(CurrentTenant(context)), adjudication, cancellationToken))).Produces<AdjudicationTaskRecord>().WithTags("Task Governance");
 
-api.MapGet("/agent-evolution", async (HttpContext context, AgentEvolutionService service,
+var agentEvolution = api.MapGroup("/agent-evolution");
+var agentEvolutionWrites = agentEvolution.MapGroup("").RequireAuthorization(ControlPlanePolicies.TenantWriter);
+agentEvolution.MapGet("", async (HttpContext context, AgentEvolutionService service,
     CancellationToken cancellationToken) => Results.Ok(await service.GetAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
     .Produces<AgentEvolutionState>().WithTags("Agent Evolution");
-api.MapPost("/agent-evolution/prompts", async (CreatePromptRequest request, HttpContext context,
+agentEvolutionWrites.MapPost("/prompts", async (CreatePromptRequest request, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.CreatePromptAsync(
         Guid.Parse(CurrentTenant(context)), request.Name, request.Content, request.Kind, cancellationToken)))
     .Produces<PromptBundle>().WithTags("Agent Evolution");
-api.MapPost("/agent-evolution/prompts/{id:guid}/activate", async (Guid id, HttpContext context,
+agentEvolutionWrites.MapPost("/prompts/{id:guid}/activate", async (Guid id, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.ActivatePromptAsync(
         Guid.Parse(CurrentTenant(context)), id, cancellationToken)))
     .Produces<PromptBundle>().WithTags("Agent Evolution");
-api.MapPost("/agent-evolution/skills", async (CreateSkillRequest request, HttpContext context,
+agentEvolutionWrites.MapPost("/skills", async (CreateSkillRequest request, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.CreateSkillAsync(
         Guid.Parse(CurrentTenant(context)), request.Name, request.PromptBundleId, request.ConfigJson, cancellationToken)))
     .Produces<SkillDefinition>().WithTags("Agent Evolution");
-api.MapPost("/agent-evolution/skills/{id:guid}/activate", async (Guid id, HttpContext context,
+agentEvolutionWrites.MapPost("/skills/{id:guid}/activate", async (Guid id, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.ActivateSkillAsync(
         Guid.Parse(CurrentTenant(context)), id, cancellationToken)))
     .Produces<SkillDefinition>().WithTags("Agent Evolution");
-api.MapPost("/agent-evolution/onboarding", async (OnboardingRequest request, HttpContext context,
+agentEvolutionWrites.MapPost("/onboarding", async (OnboardingRequest request, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.CreateOnboardingBaselineAsync(
         Guid.Parse(CurrentTenant(context)), request.EmployeeId, request.PromptBundleId, cancellationToken)))
     .Produces<OnboardingBaseline>().WithTags("Agent Evolution");
-api.MapPost("/agent-evolution/assets", async (PublishAssetRequest request, HttpContext context,
+agentEvolutionWrites.MapPost("/assets", async (PublishAssetRequest request, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.PublishAssetAsync(
         Guid.Parse(CurrentTenant(context)), request.AssetType, request.AssetId, request.Publisher, cancellationToken)))
     .Produces<PublicAsset>().WithTags("Agent Evolution");
-api.MapPost("/agent-evolution/tool-policies", async (ToolDisclosurePolicy policy, HttpContext context,
+agentEvolutionWrites.MapPost("/tool-policies", async (ToolDisclosurePolicy policy, HttpContext context,
     AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.SetToolPolicyAsync(
         Guid.Parse(CurrentTenant(context)), policy, cancellationToken)))
     .Produces<ToolDisclosurePolicy>().WithTags("Agent Evolution");
-api.MapPost("/agent-evolution/tools/disclose", async (ToolDisclosureRequest request, HttpContext context,
-    AgentEvolutionService service, CancellationToken cancellationToken) => Results.Ok(await service.DiscloseAsync(
-        Guid.Parse(CurrentTenant(context)), request, cancellationToken)))
-    .Produces<ToolDisclosureResult>().WithTags("Agent Evolution");
+agentEvolution.MapPost("/tools/disclose", async (ToolDisclosureRequest request, HttpContext context,
+    AgentEvolutionService service, ToolDisclosureAuthorityFactory authority, CancellationToken cancellationToken) =>
+{
+    RequiredIdempotencyKey(context);
+    return Results.Ok(await service.DiscloseAsync(
+        Guid.Parse(CurrentTenant(context)), await authority.CreateAsync(context.User, cancellationToken), cancellationToken));
+}).Produces<ToolDisclosureResult>().WithTags("Agent Evolution");
 
 api.MapGet("/kpis", async (HttpContext context, PerformanceService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken)))
@@ -1751,29 +1925,44 @@ api.MapGet("/kpis", async (HttpContext context, PerformanceService service,
 api.MapPost("/performance-reviews", async (CreateReviewRequest request, HttpContext context,
     PerformanceService service, CancellationToken cancellationToken) => Results.Ok(await service.ReviewAsync(
         request.EmployeeId, CurrentTenant(context), request.Conclusion, request.EvidenceJson, cancellationToken)))
-    .WithTags("Performance");
+    .RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Performance");
 
 api.MapGet("/performance-actions", async (HttpContext context, PerformanceActionService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken)))
     .Produces<IReadOnlyList<PerformanceActionRecord>>().WithTags("Performance");
 api.MapPost("/performance-actions", async (PerformActionRequest request, HttpContext context,
-    PerformanceActionService service, RegentDbContext db, AuditIntegrityService audit, CancellationToken cancellationToken) =>
+    PerformanceActionService service, ApprovalExecutionService execution, ApprovalAuthority authority,
+    AuditIntegrityService audit, CancellationToken cancellationToken) =>
 {
-    if (request.ActionType == "Terminate")
+    var tenantId = Guid.Parse(CurrentTenant(context));
+    if (string.Equals(request.ActionType, "Terminate", StringComparison.OrdinalIgnoreCase))
     {
-        var tenantId = Guid.Parse(CurrentTenant(context));
-        var approvalId = Guid.TryParse(request.ApprovalId, out var parsedApprovalId) ? parsedApprovalId : Guid.Empty;
-        var approved = await db.Approvals.AnyAsync(x => x.TenantId == tenantId
-            && x.Id == approvalId && x.State == ApprovalState.Approved
-            && x.ActionType == "employee.terminate", cancellationToken);
-        if (!approved) throw new InvalidOperationException("Human Boss approval is required for termination.");
+        await authority.EnsureCanExecuteAsync(Guid.Parse(CurrentTenant(context)), CurrentUserId(context),
+            ApprovalActionTypes.EmployeeTerminate, cancellationToken);
+        if (!Guid.TryParse(request.EmployeeId, out var targetEmployeeId))
+            throw new BadHttpRequestException("Employee ID is invalid.");
+        if (string.IsNullOrWhiteSpace(request.ApprovalId))
+            throw new BadHttpRequestException("Approval ID is invalid.");
+        var approvalId = request.ApprovalId;
+        var result = await execution.TerminateAsync(targetEmployeeId, approvalId,
+            RequiredIdempotencyKey(context), cancellationToken);
+        var projection = service.CreateApprovedTerminationRecord(CurrentTenant(context), request.EmployeeId,
+            approvalId, result.Reason ?? request.Reason, result.ExecutedAt);
+        return Results.Accepted($"/v1/performance-actions/{projection.Id}", projection);
     }
     var action = await service.PerformAsync(CurrentTenant(context), request.EmployeeId, request.ActionType,
         request.ApprovalId, request.Reason, cancellationToken);
-    await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "performance.action.recorded", CurrentUser(context),
+    await audit.AppendAsync(tenantId, "performance.action.recorded", CurrentUser(context),
         new { action_id = action.Id, employee_id = action.EmployeeId, action_type = action.ActionType, approval_id = action.ApprovalId }, cancellationToken);
     return Results.Ok(action);
-}).Produces<PerformanceActionRecord>().WithTags("Performance");
+}).Produces<PerformanceActionRecord>(StatusCodes.Status200OK)
+    .Produces<PerformanceActionRecord>(StatusCodes.Status202Accepted)
+    .RequireAuthorization(ControlPlanePolicies.ApprovalDecider).WithTags("Performance");
+api.MapGet("/performance-actions/{id}", async (string id, HttpContext context,
+        PerformanceActionService service, CancellationToken cancellationToken) =>
+        await service.GetAsync(id, CurrentTenant(context), cancellationToken) is { } action
+            ? Results.Ok(action) : Results.NotFound())
+    .Produces<PerformanceActionRecord>().Produces(StatusCodes.Status404NotFound).WithTags("Performance");
 api.MapPost("/performance-actions/{id}/appeal", async (string id, AppealActionRequest request,
     HttpContext context, PerformanceActionService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
 {
@@ -1781,7 +1970,7 @@ api.MapPost("/performance-actions/{id}/appeal", async (string id, AppealActionRe
     await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "performance.action.appealed", CurrentUser(context),
         new { action_id = action.Id, employee_id = action.EmployeeId }, cancellationToken);
     return Results.Ok(action);
-}).Produces<PerformanceActionRecord>().WithTags("Performance");
+}).Produces<PerformanceActionRecord>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Performance");
 api.MapPost("/performance-actions/{id}/appeal/resolve", async (string id, ResolvePerformanceAppealRequest request,
     HttpContext context, PerformanceActionService service, AuditIntegrityService audit, CancellationToken cancellationToken) =>
 {
@@ -1790,25 +1979,30 @@ api.MapPost("/performance-actions/{id}/appeal/resolve", async (string id, Resolv
     await audit.AppendAsync(Guid.Parse(CurrentTenant(context)), "performance.appeal.resolved", CurrentUser(context),
         new { action_id = action.Id, reviewer_id = request.Reviewer, upheld = request.Upheld }, cancellationToken);
     return Results.Ok(action);
-}).Produces<PerformanceActionRecord>().WithTags("Performance");
+}).Produces<PerformanceActionRecord>().RequireAuthorization(ControlPlanePolicies.TenantWriter).WithTags("Performance");
 
 api.MapGet("/collaboration/graph", async (HttpContext context, CollaborationVisualizationService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.GetGraphAsync(Guid.Parse(CurrentTenant(context)), cancellationToken)))
-    .Produces<CollaborationGraphDto>().RequireAuthorization("CollaborationRead").WithTags("Collaboration");
+    MembershipAuthority authority, CancellationToken cancellationToken) =>
+{
+    var viewer = await CurrentChatViewerAsync(context, authority, cancellationToken);
+    return Results.Ok(await service.GetGraphAsync(viewer.TenantId, viewer, cancellationToken));
+}).Produces<CollaborationGraphDto>().RequireAuthorization(ControlPlanePolicies.CollaborationRead).WithTags("Collaboration");
 api.MapGet("/collaboration/trace", async (HttpContext context, CollaborationVisualizationService service,
-    string entityType, string entityId, CancellationToken cancellationToken) =>
-    Results.Ok(await service.GetTraceAsync(Guid.Parse(CurrentTenant(context)), entityType, entityId, cancellationToken)))
-    .Produces<CollaborationTraceDto>().WithTags("Collaboration");
+    MembershipAuthority authority, string entityType, string entityId, CancellationToken cancellationToken) =>
+{
+    var viewer = await CurrentChatViewerAsync(context, authority, cancellationToken);
+    return Results.Ok(await service.GetTraceAsync(viewer.TenantId, viewer, entityType, entityId, cancellationToken));
+}).Produces<CollaborationTraceDto>().RequireAuthorization(ControlPlanePolicies.CollaborationRead).WithTags("Collaboration");
 
 api.MapGet("/collaboration/requests", async ([AsParameters] CoordinationPageQuery query,
     HttpContext context, CollaborationCoordinationService service, CancellationToken cancellationToken) =>
     Results.Ok(await service.ListAsync(Guid.Parse(CurrentTenant(context)), query, cancellationToken)))
-    .Produces<Page<TaskCoordinationDto>>().RequireAuthorization("CollaborationRead").WithTags("Collaboration");
+    .Produces<Page<TaskCoordinationDto>>().RequireAuthorization(ControlPlanePolicies.CollaborationRead).WithTags("Collaboration");
 api.MapGet("/collaboration/requests/{id:guid}", async (Guid id, HttpContext context,
     CollaborationCoordinationService service, CancellationToken cancellationToken) =>
     await service.GetAsync(Guid.Parse(CurrentTenant(context)), id, cancellationToken) is { } request
         ? Results.Ok(request) : Results.NotFound())
-    .Produces<TaskCoordinationDto>().WithTags("Collaboration");
+    .Produces<TaskCoordinationDto>().RequireAuthorization(ControlPlanePolicies.CollaborationRead).WithTags("Collaboration");
 
 api.MapGet("/communication/routes", (CommunicationRouter router) =>
 {
@@ -1826,10 +2020,31 @@ api.MapGet("/communication/routes", (CommunicationRouter router) =>
 }).WithTags("Communication");
 
 api.MapGet("/conversations", async (HttpContext context, ChatService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.ListAsync(CurrentTenant(context), cancellationToken)))
-    .WithTags("Chat");
+    MembershipAuthority authority, CancellationToken cancellationToken) =>
+{
+    var viewer = await CurrentChatViewerAsync(context, authority, cancellationToken);
+    var conversations = viewer switch
+    {
+        OwnerObserverViewer => await service.ListObserverConversationsAsync(viewer.TenantId.ToString(), cancellationToken),
+        EmployeeMemberViewer employee => await service.ListAsync(viewer.TenantId.ToString(), cancellationToken,
+            employee.EmployeeId),
+        _ => throw new UnauthorizedAccessException()
+    };
+    return Results.Ok(conversations);
+}).Produces<IReadOnlyList<Conversation>>().RequireAuthorization(ControlPlanePolicies.ChatRead).WithTags("Chat");
 api.MapGet("/conversations/{id}/messages", async (string id, HttpContext context, ChatService service,
-    CancellationToken cancellationToken) => Results.Ok(await service.ListMessagesAsync(id, CurrentTenant(context), cancellationToken))).WithTags("Chat");
+    MembershipAuthority authority, CancellationToken cancellationToken) =>
+{
+    var viewer = await CurrentChatViewerAsync(context, authority, cancellationToken);
+    var messages = viewer switch
+    {
+        OwnerObserverViewer => await service.ListObserverMessagesAsync(id, viewer.TenantId.ToString(), cancellationToken),
+        EmployeeMemberViewer employee => await service.ListMessagesAsync(id, viewer.TenantId.ToString(), cancellationToken,
+            employee.EmployeeId),
+        _ => throw new UnauthorizedAccessException()
+    };
+    return Results.Ok(messages);
+}).Produces<IReadOnlyList<ChatMessage>>().RequireAuthorization(ControlPlanePolicies.ChatRead).WithTags("Chat");
 api.MapGet("/evaluation-suites", async (HttpContext context, EvaluationService service,
     CancellationToken cancellationToken) => Results.Ok(await service.ListSuitesAsync(CurrentTenant(context), cancellationToken)))
     .WithTags("Evaluation");
@@ -2065,7 +2280,7 @@ agentApi.MapPost("/agent-runtime/context", async (BuildContextRequest request, H
     var identity = CurrentAgent(context);
     RequireAgentScope(identity, "tasks:execute");
     if (identity.TaskId != request.TaskId) throw new UnauthorizedAccessException("Agent token is not scoped to this task.");
-    return Results.Ok(await service.BuildContextAsync(request.TaskId, request.SystemPrefix, request.TenantMemory,
+    return Results.Ok(await service.BuildContextAsync(identity.TenantId, request.TaskId, request.SystemPrefix, request.TenantMemory,
         request.TaskGrantJson, request.ToolResultRefs, request.CheckpointJson, request.Compressed, cancellationToken));
 }).Produces<AgentContextSnapshot>().WithTags("Agent");
 agentApi.MapPost("/agent-runtime/tool-loop", async (ToolLoopRequest request, HttpContext context,
@@ -2074,7 +2289,7 @@ agentApi.MapPost("/agent-runtime/tool-loop", async (ToolLoopRequest request, Htt
     var identity = CurrentAgent(context);
     RequireAgentScope(identity, "tasks:execute");
     if (identity.TaskId != request.TaskId) throw new UnauthorizedAccessException("Agent token is not scoped to this task.");
-    return Results.Ok(await service.RunToolLoopAsync(request, cancellationToken));
+    return Results.Ok(await service.RunToolLoopAsync(identity.TenantId, request, cancellationToken));
 }).Produces<ToolLoopResult>().WithTags("Agent");
 
 agentApi.MapGet("/conversations", async (HttpContext context, ChatService service,
@@ -2156,7 +2371,7 @@ agentApi.MapPost("/conversations/{id}/messages", async (string id, SendMessageRe
             priority = message.Priority, body_length = message.Body.Length, mention_count = message.MentionedEmployeeIds.Count,
             evidence_count = message.EvidenceRefs.Count
         }, cancellationToken);
-    await hub.Clients.Group(identity.TenantId.ToString()).SendAsync("message.created", message, cancellationToken);
+    await new TenantHubNotifier(hub).MessageCreatedAsync(identity.TenantId.ToString(), message, cancellationToken);
     return Results.Ok(message);
 }).WithTags("Agent Chat");
 
@@ -2265,7 +2480,7 @@ static string RequiredIdempotencyKey(HttpContext context)
 
 static async Task NotifyCoordinationAsync(HttpContext context, IHubContext<TenantHub> hub,
     TaskCoordinationDto coordination, CancellationToken cancellationToken) =>
-    await hub.Clients.Group(CurrentTenant(context)).SendAsync("coordination.changed", coordination, cancellationToken);
+    await new TenantHubNotifier(hub).CoordinationChangedAsync(CurrentTenant(context), coordination.Id, cancellationToken);
 
 static void RequireAgentScope(AgentIdentity identity, string scope)
 {
@@ -2274,19 +2489,38 @@ static void RequireAgentScope(AgentIdentity identity, string scope)
 }
 
 static string CurrentTenant(HttpContext context) =>
-    context.User.FindFirstValue("tenant_id") ?? "11111111-1111-1111-1111-111111111111";
+    Guid.TryParse(context.User.FindFirstValue("tenant_id"), out var tenantId) && tenantId != Guid.Empty
+        ? tenantId.ToString() : throw new UnauthorizedAccessException("Missing tenant claim.");
 
 static string CurrentUser(HttpContext context) => context.User.FindFirstValue(ClaimTypes.Name) ?? "Unknown";
+
+static string CurrentActor(HttpContext context) =>
+    context.User.FindFirstValue("employee_id") ?? context.User.FindFirstValue(ClaimTypes.NameIdentifier)
+    ?? throw new UnauthorizedAccessException("Missing actor identity.");
+
+static async Task<ChatViewer> CurrentChatViewerAsync(HttpContext context, MembershipAuthority authority,
+    CancellationToken cancellationToken) =>
+    await authority.ResolveChatViewerAsync(context.User, cancellationToken) is { } viewer
+        ? viewer.Viewer : throw new UnauthorizedAccessException("Chat viewer authority is unavailable.");
+
+static Guid? CurrentOptionalEmployeeId(HttpContext context) =>
+    Guid.TryParse(context.User.FindFirstValue("employee_id"), out var employeeId) && employeeId != Guid.Empty
+        ? employeeId : null;
 
 static Guid CurrentUserId(HttpContext context) =>
     Guid.Parse(context.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? throw new UnauthorizedAccessException("Missing user identity."));
 
+static JsonDocumentStore<T> CreatePurgeFencedJsonStore<T>(IServiceProvider provider, string path) where T : class =>
+    new(path, provider.GetRequiredService<ITenantPurgeStateProvider>());
+
+static IServiceCollection AddPurgeFencedJsonStore<T>(IServiceCollection services, string path) where T : class =>
+    services.AddSingleton(provider => CreatePurgeFencedJsonStore<T>(provider, path));
+
 static void RegisterTenantStore<T>(IServiceCollection services, string path) where T : class
 {
-    if (services.Any(descriptor => descriptor.ServiceType == typeof(JsonDocumentStore<T>)))
-        services.AddSingleton<ITenantJsonDocumentStore>(provider => provider.GetRequiredService<JsonDocumentStore<T>>());
-    else
-        services.AddSingleton<ITenantJsonDocumentStore>(new JsonDocumentStore<T>(path));
+    if (!services.Any(descriptor => descriptor.ServiceType == typeof(JsonDocumentStore<T>)))
+        AddPurgeFencedJsonStore<T>(services, path);
+    services.AddSingleton<ITenantJsonDocumentStore>(provider => provider.GetRequiredService<JsonDocumentStore<T>>());
 }
 
 static async Task<IResult> CompleteAuthAsync(HttpContext context, AuthResult result)
@@ -2332,27 +2566,6 @@ static async Task SignInTenantAsync(HttpContext context, Guid userId, Guid tenan
         new ClaimsPrincipal(new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme)));
 }
 
-static bool EmergencyRequestAllowed(PathString path, string method, Guid tenantId, string allowedActionsJson)
-{
-    string[] allowedActions;
-    try { allowedActions = JsonSerializer.Deserialize<string[]>(allowedActionsJson) ?? []; }
-    catch (JsonException) { return false; }
-    var segments = path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries) ?? [];
-    string? action = null;
-    if (segments.Length == 2 && segments[0] == "auth" && segments[1] == "logout") action = "account.access";
-    else if (segments.Length == 2 && segments[0] == "auth" && segments[1] == "sessions") action = "account.access";
-    else if (segments.Length == 4 && segments[0] == "auth" && segments[1] == "sessions"
-        && Guid.TryParse(segments[2], out _) && segments[3] == "revoke") action = "account.access";
-    else if (segments.Length >= 4 && segments[0] == "v1" && segments[1] == "tenants"
-        && Guid.TryParse(segments[2], out var requestedTenant) && requestedTenant == tenantId)
-    {
-        if (segments[3] == "authentication-policy") action = "sso.restore";
-        else if (segments[3] == "identity-providers" || segments[3] == "oidc") action = "sso.restore";
-    }
-    return action is not null && allowedActions.Contains(action, StringComparer.Ordinal)
-        && !HttpMethods.IsOptions(method) && !HttpMethods.IsHead(method);
-}
-
 public sealed record DevLoginRequest(string Email, Guid? TenantId = null);
 public sealed record SwitchTenantRequest(Guid TenantId);
 public sealed record DevAgentTokenRequest(Guid TenantId, Guid EmployeeId, Guid? TaskId = null,
@@ -2367,17 +2580,16 @@ public sealed record RehireRequest(Guid PositionId, string ApprovalId);
 public sealed record CreateCandidateRequest(Guid PositionId, string DisplayName, string ModelVersion, string JobDescription);
 public sealed record RejectCandidateRequest(string Reason);
 public sealed record HireCandidateRequest(string ApprovalId);
-public sealed record DecisionRequest(string Decision, string Rationale, IReadOnlyList<Guid> EvidenceIds, int Reround, string Decider);
-public sealed record ApprovePlanRequest(string Approver, string? ApprovalId);
+public sealed record DecisionRequest(string Decision, string Rationale, IReadOnlyList<Guid> EvidenceIds, int Reround);
+public sealed record ApprovePlanRequest(string? ApprovalId = null);
 public sealed record ReadyRequirementRequest(int TotalWeight);
-public sealed record ClaimTaskRequest(string Assignee);
-public sealed record SubmitTaskRequest(string Author);
-public sealed record FixDefectRequest(string Fixer, EvidenceRef Evidence);
-public sealed record RetestDefectRequest(bool Passed, string Retester);
+public sealed record ClaimTaskRequest;
+public sealed record SubmitTaskRequest;
+public sealed record FixDefectRequest(EvidenceRef Evidence);
+public sealed record RetestDefectRequest(bool Passed);
 public sealed record ReleaseRequest(string Version, string ArtifactRef);
 public sealed record RollbackRequest(string TargetVersion);
 public sealed record AuditCheckpointRequest(string Profile);
-public sealed record PublishEventRequest(string EventType, object Payload);
 public sealed record AdmitToolRequest(string Reviewer);
 public sealed record ScanContentRequest(string Content);
 public sealed record RedactContentRequest(string Content);

@@ -30,6 +30,35 @@ public sealed class PerformanceGovernanceTests
     }
 
     [Fact]
+    public async Task Approved_termination_projection_is_deterministic_and_idempotent()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"termination-projection-{Guid.NewGuid():N}");
+        try
+        {
+            var service = new PerformanceActionService(new JsonDocumentStore<PerformanceActionRecord>(
+                Path.Combine(root, "actions.json")));
+            var approvalId = Guid.NewGuid().ToString();
+
+            var first = await service.RecordApprovedTerminationAsync("tenant-a", "employee-a", approvalId,
+                "Evidence supported termination", CancellationToken.None);
+            var replay = await service.RecordApprovedTerminationAsync("tenant-a", "employee-a", approvalId,
+                "Evidence supported termination", CancellationToken.None);
+
+            Assert.Equal(first.Id, replay.Id);
+            Assert.StartsWith("termination-", first.Id);
+            Assert.Equal(first, await service.GetAsync(first.Id, "tenant-a", CancellationToken.None));
+            Assert.Null(await service.GetAsync(first.Id, "tenant-b", CancellationToken.None));
+            Assert.Single(await service.ListAsync("tenant-a", CancellationToken.None));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.PerformAsync("tenant-a", "employee-a",
+                "Terminate", approvalId, "Bypass", CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public async Task Performance_appeal_requires_independent_resolution_and_can_reverse_action()
     {
         var root = Path.Combine(Path.GetTempPath(), $"performance-{Guid.NewGuid():N}");

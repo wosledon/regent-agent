@@ -89,26 +89,94 @@ public sealed class ChatService(JsonDocumentStore<Conversation> conversations, J
         }
     }
 
-    public async Task<IReadOnlyList<Conversation>> ListAsync(string tenantId, CancellationToken cancellationToken,
-        string? employeeId = null) =>
-        (await conversations.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId
-            && (employeeId is null || x.MemberEmployeeIds.Contains(employeeId))).ToArray();
+    public async Task<IReadOnlyList<Conversation>> ListAllAsync(string tenantId, CancellationToken cancellationToken) =>
+        (await conversations.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId).ToArray();
 
-    public async Task<IReadOnlyList<ChatMessage>> ListMessagesAsync(string conversationId, string tenantId,
-        CancellationToken cancellationToken, string? employeeId = null)
+    public async Task<IReadOnlyList<Conversation>> ListAsync(string tenantId, CancellationToken cancellationToken,
+        string employeeId)
+    {
+        if (string.IsNullOrWhiteSpace(employeeId)) throw new UnauthorizedAccessException();
+        return (await conversations.GetAllAsync(cancellationToken)).Where(x => TenantEquals(x.TenantId, tenantId)
+            && x.MemberEmployeeIds.Contains(employeeId)).ToArray();
+    }
+
+    public async Task<IReadOnlyList<Conversation>> ListObserverConversationsAsync(string tenantId,
+        CancellationToken cancellationToken) =>
+        (await conversations.GetAllAsync(cancellationToken))
+            .Where(x => IsObserverVisible(x, tenantId))
+            .OrderBy(x => x.CreatedAt)
+            .ToArray();
+
+    public async Task<IReadOnlyList<ChatMessage>> ListObserverMessagesAsync(string conversationId, string tenantId,
+        CancellationToken cancellationToken)
     {
         var conversation = await conversations.GetAsync(conversationId, cancellationToken)
             ?? throw new KeyNotFoundException("Conversation not found.");
-        if (conversation.TenantId != tenantId) throw new UnauthorizedAccessException();
-        if (employeeId is not null && !conversation.MemberEmployeeIds.Contains(employeeId))
+        if (!IsObserverVisible(conversation, tenantId)) throw new UnauthorizedAccessException();
+        return (await messages.GetAllAsync(cancellationToken))
+            .Where(x => TenantEquals(x.TenantId, tenantId) && x.ConversationId == conversationId)
+            .OrderBy(x => x.Seq).ToArray();
+    }
+
+    public async Task<bool> CanReadConversationAsync(string conversationId, string tenantId, ChatViewer viewer,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(tenantId, out var requestedTenant) || viewer.TenantId != requestedTenant) return false;
+        return viewer switch
+        {
+            OwnerObserverViewer => await IsObserverVisibleAsync(conversationId, tenantId, cancellationToken),
+            EmployeeMemberViewer employee => await IsMemberAsync(conversationId, tenantId, employee.EmployeeId,
+                cancellationToken),
+            _ => false
+        };
+    }
+
+    public static bool IsObserverVisible(Conversation conversation, string tenantId)
+    {
+        if (conversation is null
+            || string.IsNullOrWhiteSpace(conversation.Id)
+            || conversation.MemberEmployeeIds is null
+            || !TenantEquals(conversation.TenantId, tenantId)) return false;
+        return IsObserverScope(conversation.Kind) && IsObserverScope(conversation.ScopeType);
+    }
+
+    private async Task<bool> IsObserverVisibleAsync(string conversationId, string tenantId,
+        CancellationToken cancellationToken)
+    {
+        var conversation = await conversations.GetAsync(conversationId, cancellationToken);
+        return conversation is not null && IsObserverVisible(conversation, tenantId);
+    }
+
+    private static bool IsObserverScope(string? value) => value is "Company" or "Project" or "Topic";
+
+    private static bool TenantEquals(string? left, string? right) =>
+        Guid.TryParse(left, out var leftTenant) && leftTenant != Guid.Empty
+        && Guid.TryParse(right, out var rightTenant) && leftTenant == rightTenant;
+
+    public async Task<bool> IsMemberAsync(string conversationId, string tenantId, string employeeId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(employeeId)) return false;
+        var conversation = await conversations.GetAsync(conversationId, cancellationToken);
+        return conversation is not null && conversation.TenantId == tenantId
+            && conversation.MemberEmployeeIds.Contains(employeeId);
+    }
+
+    public async Task<IReadOnlyList<ChatMessage>> ListMessagesAsync(string conversationId, string tenantId,
+        CancellationToken cancellationToken, string employeeId)
+    {
+        if (string.IsNullOrWhiteSpace(employeeId)) throw new UnauthorizedAccessException();
+        var conversation = await conversations.GetAsync(conversationId, cancellationToken)
+            ?? throw new KeyNotFoundException("Conversation not found.");
+        if (!TenantEquals(conversation.TenantId, tenantId) || !conversation.MemberEmployeeIds.Contains(employeeId))
             throw new UnauthorizedAccessException();
         return (await messages.GetAllAsync(cancellationToken))
-            .Where(x => x.TenantId == tenantId && x.ConversationId == conversationId)
+            .Where(x => TenantEquals(x.TenantId, tenantId) && x.ConversationId == conversationId)
             .OrderBy(x => x.Seq).ToArray();
     }
 
     public async Task<IReadOnlyList<ChatMessage>> ListAllMessagesAsync(string tenantId, CancellationToken cancellationToken) =>
-        (await messages.GetAllAsync(cancellationToken)).Where(x => x.TenantId == tenantId).OrderBy(x => x.CreatedAt).ToArray();
+        (await messages.GetAllAsync(cancellationToken)).Where(x => TenantEquals(x.TenantId, tenantId)).OrderBy(x => x.CreatedAt).ToArray();
 
     public async Task<Conversation> CreateConversationAsync(string tenantId, string title, string kind,
         IReadOnlyCollection<string> memberEmployeeIds, string createdBy, string? createdByEmployeeId,

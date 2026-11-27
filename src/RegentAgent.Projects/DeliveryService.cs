@@ -3,12 +3,30 @@ using RegentAgent.Storage;
 
 namespace RegentAgent.Projects;
 
-public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> store, TimeProvider clock)
+public interface IDeliveryArtifactVerifier
 {
-    private readonly SemaphoreSlim gate = new(1, 1);
+    Task<IReadOnlyList<string>> ValidateAsync(Guid tenantId, Guid projectId, Guid taskId,
+        IReadOnlyList<EvidenceRef> artifacts, CancellationToken cancellationToken);
+}
 
-    public Task<ProjectDeliveryState> GetAsync(Guid tenantId, Guid projectId, CancellationToken cancellationToken) =>
-        MutateAsync(tenantId, projectId, state => (false, state), cancellationToken);
+public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> store, TimeProvider clock,
+    IDeliveryArtifactVerifier? artifacts = null)
+{
+    public async Task<ProjectDeliveryState> GetAsync(Guid tenantId, Guid projectId, CancellationToken cancellationToken)
+    {
+        var state = await store.GetAsync(projectId.ToString(), cancellationToken);
+        if (state is null) return new ProjectDeliveryState { TenantId = tenantId, ProjectId = projectId };
+        if (state.TenantId == Guid.Empty)
+        {
+            state.TenantId = tenantId;
+            state.ProjectId = projectId;
+        }
+        else if (state.TenantId != tenantId || state.ProjectId != projectId)
+        {
+            throw new UnauthorizedAccessException("Project delivery state belongs to another tenant.");
+        }
+        return state;
+    }
 
     public Task<ResearchFinding> AddFindingAsync(Guid tenantId, Guid projectId, ResearchFinding finding,
         CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
@@ -75,13 +93,19 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
         }, cancellationToken);
 
     public Task<DecompositionPlan> ProposePlanAsync(Guid tenantId, Guid projectId, DecompositionPlan plan,
-        CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+        CancellationToken cancellationToken) => ProposePlanAsync(tenantId, projectId, plan,
+        plan.Tasks.FirstOrDefault()?.Author ?? string.Empty, cancellationToken);
+
+    public Task<DecompositionPlan> ProposePlanAsync(Guid tenantId, Guid projectId, DecompositionPlan plan,
+        string author, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
         {
             var requirement = Find(state.Requirements, tenantId, plan.RequirementId);
             var errors = DeliveryPolicy.ValidatePlan(requirement, plan);
             plan.ValidationErrors = errors;
             plan.Status = errors.Count == 0 ? "Proposed" : "Invalid";
             if (errors.Count > 0) throw new InvalidOperationException(string.Join(" ", errors));
+            if (string.IsNullOrWhiteSpace(author)) throw new InvalidOperationException("Plan author is required.");
+            foreach (var task in plan.Tasks) task.Author = author;
             state.Plans.Add(plan);
             return (true, plan);
         }, cancellationToken);
@@ -112,45 +136,111 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
         }, cancellationToken);
 
     public Task<DeliveryTask> ClaimTaskAsync(Guid tenantId, Guid projectId, Guid taskId, string assignee,
-        CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+        CancellationToken cancellationToken) =>
+        ClaimTaskAsync(tenantId, projectId, taskId, assignee, null, cancellationToken);
+
+    public Task<DeliveryTask> ClaimTaskAsync(Guid tenantId, Guid projectId, Guid taskId, string assignee,
+        Guid assigneeEmployeeId, CancellationToken cancellationToken) =>
+        ClaimTaskAsync(tenantId, projectId, taskId, assignee, (Guid?)assigneeEmployeeId, cancellationToken);
+
+    private Task<DeliveryTask> ClaimTaskAsync(Guid tenantId, Guid projectId, Guid taskId, string assignee,
+        Guid? assigneeEmployeeId, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+    {
+        var task = Find(state.Tasks, tenantId, taskId);
+        if (task.Status != "Ready") throw new InvalidOperationException("Task is not ready for claim.");
+        if (assigneeEmployeeId is { } employeeId)
         {
-            var task = Find(state.Tasks, tenantId, taskId);
-            if (task.Status != "Ready") throw new InvalidOperationException("Task is not ready for claim.");
-            task.Assignee = assignee;
-            task.Status = "Claimed";
-            return (true, task);
-        }, cancellationToken);
+            if (task.AssigneeEmployeeId is { } existingEmployeeId && existingEmployeeId != employeeId)
+                throw new UnauthorizedAccessException("Task is assigned to a different employee.");
+            task.AssigneeEmployeeId = employeeId;
+        }
+        else if (task.AssigneeEmployeeId is not null)
+        {
+            throw new UnauthorizedAccessException("A stable employee identity is required to claim this task.");
+        }
+        task.Assignee = assignee;
+        task.Status = "Claimed";
+        return (true, task);
+    }, cancellationToken);
 
     public Task<DeliveryTask> SubmitTaskAsync(Guid tenantId, Guid projectId, Guid taskId, string author,
-        CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+        CancellationToken cancellationToken) =>
+        SubmitTaskAsync(tenantId, projectId, taskId, author, null, cancellationToken);
+
+    public Task<DeliveryTask> SubmitTaskAsync(Guid tenantId, Guid projectId, Guid taskId, string author,
+        Guid assigneeEmployeeId, CancellationToken cancellationToken) =>
+        SubmitTaskAsync(tenantId, projectId, taskId, author, (Guid?)assigneeEmployeeId, cancellationToken);
+
+    private Task<DeliveryTask> SubmitTaskAsync(Guid tenantId, Guid projectId, Guid taskId, string author,
+        Guid? assigneeEmployeeId, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+    {
+        var task = Find(state.Tasks, tenantId, taskId);
+        if (assigneeEmployeeId is { } employeeId)
+        {
+            if (task.AssigneeEmployeeId != employeeId)
+                throw new UnauthorizedAccessException("Task is assigned to a different employee.");
+        }
+        else if (task.AssigneeEmployeeId is { } stableAssigneeId)
+        {
+            if (!Guid.TryParse(author, out var authorEmployeeId) || authorEmployeeId != stableAssigneeId)
+                throw new UnauthorizedAccessException("Only the assigned employee can submit.");
+        }
+        else if (!string.Equals(task.Assignee, author, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Only the assigned employee can submit.");
+        }
+        task.Status = "InReview";
+        return (true, task);
+    }, cancellationToken);
+
+    public Task<DeliveryTask> CompensateTaskMutationAsync(Guid tenantId, Guid projectId, Guid taskId,
+        DeliveryTask previous, DeliveryTask expected, CancellationToken cancellationToken) =>
+        MutateAsync(tenantId, projectId, state =>
         {
             var task = Find(state.Tasks, tenantId, taskId);
-            if (task.Assignee != author) throw new InvalidOperationException("Only the assigned employee can submit.");
-            task.Status = "InReview";
+            if (task.Status != expected.Status || task.Assignee != expected.Assignee
+                || task.AssigneeEmployeeId != expected.AssigneeEmployeeId)
+                throw new InvalidOperationException("Task changed before the failed projection could be compensated.");
+            task.Status = previous.Status;
+            task.Assignee = previous.Assignee;
+            task.AssigneeEmployeeId = previous.AssigneeEmployeeId;
             return (true, task);
         }, cancellationToken);
 
-    public Task<DoneEvidence> CompleteTaskAsync(Guid tenantId, Guid projectId, Guid taskId,
-        DoneEvidence evidence, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+    public async Task<DoneEvidence> CompleteTaskAsync(Guid tenantId, Guid projectId, Guid taskId,
+        DoneEvidence evidence, CancellationToken cancellationToken)
+    {
+        var artifactErrors = artifacts is null
+            ? ["Artifact verification is unavailable."]
+            : await artifacts.ValidateAsync(tenantId, projectId, taskId, evidence.Artifacts, cancellationToken);
+        return await MutateAsync(tenantId, projectId, state =>
         {
             var task = Find(state.Tasks, tenantId, taskId);
             if (task.Status != "InReview") throw new InvalidOperationException("Task must be in review.");
             evidence.WorkItemId = taskId;
             evidence.WorkItemType = "Task";
             evidence.ValidatedAt = clock.GetUtcNow();
-            RequireValid(DeliveryPolicy.ValidateTaskDone(task, evidence, state.Reviews, state.Defects));
+            RequireValid(DeliveryPolicy.ValidateTaskDone(task, evidence, state.Reviews, state.Defects, artifactErrors));
             task.Status = "Done";
             task.Validator = evidence.Validator;
             state.Evidence.Add(evidence);
             return (true, evidence);
         }, cancellationToken);
+    }
 
     public Task<Defect> ReportDefectAsync(Guid tenantId, Guid projectId, Defect defect,
         CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
         {
             if (string.IsNullOrWhiteSpace(defect.ReproductionSteps)) throw new InvalidOperationException("Reproduction steps are required.");
+            if (defect.Severity is not ("P0" or "P1" or "P2" or "P3"))
+                throw new InvalidOperationException("Defect severity is invalid.");
             defect.TenantId = tenantId;
             defect.ProjectId = projectId;
+            defect.Status = "New";
+            defect.Fixer = null;
+            defect.Retester = null;
+            defect.RetestRound = 0;
+            defect.FixEvidence = [];
             state.Defects.Add(defect);
             return (true, defect);
         }, cancellationToken);
@@ -174,7 +264,7 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
             var defect = Find(state.Defects, tenantId, defectId);
             if (defect.Status != "ReadyForRetest") throw new InvalidOperationException("Defect is not ready for retest.");
             if (defect.RetestRound >= 2) throw new InvalidOperationException("Defect retest limit of two rounds reached.");
-            if (string.IsNullOrWhiteSpace(retester) || retester == defect.Fixer)
+            if (string.IsNullOrWhiteSpace(retester) || retester.Equals(defect.Fixer, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Fixer cannot close their own defect.");
             defect.Retester = retester;
             defect.RetestRound++;
@@ -185,12 +275,15 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
     public Task<Review> AddReviewAsync(Guid tenantId, Guid projectId, Review review,
         CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
         {
-            if (review.Reviewer == review.Author || string.IsNullOrWhiteSpace(review.Author))
-                throw new InvalidOperationException("Reviewer and author must be different.");
-            if (review.Verdict is not ("Approved" or "Rejected")) throw new InvalidOperationException("Verdict must be Approved or Rejected.");
-            if (review.SubjectType == "Task" && state.Tasks.FirstOrDefault(x => x.Id == review.SubjectId) is { } task
-                && (review.Reviewer == task.Assignee || review.Reviewer == task.Author))
+            if (review.SubjectType != "Task") throw new InvalidOperationException("Only Task reviews are supported.");
+            var task = state.Tasks.SingleOrDefault(x => x.Id == review.SubjectId && x.ProjectId == projectId)
+                ?? throw new KeyNotFoundException("Review task not found.");
+            if (string.IsNullOrWhiteSpace(review.Reviewer)) throw new InvalidOperationException("Reviewer is required.");
+            review.Author = task.Author;
+            if (review.Reviewer.Equals(review.Author, StringComparison.OrdinalIgnoreCase)
+                || review.Reviewer.Equals(task.Assignee, StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Task executor or author cannot independently review the task.");
+            if (review.Verdict is not ("Approved" or "Rejected")) throw new InvalidOperationException("Verdict must be Approved or Rejected.");
             review.TenantId = tenantId;
             review.ProjectId = projectId;
             state.Reviews.Add(review);
@@ -205,9 +298,11 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
                 throw new InvalidOperationException("Acceptance reviewer and evidence are required.");
             if (new[] { report.FunctionalScore, report.UsabilityScore, report.DesignScore, report.AccessibilityScore }.Any(score => score is < 0 or > 100))
                 throw new InvalidOperationException("Acceptance scores must be between 0 and 100.");
-            if (report.AuthorEmployeeId == report.Reviewer) throw new InvalidOperationException("Author cannot perform independent acceptance.");
+            if (string.Equals(report.AuthorEmployeeId, report.Reviewer, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Author cannot perform independent acceptance.");
             var tasks = state.Tasks.Where(x => x.RequirementId == requirement.Id).ToArray();
-            if (tasks.Any(x => x.Assignee == report.Reviewer || x.Author == report.Reviewer))
+            if (tasks.Any(x => string.Equals(x.Assignee, report.Reviewer, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(x.Author, report.Reviewer, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException("Task executor or author cannot perform independent acceptance.");
             report.TenantId = tenantId;
             report.ProjectId = projectId;
@@ -281,36 +376,55 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
         }, cancellationToken);
 
     public Task MarkRuntimeClaimedAsync(Guid tenantId, Guid projectId, Guid taskId, string assignee,
-        CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+        CancellationToken cancellationToken) =>
+        MarkRuntimeClaimedAsync(tenantId, projectId, taskId, assignee, null, cancellationToken);
+
+    public Task MarkRuntimeClaimedAsync(Guid tenantId, Guid projectId, Guid taskId, string assignee,
+        Guid? assigneeEmployeeId, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
     {
         var task = Find(state.Tasks, tenantId, taskId);
         if (task.Status is "Ready" or "Backlog")
         {
-            task.Assignee = assignee;
+            ApplyRuntimeAssignee(task, assignee, assigneeEmployeeId);
             task.Status = "Claimed";
         }
         return (true, task);
     }, cancellationToken);
 
     public Task MarkRuntimeCompletedAsync(Guid tenantId, Guid projectId, Guid taskId, string assignee,
-        CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
+        CancellationToken cancellationToken) =>
+        MarkRuntimeCompletedAsync(tenantId, projectId, taskId, assignee, null, cancellationToken);
+
+    public Task MarkRuntimeCompletedAsync(Guid tenantId, Guid projectId, Guid taskId, string assignee,
+        Guid? assigneeEmployeeId, CancellationToken cancellationToken) => MutateAsync(tenantId, projectId, state =>
     {
         var task = Find(state.Tasks, tenantId, taskId);
         if (task.Status is "Ready" or "Backlog" or "Claimed")
         {
-            task.Assignee = assignee;
+            ApplyRuntimeAssignee(task, assignee, assigneeEmployeeId);
             task.Status = "ReadyForReview";
         }
         return (true, task);
     }, cancellationToken);
 
+    private static void ApplyRuntimeAssignee(DeliveryTask task, string assignee, Guid? assigneeEmployeeId)
+    {
+        if (assigneeEmployeeId is { } employeeId)
+        {
+            if (task.AssigneeEmployeeId is { } existingEmployeeId && existingEmployeeId != employeeId)
+                throw new UnauthorizedAccessException("Task is assigned to a different employee.");
+            task.AssigneeEmployeeId = employeeId;
+        }
+        task.Assignee = assignee;
+    }
+
     private async Task<T> MutateAsync<T>(Guid tenantId, Guid projectId,
         Func<ProjectDeliveryState, (bool Changed, T Result)> mutation, CancellationToken cancellationToken)
     {
-        await gate.WaitAsync(cancellationToken);
-        try
+        T result = default!;
+        await store.MutateAsync(projectId.ToString(), current =>
         {
-            var state = await store.GetAsync(projectId.ToString(), cancellationToken) ?? new ProjectDeliveryState();
+            var state = current ?? new ProjectDeliveryState();
             if (state.TenantId == Guid.Empty)
             {
                 state.TenantId = tenantId;
@@ -320,11 +434,11 @@ public sealed class DeliveryService(JsonDocumentStore<ProjectDeliveryState> stor
             {
                 throw new UnauthorizedAccessException("Project delivery state belongs to another tenant.");
             }
-            var (changed, result) = mutation(state);
-            if (changed) await store.PutAsync(projectId.ToString(), state, cancellationToken);
-            return result;
-        }
-        finally { gate.Release(); }
+            var outcome = mutation(state);
+            result = outcome.Result;
+            return state;
+        }, cancellationToken);
+        return result;
     }
 
     private static T Find<T>(IEnumerable<T> items, Guid tenantId, Guid id) where T : class

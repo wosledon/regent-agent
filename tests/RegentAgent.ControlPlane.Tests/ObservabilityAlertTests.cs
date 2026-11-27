@@ -46,7 +46,7 @@ public sealed class ObservabilityAlertTests
             await service.RecordSampleAsync(new TelemetrySample { Metric = "web.vital.lcp", Success = false, ServiceName = "tenant-dashboard" }, CancellationToken.None);
             var alert = Assert.Single(await service.ListAlertsAsync(CancellationToken.None));
             await service.ResolveAlertAsync(alert.Id, "Test reset", CancellationToken.None);
-            await service.SilenceAlertAsync(new AlertSilenceRequest(alert.Fingerprint, "Approved maintenance", "SRE", 60), CancellationToken.None);
+            await service.SilenceAlertAsync(new AlertSilenceRequest(alert.Fingerprint, "Approved maintenance", 60), "SRE", CancellationToken.None);
             await service.RecordSampleAsync(new TelemetrySample { Metric = "web.vital.lcp", Success = false, ServiceName = "tenant-dashboard" }, CancellationToken.None);
             var alerts = await service.ListAlertsAsync(CancellationToken.None);
             Assert.Equal(2, alerts.Count);

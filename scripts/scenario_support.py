@@ -56,20 +56,51 @@ class ApiClient:
         auth, _ = self.expect(scenario, "register", "POST", "/auth/register", {
             "email": email, "password": "strong-password-123", "displayName": "Scenario Owner", "companyName": "Scenario Co"
         })
+        self.tenant_id = auth["tenant_id"]
+        self.user_id = auth["user_id"]
         return auth
 
     def start_company(self, scenario):
         employee, _ = self.expect(scenario, "start-company", "POST", "/v1/company/start")
         return employee
 
-    def create_approval(self, scenario, action_type, title):
-        approval, _ = self.expect(scenario, f"approval-create:{action_type}", "POST", "/v1/approvals", {
+    def independent_approver(self, scenario):
+        cached = getattr(self, "_independent_approver", None)
+        if cached is not None:
+            return cached
+        email = f"approver-{uuid.uuid4().hex}@example.test"
+        approver = ApiClient(self.base_url, f"{self.name}-approver")
+        approver.register(scenario, "approver")
+        invitation, _ = self.expect(scenario, "invite-independent-approver", "POST",
+            f"/v1/tenants/{self.tenant_id}/invitations", {
+                "email": email, "role": "CoOwner", "expiresInHours": 1
+            })
+        approver.expect(scenario, "accept-independent-approver", "POST", "/auth/invitations/accept",
+            {"token": invitation["token"]})
+        approver.expect(scenario, "switch-independent-approver", "POST", "/auth/switch-tenant",
+            {"tenantId": self.tenant_id})
+        self._independent_approver = approver
+        return approver
+
+    def create_approval(self, scenario, action_type, title, targetEmployeeId=None,
+                        targetCandidateId=None, targetPositionId=None, approver=None):
+        approver = approver or self.independent_approver(scenario)
+        payload = {
             "actionType": action_type, "title": title, "impact": "Cross-feature scenario approval",
-            "severity": "high", "requester": "Scenario Owner", "expiresInMinutes": 60, "evidenceRefs": ["scenario:evidence"]
-        })
-        decided, _ = self.expect(scenario, f"approval-decide:{action_type}", "POST", f"/v1/approvals/{approval['id']}/decision", {
-            "decision": "approve", "reason": "Scenario evidence verified"
-        })
+            "severity": "high", "requester": "Scenario Owner", "expiresInMinutes": 60,
+            "evidenceRefs": ["scenario:evidence"]
+        }
+        if targetEmployeeId is not None:
+            payload["targetEmployeeId"] = targetEmployeeId
+        if targetCandidateId is not None:
+            payload["targetCandidateId"] = targetCandidateId
+        if targetPositionId is not None:
+            payload["targetPositionId"] = targetPositionId
+        approval, _ = self.expect(scenario, f"approval-create:{action_type}", "POST", "/v1/approvals", payload)
+        decided, _ = approver.expect(scenario, f"approval-decide:{action_type}",
+            "POST", f"/v1/approvals/{approval['id']}/decision", {
+                "decision": "approve", "reason": "Scenario evidence verified"
+            })
         return decided
 
     def issue_agent_token(self, scenario, tenant_id, employee_id, task_id=None, scopes=None):
@@ -99,7 +130,8 @@ def hire_employee(client, scenario, name, position_name=None):
         "candidateId": candidate["id"], "capabilityScore": 0.9, "qualityScore": 0.9, "costScore": 0.8,
         "evidenceJson": '{"scenario":"assessment"}'
     })
-    approval = client.create_approval(scenario, "hiring.hire", f"Approve hiring {name}")
+    approval = client.create_approval(scenario, "hiring.hire", f"Approve hiring {name}",
+        targetCandidateId=candidate["id"], targetPositionId=position["id"])
     employee, _ = client.expect(scenario, f"hire:{name}", "POST", f"/v1/candidates/{candidate['id']}/hire", {"approvalId": approval["id"]})
     return employee, position, candidate, approval
 

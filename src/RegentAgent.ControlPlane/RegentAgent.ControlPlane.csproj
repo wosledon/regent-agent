@@ -1,6 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <ItemGroup>
+    <InternalsVisibleTo Include="RegentAgent.ControlPlane.Tests" />
+    <EmbeddedResource Include="..\..\deploy\sql\controlplane-checksums.json"
+                      Link="Infrastructure\PostgresMigrationChecksums.json"
+                      LogicalName="RegentAgent.ControlPlane.Infrastructure.PostgresMigrationChecksums.json" />
     <ProjectReference Include="..\RegentAgent.Workflows\RegentAgent.Workflows.csproj" />
     <ProjectReference Include="..\RegentAgent.Memory\RegentAgent.Memory.csproj" />
     <ProjectReference Include="..\RegentAgent.Performance\RegentAgent.Performance.csproj" />

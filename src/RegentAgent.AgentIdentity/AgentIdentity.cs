@@ -8,14 +8,16 @@ public sealed record AgentIdentity(
     IReadOnlyList<string> Scopes,
     string TokenId,
     DateTimeOffset IssuedAt,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt,
+    Guid? CredentialEpoch = null);
 
 public sealed record AgentAssignmentRequest(
     Guid TenantId,
     Guid EmployeeId,
     Guid? TaskId,
     string? RunnerId,
-    IReadOnlyList<string> Scopes);
+    IReadOnlyList<string> Scopes,
+    Guid? CredentialEpoch = null);
 
 public sealed record AgentAssignmentToken(string Token, AgentIdentity Identity);
 

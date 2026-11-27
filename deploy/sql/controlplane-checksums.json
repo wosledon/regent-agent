@@ -1,0 +1,40 @@
+{
+  "schema": "regent-controlplane-migration-checksums/v1",
+  "migrations": [
+    {
+      "version": 3,
+      "file": "controlplane-003.sql",
+      "sha256": "8f341f35e8d148af27b0ae1d81e3c1e0f86d5e68f4534c411183e79413f1cd2a"
+    },
+    {
+      "version": 4,
+      "file": "controlplane-004.sql",
+      "sha256": "e27c469f44561f52f0f819105d510c1ef3f6c637dfc992ce33ded00c055d1475"
+    },
+    {
+      "version": 5,
+      "file": "controlplane-005.sql",
+      "sha256": "c9f80ad039931f44f0fb4e8be50d79c12e3d31b4df306b960c2ae7bae4286297"
+    },
+    {
+      "version": 6,
+      "file": "controlplane-006.sql",
+      "sha256": "8e3c045942880f049818512f68e8a01d07ea441e9e566545675794a5e64d36a9"
+    },
+    {
+      "version": 7,
+      "file": "controlplane-007.sql",
+      "sha256": "a21db32b818cd08b40a2b40069f9667193e2110704829d104139af80710dc90b"
+    },
+    {
+      "version": 8,
+      "file": "controlplane-008.sql",
+      "sha256": "a20b3742a1bc55656fcbc031dbc27e2eb1535c2d2b8b9744751f8ef2628d58b8"
+    },
+    {
+      "version": 9,
+      "file": "controlplane-009.sql",
+      "sha256": "5600d0028cdc5e6f60a947958fec8e5551fe55c938c95ceb6e15201666c8a3ac"
+    }
+  ]
+}

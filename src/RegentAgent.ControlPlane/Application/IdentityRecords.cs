@@ -19,6 +19,7 @@ public sealed class AuthSessionRecord
     public string AuthMethod { get; set; } = "Password";
     public string SessionKind { get; set; } = "Standard";
     public string AllowedActionsJson { get; set; } = "[]";
+    public string? AuthorityHash { get; set; }
     public int IdleTimeoutMinutes { get; set; } = 30;
 }
 

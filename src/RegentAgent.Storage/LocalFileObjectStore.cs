@@ -62,6 +62,48 @@ public sealed class LocalFileObjectStore : IObjectStore
         return Task.FromResult(true);
     }
 
+    public Task<int> DeletePrefixAsync(string prefix, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = ResolvePrefixPath(prefix);
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+            return Task.FromResult(1);
+        }
+        if (!Directory.Exists(path)) return Task.FromResult(0);
+        var files = Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).ToArray();
+        foreach (var file in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            File.Delete(file);
+        }
+        if (Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Any())
+            throw new InvalidOperationException($"Object prefix '{prefix}' is not empty after deletion.");
+        return Task.FromResult(files.Length);
+    }
+
+    public Task<bool> IsPrefixEmptyAsync(string prefix, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var path = ResolvePrefixPath(prefix);
+        return Task.FromResult(!File.Exists(path) && (!Directory.Exists(path)
+            || !Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories).Any()));
+    }
+
+    private string ResolvePrefixPath(string prefix)
+    {
+        if (string.IsNullOrWhiteSpace(prefix) || Path.IsPathRooted(prefix) || prefix.Contains('\\'))
+            throw new ArgumentException("Invalid object prefix.", nameof(prefix));
+        var normalized = prefix.TrimEnd('/');
+        if (normalized.Length == 0) throw new ArgumentException("Invalid object prefix.", nameof(prefix));
+        var relative = normalized.Replace('/', Path.DirectorySeparatorChar);
+        var path = Path.GetFullPath(Path.Combine(root, relative));
+        if (!path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            throw new ArgumentException("Object prefix escapes the storage root.", nameof(prefix));
+        return path;
+    }
+
     private string ResolvePath(string objectKey)
     {
         if (string.IsNullOrWhiteSpace(objectKey) || Path.IsPathRooted(objectKey) || objectKey.Contains('\\'))

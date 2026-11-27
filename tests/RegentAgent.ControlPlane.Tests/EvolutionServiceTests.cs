@@ -58,6 +58,52 @@ public sealed class EvolutionServiceTests
     }
 
     [Fact]
+    public async Task Tool_disclosure_requires_every_capability_and_fails_closed_for_invalid_policies()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"agent-disclosure-{Guid.NewGuid():N}.json");
+        try
+        {
+            var tenantId = Guid.NewGuid();
+            var store = new JsonDocumentStore<AgentEvolutionState>(path);
+            await store.PutAsync(tenantId.ToString(), new AgentEvolutionState
+            {
+                ToolPolicies =
+                [
+                    new ToolDisclosurePolicy
+                    {
+                        ToolName = "multi", Level = "Primary", RequiredCapabilities = ["capability.a", "capability.b"]
+                    },
+                    new ToolDisclosurePolicy { ToolName = "", Level = "Primary" },
+                    new ToolDisclosurePolicy
+                    {
+                        ToolName = "invalid", Level = "Primary", RequiredCapabilities = null!
+                    }
+                ]
+            }, CancellationToken.None);
+            var service = new AgentEvolutionService(store, TimeProvider.System);
+
+            var partial = await service.DiscloseAsync(tenantId,
+                new ToolDisclosureAuthority(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "capability.a" }, false),
+                CancellationToken.None);
+            var complete = await service.DiscloseAsync(tenantId,
+                new ToolDisclosureAuthority(new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "capability.a", "capability.b"
+                }, false), CancellationToken.None);
+
+            Assert.Empty(partial.Tools);
+            Assert.Equal("multi", Assert.Single(complete.Tools).Name);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => service.SetToolPolicyAsync(tenantId,
+                new ToolDisclosurePolicy { ToolName = "invalid", Level = "Primary", RequiredCapabilities = [" "] },
+                CancellationToken.None));
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
     public async Task Prompt_versions_and_restricted_tools_are_deterministic()
     {
         var path = Path.Combine(Path.GetTempPath(), $"agent-evolution-{Guid.NewGuid():N}.json");
@@ -71,13 +117,18 @@ public sealed class EvolutionServiceTests
             await service.SetToolPolicyAsync(tenantId, new ToolDisclosurePolicy { ToolName = "public", Level = "Primary" }, CancellationToken.None);
             await service.SetToolPolicyAsync(tenantId, new ToolDisclosurePolicy { ToolName = "admin", Level = "Restricted", RequiredCapabilities = ["org.update"] }, CancellationToken.None);
             await service.SetToolPolicyAsync(tenantId, new ToolDisclosurePolicy { ToolName = "secret", Level = "Forbidden" }, CancellationToken.None);
-            var hidden = await service.DiscloseAsync(tenantId, new ToolDisclosureRequest(["org.update"], false), CancellationToken.None);
-            var shown = await service.DiscloseAsync(tenantId, new ToolDisclosureRequest(["org.update"], true), CancellationToken.None);
+            var hidden = await service.DiscloseAsync(tenantId,
+                new ToolDisclosureAuthority(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "org.update" }, false), CancellationToken.None);
+            var shown = await service.DiscloseAsync(tenantId,
+                new ToolDisclosureAuthority(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "org.update" }, true), CancellationToken.None);
+            var withoutRequiredCapability = await service.DiscloseAsync(tenantId,
+                new ToolDisclosureAuthority(new HashSet<string>(StringComparer.OrdinalIgnoreCase), true), CancellationToken.None);
 
             Assert.Equal(1, first.Version);
             Assert.Equal(2, second.Version);
             Assert.Single(hidden.Tools);
             Assert.Equal(2, shown.Tools.Count);
+            Assert.Single(withoutRequiredCapability.Tools);
             Assert.DoesNotContain(shown.Tools, x => x.Name == "secret");
             Assert.False(shown.PermissionExpanded);
         }

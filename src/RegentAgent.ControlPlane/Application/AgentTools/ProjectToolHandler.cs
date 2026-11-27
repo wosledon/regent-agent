@@ -33,27 +33,41 @@ public sealed class ProjectToolHandler(ProjectService projects, DeliveryService 
         };
     }
 
-    private async Task<object> ClaimTaskAsync(AgentToolContext context, JsonElement arguments,
-        CancellationToken cancellationToken)
-    {
-        var taskId = AgentToolArguments.RequiredGuid(arguments, "taskId");
-        if (context.Identity.TaskId != taskId) throw new UnauthorizedAccessException("Agent token is not scoped to this task.");
-        var task = await delivery.ClaimTaskAsync(context.Identity.TenantId,
-            AgentToolArguments.RequiredGuid(arguments, "projectId"), taskId, context.ActorName, cancellationToken);
-        await projection.SyncRuntimeStatusAsync(context.Identity.TenantId, taskId, "Assigned", task.Assignee ?? string.Empty,
-            cancellationToken);
-        return task;
-    }
+    private Task<object> ClaimTaskAsync(AgentToolContext context, JsonElement arguments,
+        CancellationToken cancellationToken) =>
+        MutateTaskAsync(context, arguments, submit: false, cancellationToken);
 
-    private async Task<object> SubmitTaskAsync(AgentToolContext context, JsonElement arguments,
-        CancellationToken cancellationToken)
+    private Task<object> SubmitTaskAsync(AgentToolContext context, JsonElement arguments,
+        CancellationToken cancellationToken) =>
+        MutateTaskAsync(context, arguments, submit: true, cancellationToken);
+
+    private async Task<object> MutateTaskAsync(AgentToolContext context, JsonElement arguments,
+        bool submit, CancellationToken cancellationToken)
     {
         var taskId = AgentToolArguments.RequiredGuid(arguments, "taskId");
         if (context.Identity.TaskId != taskId) throw new UnauthorizedAccessException("Agent token is not scoped to this task.");
-        var task = await delivery.SubmitTaskAsync(context.Identity.TenantId,
-            AgentToolArguments.RequiredGuid(arguments, "projectId"), taskId, context.ActorName, cancellationToken);
-        await projection.SyncRuntimeStatusAsync(context.Identity.TenantId, taskId, "InReview", task.Assignee ?? string.Empty,
-            cancellationToken);
+        var projectId = AgentToolArguments.RequiredGuid(arguments, "projectId");
+        await projection.RequireTaskAssigneeAsync(context.Identity.TenantId, projectId, taskId,
+            context.Identity.EmployeeId, requireAssigned: submit, cancellationToken);
+        var previous = (await delivery.GetAsync(context.Identity.TenantId, projectId, cancellationToken))
+            .Tasks.Single(task => task.Id == taskId);
+        var task = submit
+            ? await delivery.SubmitTaskAsync(context.Identity.TenantId, projectId, taskId, context.ActorName,
+                context.Identity.EmployeeId, cancellationToken)
+            : await delivery.ClaimTaskAsync(context.Identity.TenantId, projectId, taskId, context.ActorName,
+                context.Identity.EmployeeId, cancellationToken);
+        try
+        {
+            await projection.SyncRuntimeStatusAsync(context.Identity.TenantId, taskId,
+                submit ? "InReview" : "Assigned", task.Assignee ?? string.Empty,
+                cancellationToken, context.Identity.EmployeeId);
+        }
+        catch
+        {
+            await delivery.CompensateTaskMutationAsync(context.Identity.TenantId, projectId, taskId,
+                previous, task, cancellationToken);
+            throw;
+        }
         return task;
     }
 

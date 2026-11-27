@@ -89,7 +89,8 @@ public sealed class RuntimePolicyServiceTests
         var path = Path.Combine(Path.GetTempPath(), $"model-catalog-source-{Guid.NewGuid():N}.json");
         try
         {
-            var service = new ModelOperationsService(new JsonDocumentStore<ModelPoolState>(path), TimeProvider.System,
+            var service = new ModelOperationsService(new JsonDocumentStore<ModelPoolState>(path),
+                new FixedTimeProvider(new DateTimeOffset(2026, 11, 24, 12, 0, 0, TimeSpan.Zero)),
                 new StubCatalogSource());
             var tenantId = Guid.NewGuid();
             await service.SeedAsync(tenantId, CancellationToken.None);
@@ -123,7 +124,8 @@ public sealed class RuntimePolicyServiceTests
         try
         {
             var source = new StubCatalogSource { Fail = true };
-            var service = new ModelOperationsService(new JsonDocumentStore<ModelPoolState>(path), TimeProvider.System, source);
+            var service = new ModelOperationsService(new JsonDocumentStore<ModelPoolState>(path),
+                new FixedTimeProvider(new DateTimeOffset(2026, 11, 25, 12, 0, 0, TimeSpan.Zero)), source);
             var tenantId = Guid.NewGuid();
             source.Fail = false;
             await service.SeedAsync(tenantId, CancellationToken.None);
@@ -178,6 +180,11 @@ public sealed class RuntimePolicyServiceTests
         {
             if (File.Exists(path)) File.Delete(path);
         }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
     }
 
     private sealed class StubCatalogSource : IModelCatalogSource

@@ -17,6 +17,7 @@ public sealed class BackupJobRecord
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string ProfileId { get; set; } = "default";
+    public Guid? BackupSetId { get; set; }
     public int ProfileVersion { get; set; }
     public string Component { get; set; } = string.Empty;
     public string Status { get; set; } = "Pending";
@@ -56,8 +57,9 @@ public sealed record BackupCoverageDto(
     int? EffectiveRpoMinutes,
     int? EffectiveRtoMinutes,
     string RpoStatus,
-    string RtoStatus);
+    string RtoStatus,
+    IReadOnlyDictionary<string, int?>? ComponentRtoMinutes = null);
 
 public sealed record BackupRunRequest(string ProfileId = "default");
-public sealed record RestoreRequest(IReadOnlyList<Guid> BackupIds, string Scope, string ApprovalRef, string Requester);
-public sealed record RestoreApprovalRequest(string Approver, string Resolution);
+public sealed record RestoreRequest(IReadOnlyList<Guid> BackupIds, string Scope);
+public sealed record RestoreApprovalRequest(string Resolution);

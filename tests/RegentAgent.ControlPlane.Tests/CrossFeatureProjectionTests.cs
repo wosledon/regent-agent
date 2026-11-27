@@ -7,6 +7,7 @@ using RegentAgent.ControlPlane.Data;
 using RegentAgent.ControlPlane.Identity;
 using RegentAgent.Contracts.Billing;
 using RegentAgent.Contracts.Enums;
+using RegentAgent.Contracts.Governance;
 using RegentAgent.Contracts.Primitives;
 using RegentAgent.Contracts.Projects;
 using RegentAgent.Projects;
@@ -26,7 +27,13 @@ public sealed class CrossFeatureProjectionTests
             await using var db = CreateDb();
             var tenantId = Guid.NewGuid();
             var projectId = Guid.NewGuid();
+            var controllerId = Guid.NewGuid();
             db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "projection", CompanyName = "Projection Co" });
+            db.Employees.Add(new EmployeeRecord
+            {
+                Id = controllerId, TenantId = tenantId, EmployeeNo = "EMP-CONTROLLER",
+                DisplayName = "Controller", Position = "Controller", State = EmployeeState.Active
+            });
             db.Projects.Add(new ProjectRecord
             {
                 Id = projectId, TenantId = tenantId, Name = "Projection", Owner = "Controller",
@@ -56,11 +63,14 @@ public sealed class CrossFeatureProjectionTests
             await projection.SyncApprovedPlanAsync(tenantId, projectId, plan, CancellationToken.None);
             await projection.SyncApprovedPlanAsync(tenantId, projectId, plan, CancellationToken.None);
             Assert.Equal(3, await db.Tasks.CountAsync());
+            Assert.All(await db.Tasks.ToListAsync(), task => Assert.Equal(controllerId, task.AssigneeEmployeeId));
             Assert.Single(await db.AuditRecords.Where(x => x.EventType == "delivery.plan.runtime_projected").ToListAsync());
 
             var taskId = tasks[0].Id;
             await projection.MarkRuntimeClaimedAsync(tenantId, taskId, CancellationToken.None);
-            Assert.Equal("Claimed", (await delivery.GetAsync(tenantId, projectId, CancellationToken.None)).Tasks.Single(x => x.Id == taskId).Status);
+            var claimed = (await delivery.GetAsync(tenantId, projectId, CancellationToken.None)).Tasks.Single(x => x.Id == taskId);
+            Assert.Equal("Claimed", claimed.Status);
+            Assert.Equal(controllerId, claimed.AssigneeEmployeeId);
             await projection.MarkRuntimeCompletedAsync(tenantId, taskId, CancellationToken.None);
             Assert.Equal("ReadyForReview", (await delivery.GetAsync(tenantId, projectId, CancellationToken.None)).Tasks.Single(x => x.Id == taskId).Status);
         }
@@ -98,6 +108,18 @@ public sealed class CrossFeatureProjectionTests
         await db.SaveChangesAsync();
         var service = new OrganizationService(db, new TestTenantContext(tenantId), TimeProvider.System, new AllowQuotaGuard());
         var controller = await service.StartCompanyAsync(CancellationToken.None);
+        var controllerPosition = await db.Positions.SingleAsync(x => x.Name == "Controller");
+        var successorId = Guid.NewGuid();
+        db.Employees.Add(new EmployeeRecord
+        {
+            Id = successorId, TenantId = tenantId, EmployeeNo = "EMP-SUCCESSOR", DisplayName = "Successor",
+            Position = "Controller", State = EmployeeState.Active
+        });
+        db.EmploymentPeriods.Add(new EmploymentPeriodRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, EmployeeId = successorId,
+            PositionId = controllerPosition.Id, Kind = "Primary", StartedAt = DateTimeOffset.UtcNow
+        });
         var projectId = Guid.NewGuid();
         db.Projects.Add(new ProjectRecord
         {
@@ -114,12 +136,28 @@ public sealed class CrossFeatureProjectionTests
         });
         db.Approvals.Add(new ApprovalRecord
         {
-            Id = Guid.NewGuid(), TenantId = tenantId, ActionType = "employee.offboard", Title = "Offboard Controller",
-            Severity = Severity.High, State = ApprovalState.Approved, ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
+            Id = Guid.NewGuid(), TenantId = tenantId, ActionType = ApprovalActionTypes.EmployeeOffboard,
+            Title = "Offboard Controller", Severity = Severity.High, State = ApprovalState.Approved,
+            RequesterUserId = Guid.NewGuid(), TargetEmployeeId = controller.Id,
+            ActionHash = new ApprovalBinding(tenantId, ApprovalActionTypes.EmployeeOffboard,
+                TargetEmployeeId: controller.Id).ComputeV2Hash(),
+            DecidedBy = Guid.NewGuid(), DecidedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            ExpiresAt = DateTimeOffset.UtcNow.AddHours(1)
         });
         await db.SaveChangesAsync();
+        var clock = TimeProvider.System;
+        var actorId = Guid.NewGuid();
+        db.Memberships.Add(new MembershipRecord
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, UserId = actorId, Role = "Owner"
+        });
+        await db.SaveChangesAsync();
+        var execution = new ApprovalExecutionService(db, new TestTenantContext(tenantId, actorId), clock,
+            new AuditIntegrityService(db, clock), new IdempotencyService(db, clock), new AllowQuotaGuard(),
+            new ApprovalAuthority(db));
 
-        await service.OffboardAsync(controller.Id, (await db.Approvals.SingleAsync()).Id.ToString(), CancellationToken.None);
+        await execution.OffboardAsync(controller.Id, (await db.Approvals.SingleAsync()).Id.ToString(),
+            "offboard-1", CancellationToken.None);
 
         var task = await db.Tasks.SingleAsync();
         Assert.Equal("Interrupted", task.Status);
@@ -176,6 +214,7 @@ public sealed class CrossFeatureProjectionTests
                 operation = "claim_task", projectId, taskId
             })).RootElement, CancellationToken.None);
             Assert.Equal("Assigned", (await db.Tasks.SingleAsync()).Status);
+            Assert.Equal(employeeId, (await db.Tasks.SingleAsync()).AssigneeEmployeeId);
             Assert.Equal("Claimed", (await delivery.GetAsync(tenantId, projectId, CancellationToken.None)).Tasks.Single().Status);
 
             await handler.ExecuteAsync(context, JsonDocument.Parse(JsonSerializer.Serialize(new
@@ -191,13 +230,96 @@ public sealed class CrossFeatureProjectionTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Stable_task_assignee_rejects_stale_or_duplicate_display_name_tokens_before_delivery_mutation(
+        bool submit)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"agent-project-auth-{Guid.NewGuid():N}");
+        try
+        {
+            await using var db = CreateDb();
+            var tenantId = Guid.NewGuid();
+            var projectId = Guid.NewGuid();
+            var taskId = Guid.NewGuid();
+            var employeeA = Guid.NewGuid();
+            var employeeB = Guid.NewGuid();
+            db.Tenants.Add(new TenantRecord { Id = tenantId, Name = "agent-auth", CompanyName = "Agent Auth Co" });
+            db.Projects.Add(new ProjectRecord
+            {
+                Id = projectId, TenantId = tenantId, Name = "Agent Auth", Owner = "Controller",
+                Stage = ProjectStage.Active, Health = ProjectHealth.OnTrack, Currency = "CNY",
+                TargetAt = DateTimeOffset.UtcNow.AddDays(1), UpdatedAt = DateTimeOffset.UtcNow
+            });
+            db.Employees.AddRange(
+                new EmployeeRecord
+                {
+                    Id = employeeA, TenantId = tenantId, EmployeeNo = "EMP-A", DisplayName = "Same Name",
+                    Position = "Engineer", State = EmployeeState.Active
+                },
+                new EmployeeRecord
+                {
+                    Id = employeeB, TenantId = tenantId, EmployeeNo = "EMP-B", DisplayName = "Same Name",
+                    Position = "Engineer", State = EmployeeState.Active
+                });
+            db.Tasks.Add(new TaskRecord
+            {
+                Id = taskId, TenantId = tenantId, ProjectId = projectId, Title = "Stable task",
+                TaskType = "engineering.implement", Status = submit ? "Assigned" : "Ready",
+                Assignee = "Same Name", AssigneeEmployeeId = submit ? employeeA : employeeB,
+                UpdatedAt = DateTimeOffset.UtcNow
+            });
+            await db.SaveChangesAsync();
+            var store = new JsonDocumentStore<ProjectDeliveryState>(Path.Combine(root, "delivery.json"));
+            await store.PutAsync(projectId.ToString(), new ProjectDeliveryState
+            {
+                TenantId = tenantId, ProjectId = projectId,
+                Tasks =
+                [new DeliveryTask
+                {
+                    Id = taskId, TenantId = tenantId, ProjectId = projectId, Title = "Stable task",
+                    Status = submit ? "Claimed" : "Ready", Assignee = submit ? "Same Name" : null,
+                    AssigneeEmployeeId = submit ? employeeA : null
+                }]
+            }, CancellationToken.None);
+            var audit = new AuditIntegrityService(db, TimeProvider.System);
+            var delivery = new DeliveryService(store, TimeProvider.System);
+            var projection = new DeliveryRuntimeProjectionService(db, delivery, audit, TimeProvider.System);
+            var projects = new ProjectService(db, new TestTenantContext(tenantId), TimeProvider.System, new AllowQuotaGuard());
+            var handler = new ProjectToolHandler(projects, delivery, projection);
+            var tokenEmployeeId = submit ? employeeB : employeeA;
+            var now = DateTimeOffset.UtcNow;
+            var context = new AgentToolContext(new AgentIdentityModel(tenantId, tokenEmployeeId, taskId, "runner",
+                ["tasks:execute"], Guid.NewGuid().ToString("N"), now, now.AddMinutes(15)), "Same Name", "{}", "Low", "{}");
+            var arguments = JsonDocument.Parse(JsonSerializer.Serialize(new
+            {
+                operation = submit ? "submit_task" : "claim_task", projectId, taskId
+            })).RootElement;
+
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                handler.ExecuteAsync(context, arguments, CancellationToken.None));
+
+            var runtime = await db.Tasks.SingleAsync();
+            var projected = (await delivery.GetAsync(tenantId, projectId, CancellationToken.None)).Tasks.Single();
+            Assert.Equal(submit ? "Assigned" : "Ready", runtime.Status);
+            Assert.Equal(submit ? "Claimed" : "Ready", projected.Status);
+            Assert.Equal(submit ? employeeA : employeeB, runtime.AssigneeEmployeeId);
+            Assert.Equal(submit ? employeeA : null, projected.AssigneeEmployeeId);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     private static RegentDbContext CreateDb() => new(new DbContextOptionsBuilder<RegentDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
 
-    private sealed class TestTenantContext(Guid tenantId) : ITenantContext
+    private sealed class TestTenantContext(Guid tenantId, Guid? actorId = null) : ITenantContext
     {
         public TenantId TenantId { get; } = new(tenantId);
-        public UserId UserId { get; } = new(Guid.NewGuid());
+        public UserId UserId { get; } = new(actorId ?? Guid.NewGuid());
         public string DisplayName => "Owner";
         public bool IsAuthenticated => true;
     }

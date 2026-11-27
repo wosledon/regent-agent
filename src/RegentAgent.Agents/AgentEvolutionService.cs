@@ -52,20 +52,21 @@ public sealed class AgentEvolutionService(JsonDocumentStore<AgentEvolutionState>
     public Task<ToolDisclosurePolicy> SetToolPolicyAsync(Guid tenantId, ToolDisclosurePolicy policy,
         CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
     {
-        if (policy.Level is not ("Primary" or "Auxiliary" or "Restricted" or "Forbidden"))
-            throw new InvalidOperationException("Invalid disclosure level.");
+        if (!IsValidPolicy(policy))
+            throw new InvalidOperationException("Tool disclosure policy is invalid.");
         state.ToolPolicies.RemoveAll(x => x.ToolName == policy.ToolName);
         state.ToolPolicies.Add(policy);
         return (true, policy);
     }, cancellationToken);
 
-    public Task<ToolDisclosureResult> DiscloseAsync(Guid tenantId, ToolDisclosureRequest request,
+    public Task<ToolDisclosureResult> DiscloseAsync(Guid tenantId, ToolDisclosureAuthority authority,
         CancellationToken cancellationToken) => MutateAsync(tenantId, state =>
     {
-        var capabilities = request.Capabilities.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var tools = state.ToolPolicies.Where(x => x.Level != "Forbidden"
-            && (x.Level != "Restricted" || request.RestrictedActivated)
-            && (x.RequiredCapabilities.Count == 0 || x.RequiredCapabilities.Any(capabilities.Contains)))
+        var capabilities = authority.Capabilities.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var tools = state.ToolPolicies.Where(IsValidPolicy)
+            .Where(x => x.Level != "Forbidden"
+                && (x.Level != "Restricted" || authority.RestrictedActivated)
+                && x.RequiredCapabilities.All(capabilities.Contains))
             .Select(x => new DisclosedTool(x.ToolName, x.Level, x.Summary)).ToArray();
         return (false, new ToolDisclosureResult(tools, false));
     }, cancellationToken);
@@ -138,4 +139,12 @@ public sealed class AgentEvolutionService(JsonDocumentStore<AgentEvolutionState>
     private static T Find<T>(IEnumerable<T> items, Guid id) where T : class =>
         items.FirstOrDefault(x => (Guid?)typeof(T).GetProperty("Id")!.GetValue(x) == id)
         ?? throw new KeyNotFoundException($"{typeof(T).Name} not found.");
+
+    private static bool IsValidPolicy(ToolDisclosurePolicy? policy) =>
+        policy is not null
+        && !string.IsNullOrWhiteSpace(policy.ToolName)
+        && policy.Level is "Primary" or "Auxiliary" or "Restricted" or "Forbidden"
+        && policy.Summary is not null
+        && policy.RequiredCapabilities is not null
+        && policy.RequiredCapabilities.All(capability => !string.IsNullOrWhiteSpace(capability));
 }

@@ -48,20 +48,29 @@ public static class DeliveryPolicy
     }
 
     public static IReadOnlyList<string> ValidateTaskDone(DeliveryTask task, DoneEvidence evidence,
-        IReadOnlyList<Review> reviews, IReadOnlyList<Defect> defects)
+        IReadOnlyList<Review> reviews, IReadOnlyList<Defect> defects, IReadOnlyList<string>? artifactErrors = null)
     {
         var errors = new List<string>();
-        if (evidence.WorkItemId != task.Id) errors.Add("Evidence belongs to another work item.");
-        if (evidence.Validator == task.Assignee || string.IsNullOrWhiteSpace(evidence.Validator))
+        if (evidence.WorkItemId != task.Id || evidence.WorkItemType != "Task")
+            errors.Add("Evidence belongs to another work item.");
+        if (string.IsNullOrWhiteSpace(evidence.Validator)
+            || evidence.Validator.Equals(task.Assignee, StringComparison.OrdinalIgnoreCase)
+            || evidence.Validator.Equals(task.Author, StringComparison.OrdinalIgnoreCase))
             errors.Add("An independent validator is required.");
         if (evidence.CriteriaResults.Any(x => !x.Value)) errors.Add("One or more completion criteria failed.");
         if (task.AcceptanceCriteria.Any(criterion => !evidence.CriteriaResults.Keys.Contains(criterion, StringComparer.OrdinalIgnoreCase)))
             errors.Add("DoneEvidence does not cover every task acceptance criterion.");
         if (evidence.Artifacts.Count == 0) errors.Add("At least one artifact is required.");
-        if (evidence.TestResults.Count == 0) errors.Add("At least one test result is required.");
-        if (evidence.SecurityChecks.Count == 0) errors.Add("Security checks are required.");
-        if (reviews.All(x => x.SubjectId != task.Id || x.Verdict != "Approved"))
-            errors.Add("Independent approval is required.");
+        errors.AddRange(artifactErrors ?? ["Artifact verification is unavailable."]);
+        if (evidence.TestResults.Count == 0 || evidence.TestResults.Any(x =>
+                string.IsNullOrWhiteSpace(x.Name) || !x.Passed || string.IsNullOrWhiteSpace(x.EvidenceRef)))
+            errors.Add("Every required test must pass and cite evidence.");
+        if (evidence.SecurityChecks.Count == 0 || evidence.SecurityChecks.Any(x =>
+                string.IsNullOrWhiteSpace(x.Name) || !x.Passed || string.IsNullOrWhiteSpace(x.EvidenceRef)))
+            errors.Add("Every required security check must pass and cite evidence.");
+        if (reviews.All(x => x.SubjectType != "Task" || x.SubjectId != task.Id || x.Verdict != "Approved"
+                || !string.Equals(x.Reviewer, evidence.Validator, StringComparison.OrdinalIgnoreCase)))
+            errors.Add("Independent approval from the evidence validator is required.");
         var blocking = defects.Count(x => (x.TaskId == task.Id || x.RequirementId == task.RequirementId) && x.Severity is "P0" or "P1" && x.Status != "Closed");
         if (blocking > 0) errors.Add("Open P0/P1 defects block completion.");
         if (evidence.OpenP0P1Defects != blocking) errors.Add("Evidence defect count is stale.");

@@ -23,5 +23,7 @@
     <Project Path="tests/RegentAgent.Contracts.Tests/RegentAgent.Contracts.Tests.csproj" />
     <Project Path="tests/RegentAgent.Gateway.Tests/RegentAgent.Gateway.Tests.csproj" />
     <Project Path="tests/RegentAgent.ControlPlane.Tests/RegentAgent.ControlPlane.Tests.csproj" />
+    <Project Path="tests/RegentAgent.Operations.Tests/RegentAgent.Operations.Tests.csproj" />
+    <Project Path="tests/RegentAgent.PurgeFenceProbe/RegentAgent.PurgeFenceProbe.csproj" />
   </Folder>
 </Solution>

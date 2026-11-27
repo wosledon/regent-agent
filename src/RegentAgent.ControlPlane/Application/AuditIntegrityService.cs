@@ -17,6 +17,10 @@ public sealed class AuditIntegrityService(RegentDbContext db, TimeProvider clock
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false
     };
+    private static readonly SemaphoreSlim InMemoryAuditGate = new(1, 1);
+    private const int TicksPerMicrosecond = 10;
+    private static readonly int[] LegacyTimestampOffsets =
+        Enumerable.Range(1, 9).Concat(Enumerable.Range(1, 9).Select(offset => -offset)).ToArray();
 
     public async Task BackfillAsync(CancellationToken cancellationToken)
     {
@@ -32,7 +36,8 @@ public sealed class AuditIntegrityService(RegentDbContext db, TimeProvider clock
                     record.PreviousHash = previous;
                     record.Hash = ComputeHash(record, previous);
                 }
-                else if (record.PreviousHash != previous || record.Hash != ComputeHash(record, previous))
+                else if (record.PreviousHash != previous ||
+                         !VerifyHash(record, previous, db.Database.IsNpgsql(), out _))
                 {
                     break;
                 }
@@ -43,39 +48,79 @@ public sealed class AuditIntegrityService(RegentDbContext db, TimeProvider clock
     }
 
     public async Task<AuditRecord> AppendAsync(Guid tenantId, string eventType, string actor, object payload,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, bool saveChanges = true)
     {
-        var previous = await db.AuditRecords.AsNoTracking().Where(x => x.TenantId == tenantId)
-            .OrderByDescending(x => x.Seq).FirstOrDefaultAsync(cancellationToken);
-        var record = new AuditRecord
+        var relational = db.Database.IsRelational();
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = null;
+        var gateAcquired = false;
+        try
         {
-            TenantId = tenantId, Seq = (previous?.Seq ?? 0) + 1,
-            EventType = eventType, Actor = actor,
-            PayloadJson = JsonSerializer.Serialize(payload, CanonicalOptions),
-            CreatedAt = clock.GetUtcNow(), PreviousHash = previous?.Hash ?? string.Empty
-        };
-        record.Hash = ComputeHash(record, record.PreviousHash);
-        db.AuditRecords.Add(record);
-        await db.SaveChangesAsync(cancellationToken);
-        return record;
+            if (relational && db.Database.CurrentTransaction is null && saveChanges)
+                transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+            if (relational && db.Database.CurrentTransaction is not null)
+                await AcquireTenantLockAsync(tenantId, cancellationToken);
+            else
+            {
+                await InMemoryAuditGate.WaitAsync(cancellationToken);
+                gateAcquired = true;
+            }
+
+            var previous = await db.AuditRecords.AsNoTracking().Where(x => x.TenantId == tenantId)
+                .OrderByDescending(x => x.Seq).FirstOrDefaultAsync(cancellationToken);
+            var record = new AuditRecord
+            {
+                TenantId = tenantId, Seq = (previous?.Seq ?? 0) + 1,
+                EventType = eventType, Actor = actor,
+                PayloadJson = JsonSerializer.Serialize(payload, CanonicalOptions),
+                CreatedAt = RoundToPostgresPrecision(clock.GetUtcNow()), PreviousHash = previous?.Hash ?? string.Empty
+            };
+            record.Hash = ComputeHash(record, record.PreviousHash);
+            db.AuditRecords.Add(record);
+            if (saveChanges) await db.SaveChangesAsync(cancellationToken);
+            if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+            return record;
+        }
+        finally
+        {
+            if (transaction is not null) await transaction.DisposeAsync();
+            if (gateAcquired) InMemoryAuditGate.Release();
+        }
     }
 
-    public async Task<AuditVerificationDto> VerifyAsync(Guid tenantId, CancellationToken cancellationToken)
+    private async Task AcquireTenantLockAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        if (db.Database.IsNpgsql())
+        {
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(hashtext({tenantId.ToString("D")}))", cancellationToken);
+            return;
+        }
+        await db.Tenants.Where(x => x.Id == tenantId)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.Name, x => x.Name), cancellationToken);
+    }
+
+    public async Task<AuditVerificationDto> VerifyAsync(Guid tenantId, CancellationToken cancellationToken,
+        bool allowLegacyPostgresPrecision = true)
     {
         var records = await db.AuditRecords.AsNoTracking().Where(x => x.TenantId == tenantId)
             .OrderBy(x => x.Seq).ToListAsync(cancellationToken);
+        var allowLegacy = allowLegacyPostgresPrecision && db.Database.IsNpgsql();
         string previous = string.Empty;
         long expectedSeq = 1;
+        var legacyRecords = 0;
         foreach (var record in records)
         {
             if (record.Seq != expectedSeq || record.PreviousHash != previous ||
-                !CryptographicOperations.FixedTimeEquals(
-                    Encoding.UTF8.GetBytes(record.Hash), Encoding.UTF8.GetBytes(ComputeHash(record, previous))))
+                !VerifyHash(record, previous, allowLegacy, out var usedLegacy))
                 return new AuditVerificationDto(false, expectedSeq - 1, record.Seq, "Audit chain mismatch.");
+            if (usedLegacy) legacyRecords++;
             previous = record.Hash;
             expectedSeq++;
         }
-        return new AuditVerificationDto(true, records.Count, null, "Audit chain verified.");
+        var message = legacyRecords == 0
+            ? "Audit chain verified."
+            : $"Audit chain verified; {legacyRecords} legacy PostgreSQL timestamp hash(es) accepted.";
+        return new AuditVerificationDto(true, records.Count, null, message);
     }
 
     public async Task<AuditCheckpointDto> CheckpointAsync(Guid tenantId, string profile,
@@ -118,13 +163,45 @@ public sealed class AuditIntegrityService(RegentDbContext db, TimeProvider clock
         return new AuditVerificationDto(true, checkedCount, null, "Audit anchors verified.");
     }
 
-    private static string ComputeHash(AuditRecord record, string previousHash) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
-        JsonSerializer.Serialize(new
+    // PostgreSQL timestamptz stores microseconds, so hash the same precision that will be read back.
+    private static DateTimeOffset RoundToPostgresPrecision(DateTimeOffset value)
+    {
+        var remainder = value.Ticks % TicksPerMicrosecond;
+        var adjustment = remainder >= TicksPerMicrosecond / 2
+            ? TicksPerMicrosecond - remainder
+            : -remainder;
+        return value.AddTicks(adjustment);
+    }
+
+    private static bool VerifyHash(AuditRecord record, string previousHash, bool allowLegacyPostgresPrecision,
+        out bool usedLegacy)
+    {
+        usedLegacy = false;
+        if (HashesEqual(record.Hash, ComputeHash(record, previousHash))) return true;
+        if (!allowLegacyPostgresPrecision || record.CreatedAt.Ticks % TicksPerMicrosecond != 0) return false;
+
+        // Pre-fix PostgreSQL rows hashed the original 100 ns ticks before timestamptz rounded them to microseconds.
+        // Only the finite tick values inside PostgreSQL's rounding window can reproduce the stored hash.
+        foreach (var offset in LegacyTimestampOffsets)
         {
-            tenant_id = record.TenantId, seq = record.Seq, event_type = record.EventType,
-            actor = record.Actor, payload_json = record.PayloadJson,
-            previous_hash = previousHash, created_at = record.CreatedAt
-        }, CanonicalOptions)))).ToLowerInvariant();
+            if (!HashesEqual(record.Hash, ComputeHash(record, previousHash, record.CreatedAt.AddTicks(offset)))) continue;
+            usedLegacy = true;
+            return true;
+        }
+        return false;
+    }
+
+    private static bool HashesEqual(string left, string right) =>
+        CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(left), Encoding.UTF8.GetBytes(right));
+
+    private static string ComputeHash(AuditRecord record, string previousHash, DateTimeOffset? createdAt = null) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            JsonSerializer.Serialize(new
+            {
+                tenant_id = record.TenantId, seq = record.Seq, event_type = record.EventType,
+                actor = record.Actor, payload_json = record.PayloadJson,
+                previous_hash = previousHash, created_at = createdAt ?? record.CreatedAt
+            }, CanonicalOptions)))).ToLowerInvariant();
 
     private static string MerkleRoot(IReadOnlyList<byte[]> hashes)
     {

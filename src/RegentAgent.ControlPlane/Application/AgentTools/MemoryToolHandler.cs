@@ -21,7 +21,9 @@ public sealed class MemoryToolHandler(MemoryService memory) : IAgentToolHandler
                 AgentToolArguments.RequiredString(arguments, "sourceRef"),
                 AgentToolArguments.OptionalDouble(arguments, "confidence", 0.5),
                 AgentToolArguments.OptionalString(arguments, "taint", "untrusted"), context.ActorName,
-                cancellationToken, AgentToolArguments.OptionalString(arguments, "scope", "personal") != "personal"),
+                cancellationToken, AgentToolArguments.OptionalString(arguments, "scope", "personal") != "personal",
+                context.Identity.EmployeeId.ToString(),
+                authorEmploymentPeriodId: context.Identity.CredentialEpoch.ToString()),
             "search" => await SearchAsync(context, arguments, cancellationToken),
             _ => throw new InvalidOperationException("Unsupported memory tool operation.")
         };
@@ -32,7 +34,9 @@ public sealed class MemoryToolHandler(MemoryService memory) : IAgentToolHandler
     {
         var scope = AgentToolArguments.OptionalString(arguments, "scope");
         var results = await memory.SearchAsync(context.Identity.TenantId.ToString(),
-            AgentToolArguments.OptionalString(arguments, "query"), context.ActorName, cancellationToken);
+            AgentToolArguments.OptionalString(arguments, "query"), context.ActorName, cancellationToken,
+            context.Identity.EmployeeId.ToString(),
+            viewerEmploymentPeriodId: context.Identity.CredentialEpoch.ToString());
         return scope is null ? results : results.Where(x => x.Scope == scope).ToArray();
     }
 }

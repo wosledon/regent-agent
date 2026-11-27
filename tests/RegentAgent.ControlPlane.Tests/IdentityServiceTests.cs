@@ -1,8 +1,12 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using RegentAgent.ControlPlane.Application;
 using RegentAgent.ControlPlane.Data;
 using RegentAgent.ControlPlane.Identity;
 using RegentAgent.ControlPlane.Infrastructure;
+using RegentAgent.ControlPlane.Realtime;
+using RegentAgent.Contracts.Enums;
 using RegentAgent.Contracts.Identity;
 using RegentAgent.Storage;
 using Xunit;
@@ -32,6 +36,240 @@ public sealed class IdentityServiceTests
             await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.LoginAsync(new LoginRequest("owner@identity.test", "strong-password-123"), CancellationToken.None));
             var recovered = await service.LoginAsync(new LoginRequest("owner@identity.test", "new-password-456"), CancellationToken.None);
             Assert.NotEqual(login.SessionId, recovered.SessionId);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task Session_bootstrap_returns_only_safe_summary_fields()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"identity-bootstrap-{Guid.NewGuid():N}");
+        try
+        {
+            await using var db = CreateDb();
+            var service = CreateService(db, root);
+            var registered = await service.RegisterAsync(new RegisterRequest("owner@bootstrap.test", "strong-password-123", "Owner", "Bootstrap Co"), CancellationToken.None);
+
+            var summary = await service.GetSessionSummaryAsync(registered.SessionId, registered.UserId, registered.TenantId, CancellationToken.None);
+
+            Assert.NotNull(summary);
+            Assert.Equal(registered.Email, summary.Email);
+            Assert.Equal(registered.DisplayName, summary.DisplayName);
+            Assert.Equal(registered.TenantId, summary.TenantId);
+            Assert.Equal("Owner", summary.Role);
+            Assert.Equal("Password", summary.AuthMethod);
+            Assert.Equal("Standard", summary.SessionKind);
+            Assert.Empty(summary.Capabilities);
+            Assert.True(summary.EffectiveAccess.CanReadChat);
+            Assert.True(summary.EffectiveAccess.CanReadCollaboration);
+            Assert.Equal(CollaborationAccessScope.Observer, summary.EffectiveAccess.CollaborationScope);
+            using var document = JsonDocument.Parse(JsonSerializer.Serialize(summary, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            Assert.Equal(new[] { "email", "display_name", "tenant_id", "role", "auth_method", "session_kind", "capabilities", "effective_access" },
+                document.RootElement.EnumerateObject().Select(property => property.Name));
+            Assert.False(document.RootElement.TryGetProperty("employee_id", out _));
+            Assert.False(document.RootElement.TryGetProperty("user_id", out _));
+            Assert.False(document.RootElement.TryGetProperty("session_id", out _));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task Session_bootstrap_rejects_missing_expired_idle_and_revoked_sessions()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"identity-bootstrap-invalid-{Guid.NewGuid():N}");
+        try
+        {
+            await using var db = CreateDb();
+            var service = CreateService(db, root);
+            var registered = await service.RegisterAsync(new RegisterRequest("owner@bootstrap-invalid.test", "strong-password-123", "Owner", "Bootstrap Co"), CancellationToken.None);
+            var store = new JsonDocumentStore<AuthSessionRecord>(Path.Combine(root, "sessions.json"));
+            var session = await store.GetAsync(registered.SessionId.ToString(), CancellationToken.None);
+
+            Assert.Null(await service.GetSessionSummaryAsync(Guid.NewGuid(), registered.UserId, registered.TenantId, CancellationToken.None));
+            Assert.Null(await service.GetSessionSummaryAsync(registered.SessionId, Guid.NewGuid(), registered.TenantId, CancellationToken.None));
+            Assert.Null(await service.GetSessionSummaryAsync(registered.SessionId, registered.UserId, Guid.NewGuid(), CancellationToken.None));
+            session!.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await store.PutAsync(session.Id.ToString(), session, CancellationToken.None);
+            Assert.Null(await service.GetSessionSummaryAsync(session.Id, registered.UserId, registered.TenantId, CancellationToken.None));
+
+            session.ExpiresAt = DateTimeOffset.UtcNow.AddHours(1);
+            session.LastActivityAt = DateTimeOffset.UtcNow.AddHours(-2);
+            await store.PutAsync(session.Id.ToString(), session, CancellationToken.None);
+            Assert.Null(await service.GetSessionSummaryAsync(session.Id, registered.UserId, registered.TenantId, CancellationToken.None));
+
+            session.LastActivityAt = DateTimeOffset.UtcNow;
+            session.Status = "Revoked";
+            await store.PutAsync(session.Id.ToString(), session, CancellationToken.None);
+            Assert.Null(await service.GetSessionSummaryAsync(session.Id, registered.UserId, registered.TenantId, CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("membership")]
+    [InlineData("role")]
+    [InlineData("capability")]
+    public async Task Membership_authority_changes_revoke_the_session_and_signalr_connection(string change)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"identity-authority-{Guid.NewGuid():N}");
+        try
+        {
+            await using var db = CreateDb();
+            var connections = new TenantHubConnectionRegistry();
+            var service = CreateService(db, root, connections: connections);
+            var registered = await service.RegisterAsync(new RegisterRequest(
+                $"owner-{Guid.NewGuid():N}@authority.test", "strong-password-123", "Owner", "Authority Co"),
+                CancellationToken.None);
+            var disconnected = 0;
+            connections.Connected("connection", new TenantHubConnection(registered.SessionId, registered.TenantId,
+                registered.UserId, null, () => disconnected++));
+            var membership = await db.Memberships.SingleAsync(x =>
+                x.TenantId == registered.TenantId && x.UserId == registered.UserId);
+            if (change == "membership") db.Memberships.Remove(membership);
+            else if (change == "role")
+            {
+                membership.Role = "Member";
+                membership.CapabilitiesJson = "[]";
+            }
+            else
+            {
+                membership.CapabilitiesJson = "[\"dashboard.read\"]";
+            }
+            await db.SaveChangesAsync();
+
+            Assert.Null(await service.GetActiveSessionAsync(registered.SessionId, registered.UserId,
+                registered.TenantId, CancellationToken.None));
+            Assert.Equal(1, disconnected);
+            Assert.Contains(await service.ListSessionsAsync(registered.UserId, CancellationToken.None),
+                session => session.Id == registered.SessionId && session.Status == "Revoked");
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task Hub_revalidation_rejects_a_terminated_period_after_quick_rehire()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"identity-hub-epoch-{Guid.NewGuid():N}");
+        try
+        {
+            await using var db = CreateDb();
+            var service = CreateService(db, root);
+            var registered = await service.RegisterAsync(new RegisterRequest(
+                $"owner-{Guid.NewGuid():N}@epoch.test", "strong-password-123", "Owner", "Epoch Co"),
+                CancellationToken.None);
+            var employeeId = Guid.NewGuid();
+            var oldPeriodId = Guid.NewGuid();
+            var newPeriodId = Guid.NewGuid();
+            var now = DateTimeOffset.UtcNow;
+            db.Employees.Add(new EmployeeRecord
+            {
+                Id = employeeId, TenantId = registered.TenantId, EmployeeNo = $"EMP-{employeeId:N}",
+                DisplayName = "Employee", Position = "Engineering", State = EmployeeState.Active
+            });
+            db.EmploymentPeriods.AddRange(
+                new EmploymentPeriodRecord
+                {
+                    Id = oldPeriodId, TenantId = registered.TenantId, EmployeeId = employeeId,
+                    PositionId = Guid.NewGuid(), Kind = "Primary", StartedAt = now.AddHours(-2), EndedAt = now.AddHours(-1)
+                },
+                new EmploymentPeriodRecord
+                {
+                    Id = newPeriodId, TenantId = registered.TenantId, EmployeeId = employeeId,
+                    PositionId = Guid.NewGuid(), Kind = "Primary", StartedAt = now
+                });
+            await db.SaveChangesAsync();
+            ITenantSessionValidator validator = service;
+
+            Assert.False(await validator.ValidateAsync(registered.SessionId, registered.UserId,
+                registered.TenantId, employeeId.ToString(), oldPeriodId, CancellationToken.None));
+            Assert.True(await validator.ValidateAsync(registered.SessionId, registered.UserId,
+                registered.TenantId, employeeId.ToString(), newPeriodId, CancellationToken.None));
+            Assert.False(await validator.ValidateAsync(registered.SessionId, registered.UserId,
+                registered.TenantId, employeeId.ToString(), null, CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task Emergency_session_can_bootstrap_its_restricted_summary()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"identity-bootstrap-emergency-{Guid.NewGuid():N}");
+        try
+        {
+            await using var db = CreateDb();
+            var service = CreateService(db, root);
+            var owner = await service.RegisterAsync(new RegisterRequest("owner@bootstrap-emergency.test", "strong-password-123", "Owner", "Bootstrap Co"), CancellationToken.None);
+            var credential = await service.ConfigureEmergencyAccessAsync(owner.UserId, owner.TenantId, CancellationToken.None);
+            var emergency = await service.UseEmergencyAccessAsync(new EmergencyAccessRequest(owner.TenantId, credential.Credential, "Restore identity provider"), CancellationToken.None);
+
+            var summary = await service.GetSessionSummaryAsync(emergency.SessionId, emergency.UserId, emergency.TenantId, CancellationToken.None);
+
+            Assert.NotNull(summary);
+            Assert.Equal("Emergency", summary.AuthMethod);
+            Assert.Equal("Emergency", summary.SessionKind);
+            Assert.Equal(emergency.Capabilities, summary.Capabilities);
+            Assert.False(summary.EffectiveAccess.CanReadChat);
+            Assert.False(summary.EffectiveAccess.CanReadCollaboration);
+            Assert.Equal(CollaborationAccessScope.None, summary.EffectiveAccess.CollaborationScope);
+            ITenantSessionValidator validator = service;
+            Assert.False(await validator.ValidateAsync(emergency.SessionId, emergency.UserId,
+                emergency.TenantId, null, null, CancellationToken.None));
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("Active", true)]
+    [InlineData("Pending", false)]
+    [InlineData("SoftDeleted", false)]
+    [InlineData("Purging", false)]
+    [InlineData("Suspended", false)]
+    [InlineData("Purged", false)]
+    [InlineData("Inactive", false)]
+    public async Task Hub_revalidation_disconnects_every_inactive_tenant_state(string status, bool staysConnected)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"identity-hub-tenant-{Guid.NewGuid():N}");
+        try
+        {
+            await using var db = CreateDb();
+            var service = CreateService(db, root);
+            var registered = await service.RegisterAsync(new RegisterRequest(
+                $"owner-{Guid.NewGuid():N}@tenant-status.test", "strong-password-123", "Owner", "Tenant Status Co"),
+                CancellationToken.None);
+            (await db.Tenants.SingleAsync(x => x.Id == registered.TenantId)).Status = status;
+            await db.SaveChangesAsync();
+            var registry = new TenantHubConnectionRegistry();
+            var terminations = 0;
+            registry.Connected("connection", new TenantHubConnection(registered.SessionId, registered.TenantId,
+                registered.UserId, null, () => terminations++));
+            using var provider = new ServiceCollection()
+                .AddSingleton<ITenantSessionValidator>(service)
+                .BuildServiceProvider();
+            var revalidator = new TenantHubSessionRevalidator(
+                provider.GetRequiredService<IServiceScopeFactory>(), registry);
+
+            await revalidator.RevalidateOnceAsync(CancellationToken.None);
+
+            Assert.Equal(staysConnected ? 0 : 1, terminations);
+            Assert.Equal(staysConnected ? 1 : 0, registry.Snapshot().Count);
         }
         finally
         {
@@ -272,7 +510,7 @@ public sealed class IdentityServiceTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
 
     private static IdentityService CreateService(RegentDbContext db, string root,
-        IExternalIdentityProviderResolver? resolver = null) => new(
+        IExternalIdentityProviderResolver? resolver = null, TenantHubConnectionRegistry? connections = null) => new(
         db, TimeProvider.System, new LoginRateLimiter(),
         new JsonDocumentStore<CredentialRecord>(Path.Combine(root, "credentials.json")),
         new JsonDocumentStore<AuthSessionRecord>(Path.Combine(root, "sessions.json")),
@@ -285,5 +523,5 @@ public sealed class IdentityServiceTests
         new JsonDocumentStore<ExternalLoginTransactionRecord>(Path.Combine(root, "external-transactions.json")),
         new JsonDocumentStore<AuthenticationPolicyRecord>(Path.Combine(root, "authentication-policies.json")),
         new JsonDocumentStore<EmergencyAccessCredentialRecord>(Path.Combine(root, "emergency-access-credentials.json")),
-        new AuditIntegrityService(db, TimeProvider.System), new TenantRlsScope(db), resolver);
+        new AuditIntegrityService(db, TimeProvider.System), new MembershipAuthority(db), new TenantRlsScope(db), resolver, connections);
 }
