@@ -346,7 +346,8 @@ while not stopping:
 - 调岗在同一事务切换任职并重算权限，保留员工运行时和工号。
 - 再入职创建新任职周期、会话和凭据，不恢复旧私有记忆。
 - 离职立即撤销新调用；Pending/Assigned/InProgress/InReview/Blocked 任务转 `Interrupted`，清除租约所有者、token 和到期时间，并记录中断任务 ID。
-- 任务认领排除 terminated 员工，旧 Assignment Token 和旧租约不能继续访问或完成。
+- 任务认领排除 terminated 员工，旧 Assignment Token 和旧租约不能继续访问或完成；Token 的 `credential_epoch` 绑定任职周期，离职结束周期后再入职创建新周期，旧 Token 不会恢复。
+- Gateway 对每次 Agent 请求都向 ControlPlane 校验 assignment 当前状态，不使用正向授权缓存；终止或任职周期变化在下一个请求即生效。
 - 未知 assignee 自动创建 Runner 员工前必须通过租户员工套餐配额；配额不足时任务保持 Pending 并返回冲突，不产生部分员工记录。
 - Boss 批准前不执行移除订阅，申诉期间保持暂停。
 - 本地工作区在 RustFS 快照确认后清理。

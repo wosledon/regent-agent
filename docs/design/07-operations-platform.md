@@ -109,12 +109,17 @@ Regent-Agent 分为四个逻辑部分：
 - 访问指定租户时额外携带 `support_grant_id` 和 `tenant_id`。
 - 高风险操作要求 MFA 或 step-up authentication。
 - 服务间调用使用 `aud=regent-control` 或 `aud=regent-gateway` 的独立 service token。
+- Ops Console 通过 `GET /ops/auth/me` 引导独立 Operator Cookie；缺失或无效 Cookie 返回 401，非 Operator 角色返回 403，不返回登录重定向。
+- Operator 引导只返回 `email`、`display_name`、`role`、`auth_method`、`session_kind` 和可用 `capabilities`；active-tenant selection 实现前不返回 `tenant_id`。
+- ControlPlane 与 Operations 的 `POST /auth/dev-login` 均只在 `Development` 且对应开关显式为 `true` 时可用：租户入口使用 `Identity:AllowDemoLogin`，Operator 入口使用 `Operations:AllowDemoLogin`；两个选项默认 `false`，其他情况返回 `404`。CI e2e 仅对临时 Development 进程显式设置两个开关，本地 Git 忽略的 `compose.override.yaml` 只设置 Operations 开关；跟踪的生产配置不得启用任一选项。
+- demo 登录分别签发独立的 `regent.session` 租户 Cookie 和 `regent.ops` Operator Cookie，audience 不混用；生产 Operator SSO、MFA/step-up 和服务端会话撤销存储仍是独立后续工作。
+- 整个 `/ops` 路由组（包括 `/ops/auth/me`）统一应用 `OperatorReader`；所有 POST/PUT 等状态变更端点另应用 `OperatorWriter`。Reader 允许 `SRE`、`Ops Viewer`、`OperationsAdmin`、`TenantAdmin`、`SecurityAuditor`、`BillingAdmin` 和 `BreakGlassOperator`，Writer 使用同一角色集合但排除 `Ops Viewer`。当前不引入新的按角色端点权限矩阵。
 
 ### 6.2 角色
 
 | 角色 | 典型权限 |
 |---|---|
-| Ops Viewer | 查看聚合健康、容量、租户状态 |
+| Ops Viewer | 只读：可访问全部 `/ops` GET 与 `/ops/auth/me`，所有状态变更返回 403 |
 | Tenant Admin | 管理租户账户、套餐、配额和停用 |
 | SRE | 管理 Runner/Gateway、部署、事件、备份恢复 |
 | Security Auditor | 只读审计、调查和支持授权 |
@@ -141,9 +146,9 @@ Regent-Agent 分为四个逻辑部分：
 
 ### 7.1 正常支持流程
 
-1. 运营人员提交申请：租户、原因、范围、时长、只读/写权限。
-2. 租户股东批准，或按租户预设策略自动批准只读范围。
-3. 系统生成短时 `SupportGrant`。
+1. 运营人员提交申请：租户、范围、时长与租户签发的审批引用；当前仅允许 read-only/diagnostics，默认 read-only，最长 30 分钟。
+2. 服务端校验租户审批的租户、范围、有效期和未使用状态；申请者不得自行批准，激活时记录不同的实际审批操作者。
+3. 系统生成短时 `SupportGrant` 并原子消费租户审批。
 4. 运营人员通过控制面 Ops API 访问，所有请求带 grant ID。
 5. 到期自动撤销，访问记录可被租户查看。
 
@@ -204,8 +209,10 @@ Pending -> Active -> Suspended -> Active
 - 备份默认关闭，运营平台通过 BackupProfile 分别控制全量、PITR、RustFS、密钥库、异地和演练。
 - 未启用组件不产生备份作业、RPO/RTO 承诺或成功率指标。
 - 备份作业记录组件、快照、哈希、加密状态和 35 天保留期。
-- 恢复需要审批，并按租户或全量执行；未配置时返回 not_configured。
-- 恢复后执行一致性校验和可选演练报告。
+- 恢复需要审批，并按租户或全量执行；未配置时返回 not_configured。恢复审批引用由服务端生成并绑定恢复记录，客户端不能伪造。
+- 每个启用组件必须确认有效快照；缺失 Postgres/PITR/KeyVault/RustFS 源的作业标记 Blocked，空 RustFS 存储需显式验证标记。
+- 恢复后执行一致性校验和可选演练报告；只有 Full 且覆盖当前 Profile 必需组件与版本的恢复计入整体 RTO，Tenant 部分恢复单独记录。
+- 旧版无 BackupSetId 的作业不得与现代备份集混合恢复。
 - 密钥库密文和包装数据密钥存 Postgres `keyvault` schema，由网关备份，主密钥分离保管。
 
 ### 8.5 计费与对账

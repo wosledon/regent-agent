@@ -133,10 +133,13 @@ PurgeScheduled
 要求：
 
 - 按依赖顺序分批执行。
+- 首次删除前先持久化 `Purging` 删除请求和租户状态；进程重启后由到期作业从该 tombstone 恢复。
 - 每步幂等、可重试、可审计。
 - 删除作业不能读取业务明文。
-- 任何关键步骤失败都不能标记 Purged。
-- 生成最终 DeletionProof。
+- 任何关键步骤失败都不能标记 Purged；关系数据删除后失败时保留 `Purging` tombstone，重试只继续未完成步骤。
+- 对象存储按 `tenants/{tenant_id}/` 全命名空间清除，覆盖 archives、backups、artifacts、exports 和未登记孤儿对象，并在完成前验证前缀为空。
+- 租户写入与清除共用 admission/fencing 边界：清除先拒绝新写入并等待在途写入完成，迟到写入不得重建元数据或对象。
+- 全部删除和空前缀验证成功后才生成最终 DeletionProof。
 
 ## 10. 备份与 Tombstone
 

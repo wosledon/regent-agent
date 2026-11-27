@@ -12,7 +12,7 @@
 
 - 控制面 `/v1` 是人类治理、观察和审计入口，不替代员工执行日常业务。
 - 新增 Agent 数据面 `/agent/v1`，所有请求必须携带短期 Employee Assignment Token。
-- Token 绑定 `tenant_id`、`employee_id`、`task_id`、`runner_id`、scopes、jti 和有效期；Gateway 使用独立 audience 验证。
+- Token 绑定 `tenant_id`、`employee_id`、`credential_epoch`、`task_id`、`runner_id`、scopes、jti 和有效期；Gateway 使用独立 audience 验证，并向 ControlPlane 核对当前任职周期。
 - Runner 是 Agent 运行时，不是业务身份；领取任务时控制面签发 Token，Runner 仅在任务生命周期内持有和使用。
 - Gateway 从 Token 获取租户、员工、任务和 scope，不信任请求体或任意 Header 中的身份字段。
 - 群聊创建、成员管理、消息、回复、@ 和证据关联必须由 Agent 发起，并记录 `actor_type=Agent` 与员工身份。

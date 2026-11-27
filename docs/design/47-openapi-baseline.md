@@ -32,13 +32,14 @@
 - `RegentAgent.Contracts` 继续保存内部事件、状态引用类型和跨服务消息，不维护重复 HTTP DTO。
 - 前端不手写与服务端重复的请求/响应类型。
 - OpenAPI 变更进入 PR diff 和契约测试。
+- checked-in OpenAPI 与运行时文档都省略环境相关的 `servers`；调用方显式提供 base URL，契约测试拒绝服务器地址漂移。
 
 ## 4. 认证与授权
 
 | 调用方 | 认证方式 | 说明 |
 |---|---|---|
 | 租户浏览器 | HttpOnly Cookie 会话 | CSRF、SameSite、租户上下文 |
-| 运营浏览器 | Operator Cookie + MFA/step-up | 独立 audience |
+| 运营浏览器 | Operator Cookie（生产目标含 MFA/step-up；本地 demo 不含） | 独立 audience |
 | Runner/Gateway 服务 | Bearer service token | 独立 audience 和 scope |
 | 员工任务 | Assignment token | 单租户、单员工、单任务 |
 | 支持访问 | SupportGrant token | operator、tenant、scope、有效期 |
@@ -51,6 +52,18 @@
 - 请求体中的 `tenant_id` 不作为身份依据。
 - 每个 Operation 声明所需 scope 或 Capability。
 - 404 与 403 的使用必须避免泄露不可见资源。
+
+当前控制面命名策略与最小 Capability：
+
+| 策略 | 要求 | 主要范围 |
+|---|---|---|
+| `TenantWriter` | 已认证 + `tenant.write`；Owner/CoOwner 保留特权 | 身份/所有权、组织招聘、模型运行时预算、Agent evolution、治理审批、合规生命周期、事件、工作流发布审查、绩效任务治理、审计、账单支付导出写操作 |
+| `ChatRead` | 已认证 + 权威 viewer resolver；`OwnerObserver` 或具有 `chat.read` 的有效 `EmployeeMember` | 人类会话列表与消息读取；员工继续按会话成员过滤，观察者仅读取白名单共享会话 |
+| `CollaborationRead` | 已认证 + 权威 viewer resolver；`OwnerObserver` 或具有 `collaboration.read` 的有效 `EmployeeMember` | 人类协作图、trace、请求列表与详情；观察者使用过滤后的共享图 |
+
+Capability handler 从当前 `MembershipRecord` 解析租户/用户对应的角色与 capability，不信任 Cookie 中可能过期的 role/capability claims；缺少有效 `tenant_id`、`user_id` 或 membership 时 fail closed。聊天/协作 viewer resolver 还要求可选 `employee_id` 对应租户内未终止且具有有效任职周期的员工；只有当前数据库 `Owner`/`CoOwner` 且没有 employee identity 时才解析为 `OwnerObserver`。Password 与 Development 认证方式本身都不授予权限。授权中间件必须先于幂等中间件执行，普通已认证读取不因为 `TenantWriter` 被额外阻断。
+
+`OwnerObserver` 的会话可见性要求租户相等，并且 `Kind` 与 `ScopeType` 同时属于 `Company`/`Project`/`Topic`；任一字段为 `Direct`、`Position`、`System`、未知、空或损坏值时拒绝。观察者读取不修改 `MemberEmployeeIds`，协作图/trace 必须过滤会话、消息、摘要、边、权重、活动、聊天审计和计数，聊天审计缺少可用 `conversation_id` 时拒绝。完整 `message.created` 只在会话组发送，租户失效载荷不得包含 `conversation_id` 或 `message_id`。
 
 ## 5. 通用请求头
 
@@ -129,6 +142,7 @@
 
 - `/v1` 是内部主版本边界。
 - 新增可选字段向后兼容。
+- `DashboardCard` 的可选 `titleKey`、`summaryKey`、`summaryValues`、`metricPresentation` 与 `ActionCenterItem.nextActionKey` 用于稳定本地化；旧文案字段保持必填并继续填充，消费者必须支持缺失或未知 key 的旧文案回退。
 - 删除字段、改语义、收窄类型或改变状态机属于破坏性变更。
 - 破坏性变更升级主版本或提供明确迁移期。
 - 内部 API 不承诺公共 SemVer 和长期弃用周期。
@@ -137,6 +151,7 @@
 ## 8. 幂等、并发与长任务
 
 - 所有创建类接口必须支持 `Idempotency-Key`。
+- JSON 写请求在路由、模型绑定和幂等分流前拒绝重复属性；属性名按 `OrdinalIgnoreCase` 比较，嵌套对象同样校验，返回 `400 INVALID_ARGUMENT`，避免幂等/授权解析与模型绑定使用不同值。
 - 所有更新类接口必须支持 `If-Match` 或等价版本条件。
 - 任务认领、预算预留、编制占用和审批执行使用原子条件更新。
 - 长任务返回 `202` 和任务/作业 ID，客户端通过状态端点轮询或 SignalR 接收完成事件。
@@ -146,13 +161,19 @@
 ### 8.1 当前强制边界
 
 - `/v1` 与 `/agent/v1` 的所有 POST/PUT/PATCH/DELETE 请求必须携带 `Idempotency-Key`；中间件在调用端点前写入 InProgress 记录，成功后保存状态码、Content-Type 和响应体。
+- 授权先于幂等记录和重放。`POST /v1/approvals/{id}/decision` 由 `ApprovalService` 按当前稳定用户 ID 先执行自我批准检查，再按规范决策哈希处理服务层幂等重放；`POST /v1/agent-evolution/tools/disclose` 每次按当前 claims/role 计算，不使用跨 actor 的通用响应重放。两项豁免按规范化、大小写不敏感且允许尾斜杠的路径段识别。
 - 相同租户、操作和幂等键只能重放字节一致的请求；请求哈希不同返回 `409 IDEMPOTENCY_CONFLICT`，原请求仍在进行或结果未知时返回 `409 IDEMPOTENCY_IN_PROGRESS`。
 - PUT/PATCH/DELETE 必须携带 `If-Match`；请求体含 `version`/`rowVersion` 时必须精确匹配，无版本字段的动作型更新只能使用 `If-Match: *`，不匹配返回 `412 VERSION_CONFLICT`。
 - 所有响应携带 `X-Request-Id`；错误体统一使用 `request_id` 与稳定 `error.code`。
 - 游标使用 HMAC 签名的不透明字符串，绑定租户、筛选条件、快照时间和排序键；跨租户、跨筛选、篡改或过期游标均拒绝。
 - Tenant Dashboard API Client 自动生成幂等键、请求 ID 和版本条件；Runner 完成任务使用稳定幂等键，支持安全重试。
 - `/internal/metering/usage` 使用独立服务凭据，按 `usage_event_id` 业务幂等；成功返回 204，重复事件不重复写成本或项目支出。
-- 紧急访问响应包含 `sessionKind=Emergency`，调用方无需额外查询会话即可识别受限恢复会话。
+- 紧急访问响应包含 `sessionKind=Emergency`；前端展示轮换凭据后仍通过 `/auth/me` 建立服务端认证状态。
+- `GET /auth/me` 返回 Tenant 安全会话摘要，其中 `effective_access.can_read_chat`、`effective_access.can_read_collaboration` 和 `effective_access.collaboration_scope`（`none|participant|observer`）由当前数据库 authority 计算，不返回 employee/user/session ID；`GET /ops/auth/me` 返回不含租户上下文的 Operator 安全摘要。两者缺失会话时返回 401 而非重定向。整个 `/ops` 路由组要求 `OperatorReader`，所有状态变更端点另要求 `OperatorWriter`；Reader 包含全部现有 Operator 角色，Writer 仅排除 `Ops Viewer`。匿名返回 401，已认证非 Operator 返回 403，Ops Viewer 写入返回 403。
+- ControlPlane 与 Operations 的 `POST /auth/dev-login` 都是默认关闭的本地演示入口：分别只在 `Development` 且 `Identity:AllowDemoLogin=true`、`Operations:AllowDemoLogin=true` 时可用，否则返回 404。CI e2e 仅对临时 Development 进程显式 opt-in，本地 Compose override 只启用 Operations；生产配置不启用，生产 Operator SSO/MFA/step-up 仍是独立工作。
+- Tenant Dashboard API Client 使用 `createUuidV4()` 生成请求 ID 和幂等键；非安全 HTTP 上下文缺少 `crypto.randomUUID` 时回退到 `crypto.getRandomValues`，没有 CSPRNG 时失败关闭。可选 `X-Request-Id` 生成失败可省略并由服务端补齐。
+- `contracts/openapi/controlplane.json` 与 `apps/tenant-dashboard/src/lib/api-client/schema.d.ts` 从运行应用生成；`OpenApiContractTests` 比较运行时 schema 和状态码，字段或响应漂移会使测试失败。审批契约包含员工/候选人/岗位目标、决定身份和消费状态；performance Terminate 文档为 202，offboard 为 204，`GET /v1/performance-actions/{id}` 提供 202 Location 对应资源。`GET/PUT /v1/compliance/profile` 的 200 响应均显式声明 `ComplianceProfile`，新租户读取会原子创建确定性 baseline；更新在原子 mutation 内校验请求 `Version` 与存储版本，过期时返回 `412 VERSION_CONFLICT`。`GET /v1/projects/{projectId}/delivery/tasks/{taskId}/artifacts` 返回 Ready 工件的权威 ID、object key 与 SHA-256，供独立评审和 DoneEvidence 引用。
+- 内部 Outbox 不提供租户发布或处理端点；`POST /v1/outbox` 返回 405，`POST /v1/outbox/process` 返回 404，处理仅由后台 Worker 执行。
 
 ## 9. 限流与背压
 

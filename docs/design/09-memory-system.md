@@ -1,6 +1,6 @@
 # 09 记忆系统与遗忘机制
 
-- 版本：v0.1（待评审）
+- 版本：v0.6（schema 9 注释与本地实现基线）
 - 范围：分层记忆、知识库、混合 RAG、图谱多跳、遗忘、删除、投毒纠错与评估
 - 对应缺口：G-19、G-26、G-32
 
@@ -16,7 +16,7 @@
    └──────── 混合 RAG + 有界图谱多跳 ────┘
 ```
 
-Postgres 是权威源，pgvector、全文检索和关系表是索引与检索结构，RustFS 保存大内容。
+目标架构以 Postgres 为权威源、pgvector/全文检索/关系表为索引与检索结构，RustFS 保存大内容。当前 schema 9 延续 005 的 `MemoryEmbeddings` 向量投影并由 006 补充中文目录注释；claim、Finding、图谱和纠错等本地模块仍使用 JSON，不能把目标存储形态描述为已全部迁移。
 
 ## 2. 核心不变量
 
@@ -33,6 +33,7 @@ Postgres 是权威源，pgvector、全文检索和关系表是索引与检索结
 11. 跨租户共享默认关闭。
 12. 秘密不得进入记忆；PII 必须按 SensitiveDataPolicy 脱敏并保留令牌映射引用。
 13. 员工离职后私有记忆默认隔离，再入职不自动恢复。
+14. 个人 claim 的所有权使用稳定 `author_user_id` 或 `author_employee_id`；显示名不参与授权。历史仅含显示名的 claim 默认 fail closed，只有调用方显式启用且租户内姓名唯一时才允许兼容读取或隔离。
 
 ## 3. 记忆分层与类型
 
@@ -67,7 +68,7 @@ MemoryKind:
 MemoryRecord:
   id, tenant_id, kind
   scope_type: personal | organization | knowledge_base
-  owner_employee_id?, scope_position_id?
+  owner_user_id?, owner_employee_id?, scope_position_id?
   title, summary, current_version_id
   confidence, confidence_basis
   verification_status, sensitivity
@@ -328,17 +329,20 @@ memory.purge.requested
 - 清除失败进入重试和告警。
 - 备份中的副本按保留策略到期清除。
 
-## 13. 本地实现基线（2026-11-23）
+## 13. 本地实现基线（2026-11-25）
 
-- 本地模式使用 `LocalEmbeddingProvider` 生成确定性的 256 维 `local-hash-v1` 向量，向量、内容哈希、模型版本和索引时间持久化到 JSON。
-- `MemoryIndexService` 先按租户和 `scope` 过滤，再融合向量 0.55、关键词 0.35、元数据 0.10；元数据包含置信度、验证状态、使用次数和时效衰减。
-- 图扩展最多取 3 个种子、每个种子 2 跳且最多 20 个节点；扩展只能提升已通过租户和范围过滤的候选，不能扩大权限。
-- 普通召回要求综合分数达到 0.30；低风险 Finding 降权，冲突候选返回 `ConflictWithIds`， quarantined、forgotten 和 superseded 版本不进入普通召回。
-- 纠错通过新版本替换旧向量并迁移图关系；删除沿 `supersedes` 链传递，同步清理向量、图节点/边、Finding、影响记录和 CorrectionTask。
-- 个人记忆检索、详情和图查询按作者 ACL 过滤；个人 claim 可向上提名为独立组织候选，原记录保留且置信度/taint 不提升；组织/知识库候选独立复核后才发布，归档停止召回但保留追溯。
-- 当前本地实现未接入 pgvector、PostgreSQL 全文检索、Embedding Gateway 计费和完整岗位子树传播；生产存储与权限模型仍按第 2、5、11 节实施。
+- `IMemoryVectorStore` 统一租户内 CRUD、租户清除、显式候选集合和最多 200 条的有界余弦搜索。`LocalEmbeddingProvider` 仍生成确定性的 256 维 `local-hash-v1` 向量。
+- `Storage:Provider=Postgres` 且未启用 `Storage:UseInMemory` 时，`PostgresMemoryVectorStore` 使用 Npgsql/ADO.NET：每次操作开启事务、`SET LOCAL app.tenant_id`、参数化租户/claim 谓词，并以 `vector(256)` 字面量写入。租户 ID、维度和有限浮点数校验失败时直接报错，不回退 JSON。
+- PostgreSQL `MemoryEmbeddings` 使用 `(TenantId, ClaimId)` 复合主键、强制 RLS 和 `vector_cosine_ops` HNSW 索引；`<=>` 余弦距离按完整权限候选集合取 top-k，生产 SQL 与集成 EXPLAIN 共用同一参数构造。真实运行角色测试保留 `TenantId`、`ClaimId = ANY`、`<=>` 和 `LIMIT`，不裁剪候选；当前本地统计下优化器可为这组高选择性 ACL 条件选择复合主键或顺序扫描，不能把 HNSW 描述为必然计划。SQLite/InMemory 继续使用 `JsonMemoryVectorStore` 和原有 `memory-vectors.json` 格式及本地余弦实现。
+- 租户 GUID 在向量端口和 `MemoryIndexService` 边界按 `Guid` 值解析；大写、花括号和非连字符文本形式视为同一租户，JSON 文档形状不变，图谱与 Finding 的租户过滤也采用相同语义。
+- `MemoryIndexService` 先构建租户、状态、scope 和个人作者 ACL 候选集（最多 200），再只把这些 claim ID 传给向量存储；个人 ACL 优先匹配 `AuthorUserId` 或 `AuthorEmployeeId`，不再按显示名回退。随后仍按向量 0.55、关键词 0.35、元数据 0.10 融合，元数据包含置信度、验证状态、使用次数和时效衰减。
+- 人类 `/v1/memories*` 端点从认证上下文传入稳定用户 ID，Agent memory tool 从 assignment identity 传入稳定员工 ID；纠正和提名复制 claim 时保留原稳定作者 ID。
+- 图扩展最多取 3 个种子、每个种子 2 跳且最多 20 个节点；扩展只能提升已通过权限过滤的候选。普通召回阈值仍为 0.30，Finding 降权、冲突检测、quarantined/forgotten/superseded 排除和纠错图迁移行为保持不变。
+- 删除和租户清除通过同一向量端口同步删除 PostgreSQL 向量或 JSON 向量；PostgreSQL RLS 同时限制读写，应用层候选过滤不能替代 RLS。
+- `Positions.Path` 已在 PostgreSQL 映射为 ltree 并建立 GiST 索引，支持子树和 `nlevel` 查询；当前混合召回仍使用既有 scope/ACL 候选逻辑，尚未把完整岗位子树传播接入检索。
+- claim、Finding、图谱节点/边、CorrectionTask、影响记录和上下文绑定仍为 JSON 本地模块；PostgreSQL 全文检索、Embedding Gateway 计费和完整生产权限模型仍未实现。
 
-## 13. 维护任务
+## 14. 维护任务
 
 | 任务 | 职责 |
 |---|---|
@@ -352,7 +356,7 @@ memory.purge.requested
 
 任务通过 Outbox 驱动，不直接扫描修改所有表。
 
-## 14. 评估
+## 15. 评估
 
 建立标准问题集和期望记忆 ID，至少评估：
 
@@ -369,7 +373,7 @@ memory.purge.requested
 - 删除传播延迟。
 - 遗忘前后召回变化。
 
-## 15. Tool 与 API
+## 16. Tool 与 API
 
 ```text
 memory.capture
@@ -396,7 +400,7 @@ API：
 
 所有 Tool 受 Tool Registry/PEP 管理，工作流和记忆都不能提升权限。
 
-## 16. 投毒、隔离与纠错
+## 17. 投毒、隔离与纠错
 
 - 记忆拆分为 MemoryClaim，每个 claim 独立保存来源、证据、置信度、taint、冲突和引用。
 - MemoryFinding 按风险分级：高风险停止召回，低风险降权复核。
@@ -408,10 +412,10 @@ API：
 - 隔离支持反证申诉，员工报告投毒不扣 KPI。
 - 详见 [19 记忆投毒与纠错](./19-memory-poisoning-and-correction.md)。
 
-## 17. 安全
+## 18. 安全
 
 - 所有查询强制 `tenant_id`。
-- 个人记忆严格限制 owner。
+- 个人记忆严格限制稳定 owner ID；Agent claim 同时绑定 `AuthorEmploymentPeriodId`，显示名相同、更名或再入职均不改变旧周期访问限制，缺失稳定 ID 的历史 claim 默认不可读、不可隔离。
 - 组织记忆按岗位子树过滤。
 - 权限过滤进入 SQL，不能只在应用层。
 - 检索结果标记为数据，不改变系统指令或 Tool 权限。
@@ -419,7 +423,7 @@ API：
 - 外部内容默认低信任，不能自动发布高置信度知识。
 - 发布、更正、遗忘和删除全部审计。
 
-## 18. 验收场景
+## 19. 验收场景
 
 1. 员工个人记忆不能被主控或其他员工检索。
 2. 个人记忆可以沿组织树向上提名，不能跨分支发布。

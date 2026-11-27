@@ -1,6 +1,6 @@
 # 39 GitHub CI/CD 与本地部署
 
-- 版本：v0.2（供应链 CI 与不可变 Action 固定已实现）
+- 版本：v0.3（SDK/镜像 digest 与脏树来源清单门禁已实现）
 - 范围：GitHub 版本 Tag、GitHub Actions 检查、本地 Docker Compose 构建与回滚
 - 对应需求：FR-082、BR-134、BR-135、BR-136
 - 对应缺口：G-54
@@ -45,6 +45,7 @@
 - 安全、秘密、依赖和容器扫描。
 - 许可证、NOTICE 和 SBOM 检查。
 - 数据库迁移 dry-run。
+- 可复现源码清单校验。
 - Compose 配置校验。
 
 规则：
@@ -54,6 +55,7 @@
 - 不访问生产秘密。
 - Fork 和外部 PR 不获得 Secrets。
 - 不使用 `pull_request_target` 执行不可信代码。
+- e2e job 只对临时 Development 测试进程设置 `Identity__AllowDemoLogin=true` 和 `Operations__AllowDemoLogin=true`，ControlPlane 继续使用内存存储；这是测试专用 opt-in，不写入生产应用设置、Compose 或部署配置。
 
 ### 3.2 main 与版本 Tag
 
@@ -86,7 +88,7 @@ docker compose build
 
 - 不在 CI 中构建发布镜像。
 - 本地 Compose 使用版本 Tag 对应的 Dockerfile 和 lock file。
-- 基础镜像尽量按 digest 固定。
+- 基础镜像按发布记录固定；.NET SDK/ASP.NET runtime、Node、nginx 与 pgvector 已在 Dockerfile/Compose/CI 中按已验证 digest 固定。
 - 构建不得读取 CI Secrets。
 - 生产秘密只在运行阶段注入容器。
 
@@ -171,6 +173,8 @@ operator_id
 ### 11.1 当前自动门禁
 
 - CI supply-chain job 固定所有第三方 Action commit，执行 LicenseInventory/SBOM 一致性、NuGet/pnpm 漏洞、Expand/Contract dry-run、N/N-1 升级演练和 ReleaseManifest 校验。
+- `global.json` 将 SDK 精确锁定为 10.0.404 且禁止 roll-forward；所有 `setup-dotnet` 使用同版本，backend job 断言实际 SDK 一致。CI 与 Compose 的 pgvector 使用同一已验证 manifest digest，后端 Dockerfile 的 .NET SDK/ASP.NET runtime 和前端 Dockerfile 的 Node/nginx 也按 digest 固定。
+- `scripts/source-manifest.py` 在不读取或修改 Git 索引的情况下，对当前工作树全部 release-critical 已跟踪和未跟踪文件生成确定性 SHA-256 清单；CI 生成后立即复核，使未提交树内容可寻址，但不替代未来 commit/Tag。
 - CI 不构建或推送镜像；本地已完成六个应用容器构建、Compose 联调和真实 Postgres/RustFS 冒烟，但未生成不可变版本 Tag 的生产构建记录。
 
 ## 12. 指标

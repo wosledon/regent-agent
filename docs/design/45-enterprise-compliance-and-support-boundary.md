@@ -57,6 +57,7 @@ ComplianceProfile:
 - 策略必须版本化，激活前完成差异预览和影响评估。
 - 旧版本保留，历史任务记录实际生效版本。
 - baseline 使用平台默认技术控制。
+- 租户首次读取或更新 `ComplianceProfile` 时，控制面按认证租户原子创建确定性 baseline：允许 OpenAI/Anthropic、区域 `global`、在线保留 180 天、`standard` 审计、不要求备份、不允许外部共享、版本 1、状态 `Active`；重复读取保持稳定，后续更新递增版本。
 - strict 提高审计、备份、DLP 和 Provider/区域限制。
 - custom 允许租户按实际要求组合控制，但不能关闭安全红线。
 
@@ -141,7 +142,8 @@ Compliant
 
 ## 10. API
 
-- `GET /compliance/profile`：读取当前策略。
+- `GET /compliance/profile`：读取当前策略；租户尚无策略时原子创建并返回确定性 baseline，不返回空 200。
+- `PUT /compliance/profile`：按当前认证租户和版本更新策略；请求体中的租户标识不改变资源归属。
 - `POST /compliance/profile/draft`：创建草稿。
 - `POST /compliance/profile/evaluate`：预览差异和影响。
 - `POST /compliance/profile/activate`：激活版本。

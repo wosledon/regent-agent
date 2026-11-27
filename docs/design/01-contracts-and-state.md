@@ -69,6 +69,7 @@ support_grant_id: 支持访问令牌必填
 runner_id: Runner 令牌必填
 controller_id: 主控令牌必填
 employee_id: 员工任务令牌必填
+credential_epoch: 当前任职周期标识；离职或再入职后旧值失效
 task_id: 员工任务令牌必填
 scopes: space-separated permissions
 ```
@@ -77,9 +78,14 @@ scopes: space-separated permissions
 
 - Gateway 只接受 `aud=regent-gateway`；ControlPlane 接受 `aud=regent-control`；运营平台只接受 `aud=regent-ops`。
 - Operator token 不能访问租户 API；租户 token 不能访问 Ops API。
+- `/ops` 全组要求 `OperatorReader`，所有状态变更端点另要求 `OperatorWriter`；Reader 包含全部现有 Operator 角色，Writer 仅排除 `Ops Viewer`，不建立按角色端点矩阵。
+- ControlPlane 与 Operations 的 `/auth/dev-login` 都默认关闭，只在 `Development` 且分别设置 `Identity:AllowDemoLogin=true`、`Operations:AllowDemoLogin=true` 时可用。
 - SupportGrant token 必须同时匹配 `operator_id`、`tenant_id`、`support_grant_id`、scope 和有效期。
 - `tenant_id` 必须与资源路径、任务分配和模型归属一致，不一致返回 403。
 - 员工令牌不得包含 `admin`、`models:write`、`escalations:approve` 等管理权限。
+- 控制面只定义一次 `TenantWriter`、`ChatRead`、`CollaborationRead` 策略：分别要求 `tenant.write`、权威 viewer resolver 下的 `chat.read`、权威 viewer resolver 下的 `collaboration.read`。当前数据库 Owner/CoOwner 且没有 employee identity 时解析为只读 `OwnerObserver`；其他读者必须是具有有效任职周期的 `EmployeeMember` 并满足对应 capability，员工继续按会话成员范围过滤。Password 是生产登录方式，不构成授权绕过；仅 Development 环境保留 Development 认证兼容，外部认证用户必须具有显式 Capability claim，缺少 `auth_method` 时 fail closed。
+- 租户身份/所有权、组织与招聘、项目交付、模型与运行时预算、Agent evolution、治理/合规/生命周期/事件、工作流发布审查、绩效/任务治理、审计、账单/支付/导出写端点统一要求 `TenantWriter`；审批决定与 T2 执行端点改用 `ApprovalDecider`，服务层按动作再次校验精确 capability。普通已认证读取不因此被阻断。交付 actor、审批请求用户和恢复操作者均从认证 claims 获取，不信任请求体中的显示名称。
+- 授权中间件先于幂等中间件执行；审批决定、offboard/rehire/hire、performance Terminate 和工具披露由端点按当前操作者重新计算权威，不能重放其他操作者的权威响应。T2 审批端点要求 Owner/CoOwner 或 `approval.*` capability，服务层再次按动作校验当前成员关系与精确 capability，并持久化 `DecidedBy`/`DecidedAt`。审批执行使用 actor-scoped 幂等键与 v2 目标哈希，通用 HTTP 幂等中间件不替代服务层检查。
 - 管家服务令牌只包含 `infer:butler`；模型管理使用独立 `models:admin` 服务令牌。两类令牌都不能读取密钥，也不默认同时授予。
 - 签名密钥通过 JWKS 发布；轮换时新旧 `kid` 至少重叠 24 小时。
 - 吊销通过 `jti` 黑名单或凭据版本号实现，最长传播延迟 60 秒。
@@ -100,6 +106,14 @@ scopes: space-separated permissions
 2. 管家按模型协议通过 OpenAI 或 Anthropic 原生数据面调用网关。
 3. 网关验证 `aud`、`tenant_id`、`infer:butler` 和预算预留。
 4. 网关生成用量事件并推送控制面。
+
+**浏览器 Cookie 会话引导**
+
+1. Tenant Dashboard 使用 `GET /auth/me` 恢复当前 Cookie 会话，Ops Console 使用 `GET /ops/auth/me` 恢复独立 Operator Cookie。
+2. 服务端必须校验持久会话仍为 Active、未绝对过期、未空闲超时，并交叉校验用户与租户成员关系；无效会话返回 401，不返回重定向。
+3. Tenant 引导只返回 `email`、`display_name`、`tenant_id`、`role`、`auth_method`、`session_kind`、可用 `capabilities` 和 `effective_access`，不返回 session_id、user_id、恢复码或凭据。
+4. 紧急或其他受限会话只按 `AllowedActionsJson` 允许账户访问和 SSO 恢复动作；即使成员角色为 Owner/CoOwner，`effective_access` 仍固定为 `none`，且不得建立 Hub 连接。Operator 引导不包含租户上下文。
+5. 前端以引导结果认证状态为准，sessionStorage 只能作为可丢弃展示缓存；401 或退出失败都必须清除本地认证状态和查询缓存。
 
 **运营人员支持访问**
 
@@ -172,7 +186,7 @@ scopes: space-separated permissions
 
 | 域 | 主要端点 |
 |---|---|
-| 认证 | `/auth/login`、`/auth/refresh`、`/auth/logout` |
+| 认证 | `/auth/login`、`/auth/me`、`/auth/refresh`、`/auth/logout`；Ops 使用 `/ops/auth/me` |
 | 租户 | `/tenants`、`/tenants/{id}/members`、`/exports`、`/billing`；跨环境导入与托管退出后置 |
 | 公司 | `/companies`、`/charters`、`/charters/{id}/activate` |
 | 组织 | `/controllers/{id}/self-position`、`/positions`、`/positions/{id}/assignments`、`/org-delegations`、`/org-changes`、`/successions`、`/employees`、`/employees/{id}/heartbeat` |
@@ -185,7 +199,7 @@ scopes: space-separated permissions
 | 绩效 | `/improvement-proposals`、`/kpis`、`/kpis/{id}/snapshots`、`/performance-reviews`、`/performance-actions/{id}/appeal` |
 | 任务 | `/tasks/{id}/claim`、`/tasks/{id}/lease`、`/tasks/{id}/complete` |
 | 消息 | `/messages?after_seq=`、`/messages/{id}/ack` |
-| 成果 | `/artifacts`、`/artifacts/{id}/content`、`/workspaces/{id}/assign` |
+| 成果 | `/artifacts`、`/artifacts/{id}/content`、`/projects/{projectId}/delivery/tasks/{taskId}/artifacts`、`/workspaces/{id}/assign` |
 | 升级 | `/escalations`、`/escalations/{id}/decision` |
 | 管家 | `/butler/chat`、`/butler/jobs`、`/butler/reports` |
 | 模型 | `/admin/tenants/{tenant}/models`、`/test`、`/rotate`、`DELETE` |
@@ -339,7 +353,7 @@ ToolInvocation:
 | TaskGrant | id、task_id、employee_id、workspace_scope、allowed_tools、allowed_network、budget_limit、allowed_actions、policy_version | 任务预授权边界 |
 | UntrustedContent | id、tenant_id、task_id、source_type、source_ref、content_hash、taint_labels、allowed_uses、disposition | 不可信内容信封 |
 | InjectionFinding | id、content_id、detector_version、rule_id、risk_level、evidence_ref、disposition | 注入检测与处置记录 |
-| MemoryClaim | id、record_id、version、text、source_refs、confidence、verification、taint、status | 最小纠错单位 |
+| MemoryClaim | id、record_id、version、text、source_refs、confidence、verification、taint、status、author_user_id?、author_employee_id? | 最小纠错单位；个人 claim 至少使用一个稳定作者 ID，显示名仅作展示 |
 | MemoryFinding | id、claim_id、rule_id、risk_level、evidence_refs、status | 投毒或冲突发现 |
 | MemoryCorrection | id、old_claim_id、new_claim_id、reason、evidence_refs、reviewer_id、decision | 版本化纠错 |
 | MemoryImpactRecord | id、claim_version_id、target_type、target_id、used_at、risk、required_action | 引用影响 |
@@ -415,7 +429,7 @@ ToolInvocation:
 | WorkflowProposal | id、workflow_id、from_version_id、to_version_id、scope_position_id? | 只能沿作者岗位向上提名 |
 | WorkflowReview | id、proposal_id、reviewer_employee_id、decision | 仅具备 `workflow.review` 的 Leader 可采纳 |
 | WorkflowRun | id、tenant_id、workflow_id、version_id、state、metrics | 运行不提升执行者权限 |
-| MemoryRecord | id、tenant_id、kind、scope_type、owner_employee_id?、scope_position_id?、status | 个人记忆默认私有；组织范围绑定岗位子树 |
+| MemoryRecord | id、tenant_id、kind、scope_type、owner_employee_id?、owner_employment_period_id?、scope_position_id?、status | 个人记忆默认私有；组织范围绑定岗位子树 |
 | MemoryVersion | id、memory_id、version、content_artifact_id、source_refs、confidence | 已发布版本不可变，向量索引记录模型版本 |
 | MemoryRelation | id、tenant_id、from_id、to_id、relation_type | 多跳每跳重新校验权限和范围 |
 | MemoryProposal | id、memory_id、target_scope_type、scope_position_id? | 只能沿作者岗位向上提名 |
@@ -468,6 +482,8 @@ ToolInvocation:
 | WakePolicy | id、tenant_id、event_type、priority、eligible_roles、budget_limit、max_duration | 紧急唤醒边界 |
 | ScheduleOverride | id、tenant_id、scope、reason、starts_at、expires_at、budget_limit、status | 限时加班 |
 | AuditEvent | id、tenant_id、actor、action、target、payload_hash、created_at | 只增不改 |
+
+仪表盘 HTTP 投影在持久化实体之外保留可选展示元数据：`DashboardCard.titleKey`、`summaryKey`、`summaryValues` 和 `metricPresentation`，以及 `ActionCenterItem.nextActionKey`。这些字段只描述稳定资源 key 和结构化值，不替代权限、租户范围或领域状态；旧版 `title`、`summary`、`metric`、`nextAction` 必须继续填充，客户端在 key 缺失或未知时回退到旧文案。
 
 ## 6. 状态机
 
@@ -586,6 +602,7 @@ Unassigned -> Active -> SuccessionPending -> Active
 - `Active`：主控绑定有效岗位，可正常编排。
 - `SuccessionPending`：主控身份正在转移。
 - `Dormant`：无可用主控或继任者，公司暂停并通知股东。
+- 主控身份由当前未结束任职周期指向的岗位判定，不按员工显示名推断；调岗、合并或关闭主控岗位/任职以及终止主控前，必须存在同一主控岗位上其他 Active 员工的未结束 Primary 任职周期作为已接受继任者。相关变更与终止使用同一租户串行化事务边界。
 
 完整规则见 [06 主控与动态组织](./06-controller-and-organization.md)。
 
@@ -624,6 +641,13 @@ Outbox 发布器可以重试，消费者按 `event_id` 去重。事件顺序只�
 - **领域事件**：描述已经发生的事实，供投影、审计和自动化规则消费。
 - **公司消息**：员工之间的工作输入，必须经过权限和内容策略检查。
 - 两者共用投递基础设施，但使用不同的 topic/type 命名空间和保留策略。
+
+### 7.4 SignalR 隐私边界
+
+- Hub 连接必须在会话仍有效且租户状态为 `Active` 时才能进入租户失效通知组和租户限定的用户组；紧急或其他受限会话不得建立 Hub 连接。后台重验定期断开软删除、清除中、暂停及其他所有非 Active 租户的现有连接。
+- 会话组名由 `tenant_id + conversation_id` 组成。`EmployeeMember` 加入前必须验证当前 `employee_id` 是该租户会话成员；`OwnerObserver` 无需 employee identity，但只能加入 Company/Project/Topic 共享会话，Direct/private 会话必须拒绝。
+- 完整 `message.created` 消息只发送到会话组；租户组只接收不含资源 ID、会话 ID 或消息 ID 的失效提示，客户端按资源类型重新拉取当前授权快照。
+- `approval.changed` 与 `coordination.changed` 同样只发送不含 ID 的最小失效载荷，不在租户组广播 `ApprovalDto` 或 `TaskCoordinationDto`。HTTP API 仍是事实来源。
 
 ## 8. 并发与一致性规则
 
@@ -1119,7 +1143,7 @@ Outbox 发布器可以重试，消费者按 `event_id` 去重。事件顺序只�
 481. Pending Task、员工待处理项、消息、Outbox 和模型在途请求必须有上限和背压，不得静默丢弃。
 482. 共享 Runner 按租户加权轮询，有其他租户等待时单租户连续占用共享槽最多 3 次。
 483. 单租户压测不得使其他租户普通 API P95 劣化超过 20%，合格任务等待不得超过 30 秒。
-484. 合规必须通过版本化 ComplianceProfile 配置，策略激活需要审批并保留历史版本。
+484. 合规必须通过版本化 ComplianceProfile 配置；租户首次读取或更新时原子创建确定性 baseline，后续更新递增版本，策略激活需要审批并保留历史版本。
 485. ComplianceProfile 必需控制不满足时必须 fail closed，不得静默降级为 baseline。
 486. 平台不得宣称认证或将技术证据表述为法律意见。
 487. 当前不提供商业 SLA、24×7 值班、专属支持或自动客户合规审计包。

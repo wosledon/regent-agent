@@ -1,6 +1,6 @@
 # 16 部署、升级与迁移
 
-- 版本：v0.1（待评审）
+- 版本：v0.6（schema 9 Expand 基线）
 - 范围：Compose/systemd、版本集、升级顺序、数据库迁移、混版本、回滚与恢复演练
 - 对应需求：FR-058、BR-053、BR-054、BR-055
 - 对应缺口：G-05、G-16、G-20、G-21
@@ -171,17 +171,19 @@ ControlPlane
 
 ## 7. 数据库迁移
 
-- 生产禁止应用启动时自动迁移。
-- 独立 Migration Job 使用迁移角色。
-- Postgres advisory lock 保证单实例执行。
-- EF Core migration history 记录版本和 checksum。
-- 迁移前备份，失败立即停止发布。
-- 设置锁超时和语句超时。
-- 大表回填分批、限速、可恢复。
-- 回填记录进度、处理行数和校验和。
-- 数据迁移先 dry-run，再正式执行。
-- 迁移角色不用于日常运行。
-- 当前 Expand 基线为 `controlplane-003.sql` 与 `controlplane-004.sql`，SchemaVersion 为 4；`controlplane-004.sql` 增加身份查询所需的用户级 Membership RLS 策略。
+- 所有环境禁止 PostgreSQL 应用启动时自动迁移、建表、版本引导或演示种子；启动只读校验 schema 9 的扩展、精确列契约、checksum 列与历史、RLS 策略和运行角色边界。SQLite/InMemory 的 Development 初始化不受此限制。
+- 独立 Migration Job 使用迁移角色；迁移角色必须拥有应用表，并显式获得目标 schema 的 `USAGE`/`CREATE`，其中 schema `CREATE` 是创建或替换函数等迁移对象的前置权限，不能由 schema Owner 身份隐式替代。运行角色不得拥有或继承任一应用表/schema Owner 角色，不得具有 `BYPASSRLS`、superuser、`CREATEROLE`、`CREATEDB`、schema CREATE、审计表写权或 SchemaVersions 写权；直接属性和角色继承均在启动时检查。
+- `scripts/migrate-postgres.py` 是唯一 Expand 执行入口：执行前读取 checked-in checksum manifest，文件、版本和 SHA-256 集合必须精确匹配，篡改 SQL 在任何 DDL 前失败。空数据库通过 `to_regclass` 检测缺失的 `SchemaVersions` 并从 003 开始；在同一个 psql 会话中获取基础锁及旧版逐迁移锁 `6317000 + target`，重新读取并验证历史、应用全部待执行迁移、仅回填 NULL checksum、断言历史版本集合与最新版本完全匹配后按逆序释放 lock，同时设置 `lock_timeout` 和 `statement_timeout`。`ON_ERROR_STOP=1` 在失败时结束 psql，连接关闭释放 session lock。Npgsql 关键字连接串在调用 psql 前显式转换为 libpq 形式。
+- Schema 8 的 `SchemaVersions.Checksum` 记录迁移文件 SHA-256。`deploy/sql/controlplane-checksums.json` 是 checked-in manifest 记录 003～009 的精确 SHA-256，并作为嵌入资源随 ControlPlane 发布；`scripts/check-migration-checksums.py` 在 CI 中重新生成并校验。runner 只回填 NULL 值，绝不覆盖非 NULL 校验和；发现非 NULL 漂移立即失败。008 已提交但回填前中断的数据库可在下一次运行自动恢复，历史版本缺失或最新迁移未写入版本行时失败关闭。所有已知版本在成功结束前都必须与 manifest 精确匹配。
+- 迁移前备份，失败立即停止发布；大表回填分批、限速、可恢复，并记录进度、行数和校验和。数据迁移先 dry-run，再正式执行；迁移角色不用于日常运行。`--dry-run`/`--check` 只校验迁移文件与事务，Expand 阶段还校验 manifest、版本和 SHA-256，并统计 `FORCE ROW LEVEL SECURITY` 声明；它们不连接数据库，不能验证 RLS 是否生效或策略是否精确。精确 RLS/策略由 PostgreSQL 集成测试和所有环境的启动只读校验执行。
+- 当前 Expand 基线为 `controlplane-003.sql`～`controlplane-009.sql`，SchemaVersion 为 9。007 增加 `RequesterUserId`、`TargetEmployeeId`、`TargetCandidateId`、`TargetPositionId`、`ActionHash`、`ConsumedAt`、`ConsumedBy` 七个审批字段；008 增加 `DecidedBy`、`DecidedAt`、`NextAttemptAt`、`LastError` 四个业务字段和 `SchemaVersions.Checksum` 元数据列；009 为 `Milestones` 增加 `TenantId`、强制 RLS、`(TenantId, ProjectId)` 复合外键和 N-1 兼容派生触发器，旧二进制省略 `TenantId` 时仍从项目派生，但非空、复合外键和 canonical 策略保持不变。`controlplane-004.sql` 的 `Memberships_user_read` 是唯一允许的额外 permissive SELECT 策略；启动校验要求其恰好一个、命令为 SELECT、角色为 PUBLIC，且 `UserId/app.user_id` 表达式精确匹配，缺失、复制、弱化、命令或角色错误均失败。
+- `controlplane-005.sql` 安装/确认 vector 与 ltree 扩展，创建 `MemoryEmbeddings`、HNSW 余弦索引和强制 RLS，并把 `Positions.Path` 回填为规范 ltree 后设置 `NOT NULL`、创建 GiST 索引。回填在租户事务上下文内执行，遇到环、缺失/跨租户父节点或超过四级岗位时整份迁移失败。
+- `deploy/sql/runtime-grants.sql` 先撤销运行角色和 PUBLIC 在当前 schema 的 CREATE、表/序列及列级权限，再授予业务表 CRUD；`AuditRecords`/`AuditCheckpoints` 仅 SELECT/INSERT，`SchemaVersions` 仅 SELECT。CI 在同一 runner 应用 003–009 后执行该脚本，不再使用宽泛的 `GRANT ... ON ALL TABLES`。
+- `PostgresMigrationTests` 的临时 schema 迁移契约测试覆盖 003–009、表 27/27、业务用户列 231→238→242→243、基线 `p`/`f`/`u`/`c` 约束 29/29（27 PK + 2 FK，基线 UNIQUE/CHECK 为 0；合成 UNIQUE/CHECK 测试分母为 31；唯一索引只计入 `indexes`；PG18 `contype='n'` 不进入分母）、索引 55→56、扩展 2/2 的非空中文注释、006/007/008/009 重复执行与结构/业务行不变，以及 005 的环、缺失父节点、跨租户父节点和超深数据回滚。007/008/009 在应用前种子化代表性数据，并断言字段值、行数和租户隔离 canary；009 额外使用 `regent_controlplane` 运行角色执行不含 `TenantId` 的旧插入形状，验证触发器派生、强制 RLS 可见性、复合外键拒绝跨租户以及重复迁移后触发器仍唯一。009 还覆盖 `NOSUPERUSER`/`NOBYPASSRLS` 表 Owner 的多租户升级：测试保持 schema 由管理员所有，仅向表 Owner 授予 `USAGE`/`CREATE`，并验证该角色不直接或通过继承获得 superuser/`BYPASSRLS`；首次迁移前把 session-scoped `app.tenant_id` 设为最后一个租户，验证回填与复合外键校验不依赖该值，随后以另一个租户上下文重复应用 009 验证幂等。回填前临时移除 `Projects` 的 `FORCE ROW LEVEL SECURITY`，并使用一条不设置租户上下文的 set-based `UPDATE`，因此缺少 `NO FORCE` 会直接失败。事务提交前仍恢复 ENABLE/FORCE，并由同时检查 `Projects`/`Milestones` 的 guard 失败关闭，最终逐租户验证仅该租户里程碑可见、`TenantId` 回填、复合外键 `convalidated`、schema 非运行角色所有且 `Projects`/`Milestones` 强制 RLS。
+- `PostgresMigrationTests` 拥有 deparse、注释、PG18、UNIQUE/CHECK 和 RLS/权限回归：PostgreSQL 17/18 验证 deparse 后 canonical 策略仍精确匹配，基线约束分母为 29/29（27 PK + 2 FK，基线 UNIQUE/CHECK 为 0），PG18 `contype='n'` 排除，合成 UNIQUE/CHECK 把分母提高到 31（唯一索引只计入 `indexes`），以及真实约束注释缺失失败；RLS 负例包含设置名大小写/空格变化和错误引号列。权限测试验证审计表 append-only、SchemaVersions 只读、schema 无 CREATE 和列级权限清理。
+- `PostgresMigrationRunnerTests` 只拥有 runner/checksum/恢复/tamper/lock 行为：对空的可丢弃 PostgreSQL 数据库调用真实 runner，验证版本 003–009 和全部精确 checksum；重复运行验证 SKIP，篡改版本 7 checksum 后验证失败关闭，并覆盖 schema 3～7（含无 Checksum 列的 schema 7）升级到 9、008 后回填中断恢复、并发 runner、旧版逐迁移锁互斥和最新迁移未写版本行。Tampered SQL 测试验证 manifest 在任何建表前失败。
+- CI 使用按 digest 固定的 pgvector PostgreSQL 17/18 一次性服务容器矩阵，以迁移角色调用同一 runner，再以运行角色执行迁移、RLS、权限和审批并发集成测试，并执行后端镜像 smoke build；前端 job 重新生成 Tenant Dashboard TypeScript schema 到临时文件并与跟踪文件 diff。
+- 本地未配置 PostgreSQL DSN 时，真实数据库集成测试按环境门控跳过，不把跳过表述为通过；CI 的一次性 pgvector 服务容器执行真实迁移、RLS、权限和并发测试。未执行 live 或生产数据库迁移。
 
 ## 8. 应用回滚
 

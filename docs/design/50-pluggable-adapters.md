@@ -19,7 +19,8 @@
 |---|---|---|---|
 | 模型调用 | `IProviderClient` + `LocalProviderClient` + `IProviderRouter` | 默认本地，可配置 remote；OpenAI/Anthropic HTTP 适配支持原生 JSON、SSE 流式透传、有界读取和用量提取 | 真实契约冒烟仍按约束不调试 |
 | 模型目录 | `IModelCatalogSource` + 本地/models.dev 源 | `ModelOperationsService` 通过端口选择，快照保存 raw JSON/checksum | 自动分档与真实远程同步仍按约束不调试 |
-| 关系存储 | EF Core SQLite/Postgres 分支 | Provider 显式校验；生产禁止启动建表/种子，要求 SchemaVersion 和租户表强制 RLS；本地真实 Postgres schema 4 与 RLS 冒烟已验证 | 生产事务、并发和升级集成测试未执行 |
+| 关系存储 | EF Core SQLite/Postgres 分支 | Provider 显式校验；所有环境 PostgreSQL 启动只读校验 SchemaVersion 9、精确列契约、vector/ltree 对象、全部租户表强制 RLS/策略和运行角色边界，禁止建表/版本引导/种子；仅 SQLite/InMemory Development 初始化 | 生产事务、并发和升级集成测试未执行 |
+| 记忆向量 | `IMemoryVectorStore` + JSON/Postgres 适配 | 有效 Provider 为 Postgres 时使用 Npgsql/pgvector；SQLite/InMemory 或 `Storage:UseInMemory=true` 使用 JSON；Postgres 失败不回退 | claim、Finding、图谱、纠错、影响和上下文绑定仍为 JSON 本地模块 |
 | 对象存储 | `IObjectStore` + 本地/S3 适配 | `Storage:ObjectProvider` 在组合根选择 Local 或 S3，S3 保存 checksum 元数据；自定义 endpoint 使用 `AuthenticationRegion`，PUT 禁用 aws-chunked 以兼容 RustFS | 本地真实 RustFS 上传、读取和导出校验已验证；生产备份/恢复未执行 |
 | Gateway 密钥 | `IKeyVault` + 本地文件/Postgres 密钥库 | `Gateway:KeyVault:Provider` 选择 local 或 postgres；Postgres 使用信封加密、强制 RLS 和租户事务作用域 | 真实 Postgres/外部 KMS 按约束不调试 |
 | 外部身份 | `IExternalIdentityProvider` + 本地/GitHub/OIDC 适配 | `Identity:Mode` 选择 local 或 remote；授权事务绑定 state/PKCE/nonce，OIDC 支持 code 交换与 JWKS 校验，GitHub 读取已验证邮箱；远程登录要求邀请并持久化 subject 绑定 | 真实 IdP、required SSO/紧急恢复和组策略按约束不调试 |
@@ -63,7 +64,8 @@ public interface IModelCatalogSource
 
 - `IObjectStore` 保持为对象字节端口；生产适配直接使用 S3 SDK/RustFS endpoint，不新增业务存储抽象。
 - 组合根根据 `Storage:ObjectProvider=Local|S3` 选择实现；S3 配置包含 endpoint、bucket、region、forcePathStyle 和凭据引用。
-- EF Core 根据 `Storage:Provider=Sqlite|Postgres` 选择关系提供程序；生产启动必须禁用自动迁移并验证 SchemaVersion。
+- EF Core 根据有效 `Storage:Provider=Sqlite|Postgres|InMemory` 选择关系提供程序；`Storage:UseInMemory=true` 强制本地开发路径。Postgres 在 Development/Production 都只读验证 SchemaVersion 9、精确列契约、vector/ltree 对象、全部租户表 RLS/策略和运行角色边界；本地 bootstrap 仅限 SQLite/InMemory Development。
+- `IMemoryVectorStore` 是记忆向量的租户边界；只有有效 PostgreSQL 路径注册 `PostgresMemoryVectorStore`，其他路径保留 `JsonMemoryVectorStore`。Postgres 适配每次操作设置事务级 `app.tenant_id`，并以显式 claim 候选集合执行 pgvector 余弦搜索。
 - `IKeyVault` 保持为 Gateway 密钥端口；本地文件实现用于开发，Postgres 实现使用独立角色、`keyvault` schema 和 RLS。
 - 主密钥永不进入数据库或备份对象；Postgres 密钥库只存密文、包装数据密钥和版本元数据。
 

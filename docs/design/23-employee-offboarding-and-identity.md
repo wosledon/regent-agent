@@ -188,6 +188,19 @@ Boss 批准并确定生效时间
 - 在途工具调用按策略取消或完成；本地工作区在快照确认后清理。
 - 所有步骤幂等并审计。
 
+### 9.1 当前审批执行边界
+
+- offboard、terminate、hire、rehire 只通过 `ApprovalExecutionService` 执行；旧的组织服务旁路不再公开。
+- `ApprovalRecord` 保存稳定请求用户 ID、目标员工/候选人/岗位 ID、`DecidedBy`/`DecidedAt` 与 v2 `action_hash`。v2 哈希覆盖 `tenant_id`、规范化 `action_type` 和三个稳定目标 ID；v1 哈希只保持可读，永不执行，标题不参与目标推断。
+- T2 决定与执行都要求当前 Owner/CoOwner 成员关系或动作精确匹配的 `approval.*` capability；Password 不授予额外权限，普通 `tenant.write` 不能批准解雇、离职、录用或再入职。
+- 执行层重新计算 v2 哈希，并要求同租户、动作类型、全部目标 ID、Approved、未过期、未消费且存在授权决定身份完全匹配；关系库使用条件更新原子消费，InMemory 使用静态信号量回退。
+- 服务层幂等键按 `approval-execution:{approvalId}:{actorId}` 隔离；同一 actor、key、hash 可重放，不同 hash 冲突，其他 actor 不共享缓存，消费后的新 key 返回 409。
+- 审批消费、领域变更、审计、确定性 `approval.execution.committed` Outbox 和幂等结果在同一租户串行化事务提交；配额或状态失败回滚消费。员工状态转换使用 `State <> Terminated` 条件更新，主控移除要求同一 Controller 岗位已有其他 Active 员工的未结束 Primary 任职周期；主控身份按该任职周期的岗位判定，不按显示名判定。调岗和关闭主控岗位复用同一继任校验与事务边界；Controller 岗位自身禁止合并和同名副本，必须通过显式继任调岗。
+- Outbox handler 加载审批并校验租户、动作、全部目标、决定/消费身份、消费时间、v2 哈希和确定性消息 ID 后才产生副作用；客户端不能发布或触发内部 Outbox。
+- 私有记忆按稳定 `AuthorEmployeeId` 与 `AuthorEmploymentPeriodId` 隔离，不按显示名批量隔离；Agent 捕获和检索都携带当前任职周期，旧周期 claim 即使因 Outbox 延迟仍为 Active 也不能被新周期 Token 读取。隔离与向量删除在终止事务提交后由 `ApprovalExecutionOutboxHandler` 执行，覆盖 Active、Disputed、Quarantined 和 Candidate；提交前故障不会触碰 JSON claim 或向量索引。无周期 ID 的历史 claim 以被结束任职周期的 `EndedAt` 为上限，迟到 Outbox 只按旧周期 ID 或同一截止时间幂等补隔离，不得影响再入职后的新 claim。仅当租户内同名员工唯一且调用方显式请求时，才允许历史无稳定 ID 的 claim 走姓名兼容路径。再入职不会恢复已隔离 claim。
+- 终止事件携带被结束的 `employment_period_id`。Agent Assignment Token 携带同一 `credential_epoch`，ControlPlane 与 Gateway 都校验当前未结束任职周期；再入职创建新周期，旧 Token 永不复用，迟到终止事件只断开旧周期连接。
+- Outbox 按消息隔离失败并有界退避；达到上限进入 `Quarantined`，保留 Attempts、NextAttemptAt 和非敏感 LastError，不阻塞后续消息或其他租户。
+
 ## 10. OffboardingHandoff
 
 包含：

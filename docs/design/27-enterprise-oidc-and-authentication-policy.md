@@ -151,6 +151,8 @@ OidcIdentityBinding
 - 无法读取必需组声明时拒绝授权，不保留过期权限。
 - Owner 默认不能由组自动授予。
 - 确需组授予 Owner 时，必须二次审批并审计。
+- 控制面 Capability handler 在缺少 `auth_method` 时拒绝授权；Password 是生产登录方式，不构成授权绕过，仅 Development 环境保留 Development 认证兼容，外部 OIDC/GitHub 会话必须携带显式 `capability` claim。
+- 租户身份/所有权、组织招聘、模型运行时、治理审批、工作流、绩效、账单与导出等管理写端点统一使用 `TenantWriter`（`tenant.write`）。Owner/CoOwner 仍保留特权访问；审批决定与 T2 执行端点使用 `ApprovalDecider`，并继续由服务层校验当前成员关系和动作精确 capability；已有服务层更严格的 Owner 检查不因此放宽。
 
 ## 8. IdP MFA
 
@@ -171,6 +173,10 @@ OidcIdentityBinding
 - 管理员可强制撤销单个或全部会话。
 - 密码找回和账户安全操作仍撤销全部会话。
 - 浏览器仍使用现有 Secure HttpOnly Cookie 和 CSRF 基线。
+- Tenant Dashboard 每次挂载通过 `GET /auth/me` 校验持久 Cookie 会话；Ops Console 使用独立的 `GET /ops/auth/me`。
+- 引导响应只包含安全会话摘要；缺失、过期、撤销和空闲超时会话返回 401，前端显式进入 anonymous。
+- 紧急会话的 `account.access` 范围包含 `/auth/me`，因此受限恢复页也能完成服务端会话引导。
+- 前端 401 统一清除认证状态、旧 sessionStorage 摘要和 QueryClient 缓存，并只跳转一次登录；退出请求失败也在 finally 完成本地清理。
 
 ## 10. 紧急恢复
 
@@ -222,7 +228,9 @@ required 模式必须包含：
 - `POST /v1/tenants/{tenantId}/oidc/group-mapping/refresh`：按绑定中的组声明重新计算能力。
 - `POST /v1/tenants/{tenantId}/emergency-access`：Owner 配置紧急凭据。
 - `POST /auth/emergency-access`：使用紧急凭据，创建 15 分钟受限会话并返回轮换凭据。
+- `GET /auth/me`：校验当前持久 Cookie 会话并返回安全摘要，紧急会话在 `account.access` 下可调用。
 - `POST /auth/logout`：撤销本地会话。
+- `GET /ops/auth/me`：校验独立 Operator Cookie 和运营角色并返回无租户上下文的安全摘要。
 
 ## 13.1 当前实现状态
 

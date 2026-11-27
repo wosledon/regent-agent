@@ -1,15 +1,16 @@
 # 49 核心 ERD 与数据字典
 
-- 版本：v0.1（待评审）
+- 版本：v0.6（schema 9 里程碑租户隔离基线）
 - 范围：租户、身份、组织、项目、消息、模型、账本、评测、治理和运营核心实体关系
 - 关联设计：[15 数据 Schema 与事务边界](./15-data-schema-and-transactions.md)、[01 基础契约与状态模型](./01-contracts-and-state.md)、[后端技术文档](../Regent-Agent-后端技术文档.md)
 
 ## 1. 范围
 
-- 本文是核心逻辑模型，不替代逐表迁移脚本和字段级 Schema。
-- 所有租户业务表包含 `tenant_id` 并启用强制 RLS。
-- 主键、唯一约束、外键和索引按租户隔离。
-- 跨表外键使用复合 `(tenant_id, referenced_id)`。
+- 本文是核心逻辑模型，不替代逐表迁移脚本和字段级 Schema；上方 Mermaid 保持核心逻辑实体视图，`MemoryEmbeddings` 与 `Positions.Path` 由 005 引入，schema 6 仅补充中文目录注释。逻辑实体不得据此推断为当前已落地表。
+- 逻辑模型要求所有租户业务表包含 `tenant_id` 并启用强制 RLS；当前物理基线中 `Milestones` 由 009 增加 `TenantId`、强制 RLS 和复合项目外键，`MemoryEmbeddings` 直接使用 `TenantId` 和强制 RLS。
+- 目标租户约束要求主键、唯一约束、外键和索引按租户隔离；009 已将 `Milestones` 项目外键改为 `(TenantId, ProjectId)`，但 `Tasks` 仍是 003 的单列项目外键，应用必须经项目校验租户。
+- 跨表复合外键 `(tenant_id, referenced_id)` 是目标不变量；当前只有里程碑项目关系具备该约束，不能据逻辑 ERD 声称所有物理外键均已按租户复合。
+- 006 注释遵循当前物理例外：`Approvals` 无 `Version`；`Memberships_user_read` 是启动强制要求的唯一 SELECT-only/PUBLIC permissive 策略，与租户策略在 SELECT 上按 permissive OR 组合，缺失、复制、弱化、命令或角色错误均失败；`Artifacts.ProjectId` 无外键或级联删除；`AuditRecords` 链首 `PreviousHash=''` 而非 NULL。不得为迁就注释新增约束。
 - 状态使用稳定 `snake_case` 字符串，代码使用密封引用类型包装。
 - 大文件和二进制内容存 RustFS，Postgres 只存元数据和对象引用。
 
@@ -271,6 +272,11 @@ erDiagram
 | `governance` | Escalation、Compliance、Notification、Audit | ControlPlane Governance |
 | `platform` | Operator、SupportGrant、ResourcePool、Backup | Operations |
 | `dashboard` | 只读卡片、ProjectHealth、ActionCenter 投影 | ControlPlane Dashboard |
+| `public`（当前） | MemoryEmbeddings pgvector 投影 | Memory |
+
+上表是目标逻辑所有权，不表示所有实体已经关系化。Schema 9 的当前物理权威源是 `deploy/sql/controlplane-003.sql`～`009.sql` 建立的 27 张 `public` 表；账户、成员、组织、项目、任务、审计、Outbox/Inbox 等已迁移模块以 PostgreSQL 为事实源。`MemoryEmbeddings` 只是派生向量投影；claim、Finding、图谱、纠错、影响和上下文绑定仍由 JSON 本地模块保存。账户会话、邀请、OIDC 绑定、聊天和绩效等尚未迁移模块不得写成已落地表。
+
+Schema 6 通过 006 为这 27 张表、231 个业务用户列、55 个索引（含主键索引）、29 个基线 PostgreSQL `p`/`f`/`u`/`c` 目录约束（27 PK + 2 FK，基线 UNIQUE/CHECK 为 0；合成 UNIQUE/CHECK 测试把分母提高到 31；唯一索引只计入 `indexes`）及 vector/ltree 扩展提供中文业务注释；007 追加 `Approvals.RequesterUserId`、`TargetEmployeeId`、`TargetCandidateId`、`TargetPositionId`、`ActionHash`、`ConsumedAt`、`ConsumedBy` 七个字段，业务用户列达到 238；008 再追加 `Approvals.DecidedBy`、`DecidedAt` 与 `Outbox.NextAttemptAt`、`LastError` 四个业务字段，达到 242；009 增加 `Milestones.TenantId`，业务用户列达到 243，并将里程碑索引替换为租户复合索引、为项目增加租户唯一索引后，索引总数达到 56；同时安装仅在新行省略 `TenantId` 时从项目派生的兼容触发器，保留非空、复合外键、强制 RLS 和 canonical 策略。`SchemaVersions.Checksum` 是额外迁移元数据列，不进入业务用户列分母，但单独校验其中文注释。`verify-schema-comments.sql` 排除系统列、dropped 列、临时表和扩展拥有的系统对象，约束分母只包含 `contype IN ('p','f','u','c')`；PostgreSQL 18 的 `contype='n'` 表 `NOT NULL` 目录行不进入该分母。脚本要求每类总数大于零，并将 NULL、空白或没有基本汉字的注释计为缺失。迁移测试对表、列、索引、约束和扩展分别覆盖缺失、空白、纯英文三种失败路径，再应用 006 验证恢复；PostgreSQL 17/18 回归还验证 003–009 后基线约束注释为 29/29（27 PK + 2 FK，基线 UNIQUE/CHECK 为 0）、PG18 `n` 行排除、合成 UNIQUE/CHECK 把分母提高到 31（唯一索引仍只计入 `indexes`）和真实约束注释缺失失败。注释迁移不改变关系结构、RLS、授权或业务数据。007/008/009 迁移测试种子化业务行并验证幂等重放保留行数和值。
 
 ## 4. 核心数据字典
 
@@ -280,7 +286,8 @@ erDiagram
 | Account | id、email、status、deleted_at | 全局登录身份 | ControlPlane |
 | Membership | tenant_id、account_id、role、status | 账户与租户关系 | ControlPlane |
 | Company | tenant_id、name、status | 一租户一公司 | ControlPlane |
-| Position | parent_position_id、name、capabilities | 动态岗位 | ControlPlane |
+| Position | parent_position_id、path、name、capabilities | 动态岗位；Postgres `path` 为 ltree，其他开发提供程序为 text | ControlPlane |
+| MemoryEmbedding | tenant_id、claim_id、content_hash、model_version、vector、indexed_at | 005 引入的 pgvector 投影，006 补充中文注释；`(tenant_id, claim_id)` 主键、`vector(256)`、HNSW `vector_cosine_ops`；claim 正文仍在 JSON | Memory |
 | Employee | employee_no、operational_state、binding | 独立员工运行时 | ControlPlane |
 | PositionAssignment | employee_id、position_id、period | 任职历史 | ControlPlane |
 | Project | workflow_state、budget_envelope_id | 项目生命周期 | Projects |
@@ -309,6 +316,8 @@ erDiagram
 - 第一梯队一个租户对应一个 Company。
 - 一个员工同一时间只有一个 primary PositionAssignment。
 - 一个岗位同一时间只有一个主任职者。
+- `Positions.Path` 是 `root.<position-guid>[.<child-guid>]` 规范 ltree，最多四级岗位；创建、合并、拆分和回填必须保持父路径、租户、无环和深度约束。
+- `MemoryEmbeddings` 只保存租户内 256 维有限向量投影，按显式 claim 候选集合执行余弦 top-k；应用层权限预过滤与强制 RLS 同时生效。
 - Task 必须属于 Requirement，Requirement 必须属于 Project。
 - TaskRun 通过租约和 fencing 防止旧 Worker 覆盖新结果。
 - Message 的 `(tenant_id, seq)` 唯一。
@@ -323,7 +332,7 @@ erDiagram
 ## 6. RLS 与删除
 
 - 租户业务表启用 `FORCE ROW LEVEL SECURITY`。
-- 应用角色无 `BYPASSRLS`，不是表 Owner。
+- 应用角色不得直接或继承 superuser/`BYPASSRLS`/`CREATEROLE`/`CREATEDB` 或 Owner 角色，不是任一应用表/schema Owner，且无 schema CREATE、审计表写权或 SchemaVersions 写权。
 - 每个事务使用 `SET LOCAL app.tenant_id`。
 - Account 根记录和 Tenant 根记录支持软删除。
 - 软删除立即撤销会话、Token 和对象访问。
@@ -331,6 +340,9 @@ erDiagram
 - tombstone 防止已删除身份复活。
 - 法律保留只限制物理清除，不恢复普通访问。
 - `keyvault` schema 使用 Gateway 独立角色，其他服务角色无访问权限。
+- 005 引入的 `MemoryEmbeddings` 同样启用且强制 RLS，并条件性授予 `regent_controlplane` CRUD 权限；`Positions.Path` 使用 GiST ltree 索引，向量列使用 HNSW 余弦索引。真实运行角色测试覆盖完整候选过滤余弦查询、ltree 子树/深度和跨租户读写隔离；精确 ACL 向量查询的本地自然计划可为复合主键或顺序扫描，HNSW 是否被选择取决于数据分布和统计。
+- PostgreSQL 启动在所有环境都只读校验 schema 9 的扩展、列类型/非空、HNSW/GiST、RLS 精确策略、`SchemaVersions.Checksum` 列契约，以及 003～009 与嵌入 checksum manifest 完全相同的 SHA-256；schema 0/4/5/6/7/8 或不完整 schema 9 直接失败且不写版本、不种子。SQLite/InMemory 仅在 Development 执行本地初始化。
+- SQLite/InMemory 的向量仍写入 `memory-vectors.json`，组织路径使用 text 和既有循环回退；它们不是 PostgreSQL RLS 验证证据。
 
 ## 7. 保留与归档
 
@@ -355,3 +367,4 @@ erDiagram
 5. Judge 员工与候选员工关系明确。
 6. 软删除、物理清除和 tombstone 可表达。
 7. 保留策略与归档边界一致。
+8. Schema 9 的表、243 个业务用户列、29 个基线 `p`/`f`/`u`/`c` 约束（27 PK + 2 FK，基线 UNIQUE/CHECK 为 0；合成 UNIQUE/CHECK 测试分母为 31；唯一索引只计入 `indexes`；PG18 `contype='n'` 排除）、56 个索引和 vector/ltree 扩展注释覆盖验证为 100%，迁移元数据 checksum 注释单独校验，且重复执行 007/008/009 不改变结构、业务行数或代表性值。

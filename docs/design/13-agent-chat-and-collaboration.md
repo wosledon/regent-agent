@@ -269,6 +269,16 @@ chat.open_attachment
 
 所有写 API 幂等并审计；实时推送可用 SignalR，消息表仍是权威源。群聊创建、成员管理、消息、回复、@ 和证据关联只能由 `/agent/v1/conversations` 的 Employee Assignment Token 发起；控制面 `/v1/conversations` 仅提供只读观察。
 
+人类聊天与协作读取由同一个权威 viewer resolver 解析：它以当前数据库 `MembershipAuthority` 和可选 `employee_id` 为输入，只产生 `EmployeeMember` 或 `OwnerObserver`。`OwnerObserver` 仅授予当前数据库角色仍为 `Owner`/`CoOwner` 且没有 employee identity 的账户；`EmployeeMember` 必须是租户内未终止且具有有效任职周期的员工。Cookie 中过期的 role/capability claims 不授予权限，membership 被删除、角色降级或 capabilities JSON 损坏时 fail closed。
+
+`ChatRead` 对 `OwnerObserver` 允许只读观察，对 `EmployeeMember` 仍要求 `chat.read`；`CollaborationRead` 对 `OwnerObserver` 允许只读观察，对 `EmployeeMember` 仍要求 `collaboration.read`。非所有者缺少有效 `employee_id` 时两种策略均拒绝。员工读取继续按会话成员过滤，所有权不会把员工提升为租户级聊天读者。
+
+`OwnerObserver` 的会话可见性谓词同时要求租户相等，且 `Kind` 与 `ScopeType` 都在 `Company`/`Project`/`Topic` 白名单内；任一字段为 `Direct`、`Position`、`System`、未知值、空值、格式损坏或隐私指示不一致时拒绝。观察者列表、消息、协作图与 trace 共用该谓词，不修改 `MemberEmployeeIds`。图构建共享同一实现，但观察者模式必须过滤会话节点、相关边、消息与摘要、协作权重、活动、聊天审计和所有计数；聊天审计缺少可用 `conversation_id` 时 fail closed。Direct/private 内容不进入观察者通知或 SignalR 会话组。
+
+`GET /auth/me` 返回 `effective_access.can_read_chat`、`effective_access.can_read_collaboration` 和 `effective_access.collaboration_scope`（`none|participant|observer`），它们由同一 authority 计算，不包含 employee/user/session ID。前端缺失或损坏该结构时按拒绝处理。
+
+Hub 在连接和每次会话加入时校验持久会话仍为 Active、未过期、未空闲超时且成员关系有效；`JoinConversation` 使用同一 viewer resolver 和可见性谓词，观察者只能加入白名单会话，员工仍必须是会话成员。会话撤销、员工离职或周期性重验证失败会主动断开连接。完整 `message.created` 仅发送到会话组；租户组只收到不含 `conversation_id`、`message_id` 或正文的最小失效提示。`approval.changed` 和 `coordination.changed` 同样只广播最小失效载荷，完整审批与协作 DTO 不进入租户组。
+
 ### 14.1 可视化与过程追溯
 
 - Tenant Dashboard 提供 `/organization/collaboration` 只读工作台，可在办公室、组织图、协作网络和过程时间线之间切换。

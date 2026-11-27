@@ -77,6 +77,8 @@ Tool 权限分两层执行：
 
 执行结果分为 `Allowed`、`NeedsActivation`、`RequiresApproval`、`Forbidden`。未授权 Tool 不向 LLM 暴露 Schema；手动伪造调用只返回通用 `TOOL_NOT_AVAILABLE` 或 `FORBIDDEN`。写 Tool 必须幂等，调用者、参数哈希、策略结果和领域结果进入审计。
 
+当前 `/v1/agent-evolution/tools/disclose` 从服务端当前 Membership 的角色与 capability 生成披露权威，不读取 Cookie 中的旧角色或 capability claim；Restricted 激活还要求当前 Owner/CoOwner 身份或显式 `tools.restricted.activate` capability。请求体中的 `capabilities` 与 `restrictedActivated` 仅保留为兼容线协议字段，不能扩大披露范围。Primary/Auxiliary/Restricted/Forbidden 与 required-capability 过滤保持不变；多个 required capability 必须全部满足，无效策略条目 fail closed，披露接口不参与跨 actor 的幂等响应重放。
+
 ### 4.2 文件工具
 
 - 只允许访问当前任务 worktree 和员工私有目录。
@@ -254,6 +256,7 @@ Tool 权限分两层执行：
 
 - 账户可以加入多个租户，但每次会话只有一个 Active Tenant。
 - 服务端必须校验成员关系和 membership_version，不信任请求体 Tenant ID。
+- 每个已认证租户请求都重新校验当前 Membership；会话记录保存角色与 capability 的权威哈希，成员删除、角色降级或 capability 撤销会使旧 Cookie 会话和 SignalR 连接失效。MemoryGovernor 与工具披露直接消费当前 Membership，不回退到 Cookie claim。
 - 每个租户唯一 Primary Owner，最后 Active 所有者不可移除。
 - 代理权限限时、限范围、不可转授权，且不能执行主所有者专属操作。
 - 切换租户重新签发会话并清空旧上下文。
@@ -324,6 +327,8 @@ Escalation:
 - 不能处理时才使用 ApprovalDelegation、备用审批人或 Co-Owner 路由。
 - 委托必须限时、限范围、双方确认且不可转授权，不能覆盖所有者专属事项或自我批准限制。
 - 完整路由、SLA 和审计见 [36 审批委托与缺席](./36-approval-delegation-and-absence.md)。
+
+当前 `ApprovalService` 创建审批时忽略客户端 Requester，持久化认证 `ITenantContext.DisplayName`。决定审批时先加载同租户审批并拒绝 Requester 与当前 DisplayName 相同的操作者，再检查幂等重放和状态；错误码为 `FORBIDDEN`。独立授权操作者仍可按幂等键重放已完成的决定。`POST /v1/approvals/{id}/decision` 要求 `TenantWriter`，且不经过会在服务层自审检查之前返回的通用 HTTP 幂等重放。
 
 ### 7.3 人类指令
 

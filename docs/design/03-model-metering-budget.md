@@ -119,7 +119,7 @@ OpenAI body: /v1/chat/completions 原生 schema
 Anthropic body: /v1/messages 原生 schema
 ```
 
-- 网关不信任请求体或 Header 中的 `tenant_id`、`employee_id`、`task_id`，只使用已验证 Employee Assignment Token claim；Token audience 必须为 `regent-gateway`，scope 必须包含 `infer:employee`。
+- 网关不信任请求体或 Header 中的 `tenant_id`、`employee_id`、`task_id`，只使用已验证 Employee Assignment Token claim；Token audience 必须为 `regent-gateway`，scope 必须包含 `infer:employee`，`credential_epoch` 必须与 ControlPlane 当前未结束任职周期一致。
 - 网关只把 `X-Regent-Model` 解析为实际 `provider_model_id` 并写入该协议的原生 `model` 字段。
 - 不读取、改写或补造其他协议字段；工具调用、流式事件和错误结构保持原生形状。
 - `max_tokens`、`max_completion_tokens`、`thinking`、`tools` 等参数由对应协议客户端设置，不由统一 DTO 转换。

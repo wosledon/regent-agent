@@ -1,6 +1,6 @@
 # 43 自托管安装与离线升级
 
-- 版本：v0.2（升级计划、Expand/Contract 与回滚演练脚本已实现）
+- 版本：v0.3（升级计划、Expand/Contract、回滚演练与脏树源码清单已实现）
 - 范围：Tag 源码安装、Compose/systemd、脚本、许可证、离线缓存和升级恢复
 - 对应需求：FR-087、BR-148、BR-149、BR-150、BR-151
 - 对应缺口：G-58
@@ -204,6 +204,7 @@ cp .env.example .env
 ### 14.1 当前脚本边界
 
 - `scripts/verify-release.py` 生成绑定 Tag、commit、schema、lockfile、LicenseInventory、SBOM 和迁移哈希的 ReleaseManifest；dry-run 不要求创建 Tag。
+- `scripts/source-manifest.py` 对 release-critical 已跟踪和未跟踪文件生成确定性 SHA-256 JSON 清单，显式排除 `.env`、`compose.override.yaml`、运行时数据、依赖和构建产物；它不读取或修改 Git 索引，用于在正式 commit/Tag 前寻址已验证脏树，不替代发布身份。
 - `scripts/plan-upgrade.py` 只接受不可变 `vMAJOR.MINOR.PATCH` Tag，校验 N/N-1 兼容、备份或风险接受，并生成 Drain/Backup/Expand/Deploy/Smoke/Resume/Contract 顺序。
 - `deploy/sql/controlplane-003-contract.sql` 是显式 Contract 门禁：必须已完成 Expand、Smoke 并设置 `regent.allow_contract=on`，否则拒绝执行。
 - `scripts/upgrade-drill.py` 覆盖成功、Deploy 失败、Smoke 失败和 Contract 失败；Contract 前允许恢复旧镜像/Tag，Contract 后只能前滚纠正迁移。

@@ -64,6 +64,12 @@ event_hash = SHA-256(canonical_payload + previous_event_hash)
 - 按租户和时间分片，避免全局单链瓶颈。
 - 链头、算法版本和密钥版本随检查点记录。
 
+### 4.1 PostgreSQL 时间精度兼容
+
+- 新审计事件先把 `CreatedAt` 舍入到 PostgreSQL `timestamptz` 的微秒精度，再计算哈希，确保写入后读回值可重算。
+- 旧版本 PostgreSQL 事件使用 100 纳秒 tick 计算哈希，而数据库只保留微秒。升级不覆盖这些历史 `Hash`；验证器仅在 Npgsql 路径接受“存储微秒加上 PostgreSQL 舍入窗口内的候选 tick 可以重放原哈希”的旧记录，并在验证消息中报告兼容记录数。
+- 严格验证可禁用该兼容窗口；任何无法由存储值或有限候选 tick 重放的哈希仍按篡改失败。该策略不需要回填或改写历史审计行。
+
 ## 5. AuditCheckpoint
 
 ```text

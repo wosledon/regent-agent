@@ -1,6 +1,6 @@
 # 设计一致性审计
 
-- 审计日期：2026-11-24
+- 审计日期：2026-11-25
 - 范围：`docs/design/01`～`50` 与已接受 ADR
 - 基线提交：`7754274`（本轮变更为当前工作树）
 - 口径：`符合（本地）` 表示当前本地模式有实现与自动化证据；`符合（适配）` 表示远程端口、协议和失败语义已实现但未连接真实组件；`部分（生产）` 表示本地闭环成立但生产设计仍有明确缺口。本文不把本地实现表述为生产就绪。
@@ -13,7 +13,7 @@
 | 外部身份允许匿名 JIT 入租户，未持久化 subject 绑定 | 增加 state/PKCE/nonce 事务、code 交换、邀请门禁和 provider+issuer+subject 绑定 | `IdentityServiceTests`、`ExternalIdentityProviderTests` |
 | 本地密码使用 PBKDF2 | 新凭据使用 Argon2id，旧凭据成功登录后升级 | `IdentityServiceTests` |
 | Provider 只支持非流式响应 | 增加原生 SSE 透传、有界读取和流式用量提取，不跨协议转换 | `HttpProviderClientTests` |
-| 生产启动自动建表/种子，缺少 RLS 启动边界 | 生产只校验 SchemaVersion 与强制 RLS，不执行自动迁移或种子 | `SchemaVersionServiceTests`、`PostgresRlsValidator` |
+| 生产启动自动建表/种子，缺少 RLS 启动边界 | 所有环境 Postgres 只读校验 SchemaVersion 9、精确列契约、全部租户表 RLS/精确策略和运行角色边界；本地 bootstrap 仅限 SQLite/InMemory Development | `SchemaVersionServiceTests`、`PostgresSchemaValidatorTests`、`PostgresMigrationTests` |
 | remote Gateway 与生产 Runner 内部端点可匿名调用 | 缺少服务/管理员/Runner 凭据时启动失败，远程请求鉴权 | 组合根校验与中间件 |
 | 审计锚定硬编码本地文件 | `IAuditAnchorStore` 支持本地和对象存储，按租户/序号验证 | `AuditAnchorStoreTests` |
 | KeyVault 只有本地文件 | 增加 Postgres `keyvault` 信封加密适配、RLS SQL 和 TLS 校验 | `PostgresKeyVaultOptionsTests` |
@@ -28,6 +28,8 @@
 | Gateway 用量只存在本地账本，没有进入控制面成本和项目支出 | 增加持久投影队列、异步重试、事件 ID 幂等、租户/员工/任务归属校验和项目支出更新 | S-05、`UsageProjectionTests`、`RuntimePolicyServiceTests` |
 | 租户软删除把请求 GUID 文本与 SQLite 大写 GUID 文本直接比较，返回 404 | 改为 GUID 值比较；现有 Cookie 与 Agent Token 均 fail closed，仅保留恢复/会话管理 | S-06、`DataLifecycleServiceTests` |
 | 紧急访问响应没有显式 `sessionKind`，调用方需额外查询会话 | `EmergencyAccessResult` 增加 `sessionKind=Emergency` | S-08、`IdentityServiceTests` |
+| 记忆向量硬编码 JSON，租户清除无法删除 Postgres 投影 | 增加 `IMemoryVectorStore`、有效 Provider 选择、Guid 值语义、完整权限候选预过滤和统一租户清除；Postgres 失败不回退 | `MemoryVectorStoreTests`、`MemoryIndexServiceTests`、`PostgresRuntimeSmokeTests` |
+| 组织岗位没有可查询路径，Postgres 缺少 ltree 索引 | 维护规范 `Positions.Path`，Postgres 使用 ltree/GiST 与 `nlevel`，其他提供程序保留 text/循环回退 | `PositionPathTests`、`OrganizationServiceTests`、`PostgresLTreeTests` |
 
 ## 2. 逐模块矩阵
 
@@ -38,17 +40,17 @@
 | 03 模型、计量与预算 | Provider 路由、原生 HTTP/SSE、Agent JWT、KeyVault、价格快照、金额预留/结算/释放/过期、独立尝试用量、持久投影队列和账单更正 | 符合（本地） | 生产多 Worker 原子预留与真实 Provider 账单未连接 |
 | 04 安全、治理与恢复 | Tool PEP、审批、审计、DLP、事件响应、备份脚本 | 部分（生产） | 容器隔离、真实 WORM 与异地恢复按约束未执行 |
 | 05 产品交付闭环 | `DeliveryPolicy`、`DeliveryService`、运行时任务投影、独立验收、发布/回滚 | 符合（本地） | 容器发布未执行 |
-| 06 主控与动态组织 | `OrganizationService`、能力授权、组织调整、继任 | 符合（本地） | 无 |
+| 06 主控与动态组织 | `OrganizationService`、能力授权、组织调整、继任、规范路径与 ltree 子树查询 | 符合（本地真实 PG） | 生产并发与大规模迁移未验证 |
 | 07 运营平台 | Operations、租户启停、SupportGrant、状态页、运营审计 | 符合（本地） | 托管计费与外部 SLA 不在范围 |
 | 08 工作流系统 | `WorkflowService`、版本、向上提名、独立审查、执行门禁 | 符合（本地） | 无 |
-| 09 记忆系统 | 混合检索、图谱、ACL、衰减、归档、删除传播 | 符合（本地） | 生产 pgvector 未连接 |
+| 09 记忆系统 | 混合检索、图谱、ACL、衰减、归档、删除传播、pgvector 完整候选过滤与统一租户清除 | 符合（本地真实 PG） | claim、Finding、图谱和纠错仍为 JSON；精确 ACL 查询自然计划随统计选择 PK/Seq Scan，生产全文检索与规模压测未验证 |
 | 10 绩效与自我改进 | 改进审查、KPI、绩效动作、申诉反转 | 符合（本地） | 无 |
 | 11 项目管理 | 需求/任务/缺陷状态机、计划到运行时投影、认领/完成回写、评审、裁决 | 符合（本地） | 无 |
 | 12 通信与路由 | `CommunicationRouter`、管理链/专业链、项目覆盖 | 符合（本地） | 无 |
 | 13 Agent 聊天协作 | Agent Token、群成员、回复/@、证据、委派/交接/求助/打断状态机、安全点租约、只读过程面板 | 符合（本地） | 无 |
 | 14 模型评测回归 | 版本化评测、密封/污染检测、回归计划 | 符合（本地） | 真实模型回归未执行 |
-| 15 数据 Schema 与事务 | SQLite/JSON/对象存储、Outbox、SchemaVersion 4、Npgsql 基线、22 表强制 RLS、租户/用户上下文和迁移脚本 | 符合（本地真实 PG/RustFS 冒烟） | 生产事务、并发和混沌集成测试未执行 |
-| 16 部署升级迁移 | Compose Profile、生产启动校验、版本脚本、六个应用容器本地联调 | 部分（生产） | Expand/Contract、不可变 Tag 与混版本回滚未在容器环境演练 |
+| 15 数据 Schema 与事务 | SQLite/JSON/对象存储、Outbox、SchemaVersion 9、Npgsql 基线、27 表/243 个业务用户列/29 个基线 `p`/`f`/`u`/`c` 约束（27 PK + 2 FK，基线 UNIQUE/CHECK 为 0；合成 UNIQUE/CHECK 测试分母为 31；唯一索引只计入 `indexes`；PG18 `contype='n'` 排除）/56 索引中文注释、24 表强制 RLS、MemoryEmbeddings HNSW、Positions.Path ltree/GiST、精确列与策略启动校验、迁移 checksum 中断恢复和最小权限运行角色 | 符合（本地；真实 PG 由 CI 门控） | CI 一次性 PostgreSQL 17/18 服务容器集成测试通过；生产/live 迁移及生产规模并发/混沌未验证 |
+| 16 部署升级迁移 | Compose pgvector Profile、全环境 Postgres 启动校验、空数据库 003–009 bootstrap、单会话 advisory-lock runner、checksum 漂移失败关闭与中断恢复、006 `p`/`f`/`u`/`c` 注释覆盖/幂等/结构不变、007/008/009 行业务行保留、005 无效层级回滚与最小权限授权、PostgreSQL 17/18 一次性服务容器 CI 矩阵 | 部分（生产） | Contract、不可变 Tag 与混版本回滚未在容器环境演练 |
 | 17 可观测性与测试 | 四服务 OTel、严格脱敏、两个前端浏览器遥测、SLO/错误预算、L1～L3 告警确认/抑制/恢复、行动中心投影和 ES 状态展示 | 符合（本地真实 ES） | 生产 TLS/ILM、告警渠道与 24 小时 soak 未执行 |
 | 18 注入防御 | taint、TaskGrant、注入扫描、执行层鉴权 | 符合（本地） | 无 |
 | 19 记忆投毒纠错 | Finding、隔离、申诉、独立纠错、个人作者 ACL 保留、影响传播 | 符合（本地） | 无 |
@@ -71,7 +73,7 @@
 | 36 审批委托缺席 | 分级、协商、委托、SLA、超时拒绝 | 符合（本地） | 无 |
 | 37 国际化本地化 | zh-CN/en-US、IANA 时区、ISO 币种、翻译回退 | 部分（生产） | WCAG 2.2 AA 按 G-52 明确后置 |
 | 38 作息调度 | 工作窗口、低价窗口、假期、紧急唤醒 | 符合（本地） | 无 |
-| 39 CI/CD 与 Compose | GitHub Actions、不可变 Action SHA、supply-chain job、Tag、Compose Profile、校验脚本 | 符合（本地） | 按用户约束未创建或测试容器 |
+| 39 CI/CD 与 Compose | GitHub Actions、不可变 Action SHA、supply-chain job、Tag、Compose Profile、校验脚本 | 符合（本地） | CI 使用一次性 PostgreSQL 17/18 服务容器并执行后端镜像 smoke build；生产/live 迁移与生产规模并发/混沌未验证 |
 | 40 成本归属分摊 | Gateway 用量持久投影、原币账本、幂等、分摊、异常、项目预算 | 符合（本地） | 不做汇率换算 |
 | 41 内部通知 | 持久通知、分级、去重、SignalR 增强 | 符合（本地） | 仅站内 |
 | 42 内部 API 扩展 | Tool/MCP 边界、供应链准入、权限过滤 | 符合（本地） | 公共 API/SDK/Webhook 不在范围 |
@@ -81,24 +83,20 @@
 | 46 评测 QA | Judge 校准、污染检测、统计门槛、复测 | 符合（本地） | 无 |
 | 47 OpenAPI | OpenAPI 3.1、全局幂等/版本中间件、request_id、稳定错误码、签名游标、用量投影端点和 TS 生成 | 符合（本地） | 生产多实例幂等仍需 Postgres 唯一约束与事务保证 |
 | 48 前端路由 | Tenant/Ops 独立应用、路由、权限、共享组件、协作工作台 | 符合（本地） | 无 |
-| 49 核心 ERD | 实体、租户字段、Schema 所有权、保留规则 | 部分（生产） | 生产迁移与 RLS 集成测试未执行 |
-| 50 可插拔适配 | Provider、目录、S3、KeyVault、身份、OTel、锚定、备份、Compose | 符合（适配） | 真实组件连通性按约束未调试 |
+| 49 核心 ERD | 实体、租户字段、Schema 所有权、MemoryEmbeddings 与 Positions.Path 物理投影 | 符合（本地真实 PG） | CI 已运行一次性容器迁移/并发集成测试；生产/live 迁移及生产规模并发/混沌未验证 |
+| 50 可插拔适配 | Provider、目录、S3、KeyVault、身份、OTel、锚定、备份、Compose、JSON/Postgres 记忆向量端口 | 符合（适配） | 其余真实组件连通性按约束未调试 |
 
 ## 3. 验证结果
 
-- `dotnet build RegentAgent.slnx --no-restore`：通过，0 警告、0 错误。
-- `DOTNET_ROLL_FORWARD=Major dotnet test RegentAgent.slnx --no-build --no-restore`：131 项通过（Contracts 1、Gateway 19、ControlPlane 111）。
-- `python3 scripts/scenario-trial.py`：S-01～S-10 共 10 项跨模块场景全部通过，覆盖交付、招聘配额、离职、记忆纠错、预算投影、软删除、计费、OIDC、告警和备份恢复。
-- `corepack pnpm typecheck`、`corepack pnpm lint`、`corepack pnpm test`、`corepack pnpm build`：全部通过；Vitest 共 9 项通过。
-- `corepack pnpm test:e2e`：14 项 Playwright 全部通过，覆盖协作四视图、Agent 建群/发消息、Tool 调用、权限边界、移动端、本地计费和导出校验。
-- OpenAPI 与 Tenant Dashboard TypeScript schema 已从当前 ControlPlane 重新生成。
-- 文档链接/围栏/表格/编号、Compose 与 Collector YAML、离线缓存前置检查：全部通过。
-- 容量基线：50 请求，P50 2.3ms、P95 13.6ms。
-- 本地备份创建与恢复 round trip：通过，105 个文件。
-- LicenseInventory/SBOM：272 个依赖，0 未知或阻断许可；NuGet/pnpm 已知漏洞为 0；第三方 Action 全部固定完整 commit SHA。
-- Postgres Expand/Contract dry-run、N/N-1 升级计划、成功/Deploy 失败/Smoke 失败/Contract 失败演练和 ReleaseManifest dry-run：全部通过。
-- ControlPlane、Gateway、Operations 健康检查与 OpenAI/Anthropic 本地 SSE 冒烟：通过。
-- 未创建或启动容器，未连接真实 Provider、IdP、Postgres、RustFS、OTLP/Elastic。
+- 使用精确 .NET 10 SDK 10.0.404 执行 `dotnet build RegentAgent.slnx --no-restore --configuration Release`：通过，0 警告、0 错误。
+- 在不配置 `REGENT_TEST_POSTGRES_DSN`/`REGENT_TEST_POSTGRES_MIGRATION_DSN` 的情况下执行完整 Release 测试：366 项总数、345 项通过、21 项跳过、0 失败。跳过项全部为 PostgreSQL 运行角色、临时 schema 迁移、RLS/权限和 runner 集成测试，不计为通过；CI 另在一次性 PostgreSQL 17/18 服务容器中执行这些真实集成测试。
+- `DeliveryServiceTests.Self_review_and_unverified_key_claims_are_rejected`：通过；测试先种子化项目任务，再分别断言关键结论双源错误和自评审守卫错误。
+- `python3 -m py_compile scripts/migrate-postgres.py`、Expand dry-run、Contract dry-run：通过；dry-run 列出 003–009 与 contract 文件、SHA-256、事务并统计 RLS 声明；精确 RLS/策略由 PostgreSQL 集成测试和启动只读校验执行。
+- `python3 scripts/check-workflow-pins.py`：通过，第三方 Action 均为完整 commit SHA。
+- Tenant Dashboard TypeScript schema 重新生成到临时文件并与 `apps/tenant-dashboard/src/lib/api-client/schema.d.ts` diff：通过。前端契约未改变，因此本轮未运行前端 typecheck/test/build。
+- `python3 scripts/validate-docs.py`：通过；文档链接、围栏、表格和 FR/BR/G/Q 编号有效。`.github/workflows/ci.yml` 与 `compose.yaml` YAML 解析通过。
+- `PostgresMigrationTests` 拥有 deparse、注释、PG18、UNIQUE/CHECK 和 RLS 回归：CI 的 PostgreSQL 17/18 一次性服务容器验证基线约束分母 29/29（27 PK + 2 FK，基线 UNIQUE/CHECK 为 0）、PG18 `contype='n'` 排除、合成 UNIQUE/CHECK 把分母提高到 31（唯一索引只计入 `indexes`）和真实约束注释缺失失败；`PostgresMigrationRunnerTests` 拥有 runner/checksum/恢复/tamper/lock 回归。CI 同时执行后端镜像 smoke build；未执行 live/生产迁移或生产规模并发/混沌演练。
+- `git diff --check`：通过。本轮未执行 live 或生产 PostgreSQL 迁移、生产容器发布或任何 Git 状态变更。
 
 ## 4. 审计结论
 

@@ -29,10 +29,10 @@
 - 本地身份使用 Argon2id 密码哈希、一次性恢复码、持久会话和登录限流；旧 PBKDF2 凭据在成功登录后升级，会话撤销会在后续请求生效。
 - OIDC/GitHub 默认使用本地适配；远程模式支持 state/PKCE/nonce 授权事务、code 交换、JWKS 校验和 subject 绑定，新用户必须有效邀请。租户可启用 required SSO，执行组能力、acr/amr/auth_time 和会话空闲策略；紧急凭据单次使用后轮换，只创建 15 分钟的 SSO 恢复/账户访问会话。
 - 租户邀请、Co-Owner、限时所有权委托和 Boss 展示后缀已提供 API 与设置页面。
-- 管家支持确定性问答、定时/事件报告和失败重试；Operations 提供本地健康检查、公开状态页、租户启停和支持访问审批。
-- 记忆模块提供确定性 256 维向量、关键词/向量/图混合召回、冲突提示、低风险降权、投毒隔离、独立纠错、影响记录和索引删除传播；生产 pgvector/全文检索仍未接入。
+- 管家支持确定性问答、定时/事件报告和失败重试；Operations 提供本地健康检查、公开状态页、租户启停和支持访问审批。ControlPlane 与 Operations 的 demo 登录均默认关闭，分别只在 `Development` 且 `Identity:AllowDemoLogin=true`、`Operations:AllowDemoLogin=true` 时可用，否则 `POST /auth/dev-login` 返回 404；CI e2e 仅对临时 Development 进程显式 opt-in，本地 Compose override 只启用 Operations demo，跟踪的生产配置不启用任一选项。
+- 记忆模块提供确定性 256 维向量、关键词/向量/图混合召回、冲突提示、低风险降权、投毒隔离、独立纠错、影响记录和索引删除传播；Postgres 使用 schema 9 的 pgvector/HNSW 投影与强制 RLS，完整 ACL 候选查询的自然计划可为复合主键或顺序扫描；SQLite/InMemory 保留 JSON 向量，claim/Finding/图谱/纠错/影响/上下文绑定仍为 JSON，PostgreSQL 全文检索尚未接入。租户 GUID 文本形式按值等价。
 - 记忆检测、隔离、申诉、纠错和影响事件写入哈希审计与 Outbox，并通过站内通知提醒；SQLite Outbox 排序在内存执行以兼容当前本地提供程序。
-- 组织服务强制四层深度、20 人编制、岗位状态和合并防环；离职释放槽位，章程、岗位、任职、委托和招聘变更写入哈希审计。
+- 组织服务强制四层深度、20 人编制、岗位状态和合并防环，并维护规范 `Positions.Path`；Postgres 使用 ltree/GiST 子树与 `nlevel` 查询，其他提供程序使用 text/循环回退。离职释放槽位，章程、岗位、任职、委托和招聘变更写入哈希审计。
 - 审批每分钟执行过期作业，超时默认拒绝并写入审计和通知；也可通过 `POST /v1/approvals/expire-due` 手动触发。
 - 交付链路强制 Go 决策证据、验收标准覆盖、能力声明、需求权重精确拆分、高风险拆分审批、执行者独立评审、DoneEvidence 全覆盖、2～3 人独立验收、缺陷两轮复测和 P0/P1 发布门禁。
 - 工作流支持个人捕获、向上提名、独立采纳/试点/拒绝和不可变执行版本；绩效动作、改进审查和申诉复核均写入哈希审计。
@@ -40,7 +40,7 @@
 - 任务认领按能力、历史、工具、成本、容量和独立性加权且幂等；改派必须携带理由和审批记录。
 - PromptBundle 区分招聘、入职和运营用途，支持版本激活回滚、入职基线和不可重复的公共资产发布记录。
 - 记忆可绑定 Task 上下文；隔离、纠正或删除 claim 时，引用该 claim 的在途上下文自动标记 Stale，必须重新检索。
-- 离职结束任职周期、释放岗位并隔离私有记忆；再入职需 Boss 批准、保留永久工号且不自动恢复私有记忆。
+- 离职结束任职周期、释放岗位，并在审批事务提交后由 Outbox handler 隔离私有记忆和删除向量；再入职需 Boss 批准、保留永久工号且不自动恢复私有记忆。
 - 记忆纠错若影响已执行外部动作，会自动创建 SEV2 安全事件并附影响记录引用。
 - 本地化设置按租户持久化 locale、IANA 时区和 ISO 4217 币种，更新递增版本并在边界校验。
 - 章程提供基础/受监管模板并支持自定义版本；招聘要求岗位 JD，支持拒绝、重试、Boss 录用批准、公平审计和申诉。
@@ -55,16 +55,16 @@
 - DataExportService 只允许 Owner 生成包含租户数据库行、领域模块状态、manifest 和 SHA-256 的 ZIP；凭据、会话、恢复码、外部登录事务和 KeyVault 明确排除。
 - 供应链脚本生成 LicenseInventory、CycloneDX SBOM 和第三方通知，检查 NuGet/pnpm 已知漏洞、Action commit 固定、迁移 dry-run、N/N-1 升级/回滚边界和 ReleaseManifest。
 - 四个服务统一接入 `RegentAgent.Observability`，按 `off/local/otlp/elastic` Profile 选择 Console 或 OTLP Exporter；指标、日志、追踪可独立开关，启动时校验采样和 endpoint。启用 ASP.NET Core/HTTP 仪表，严格脱敏处理器移除敏感属性、消息体、格式化消息和异常详情，OTLP 导出超时为 5 秒。
-- 审计检查点通过 `IAuditAnchorStore` 选择本地 JSONL 或对象存储锚定，验证时按租户和检查点序号读取并比对 Merkle 根。
+- 审计检查点通过 `IAuditAnchorStore` 选择本地 JSONL 或对象存储锚定，验证时按租户和检查点序号读取并比对 Merkle 根。PostgreSQL 旧审计行保留原哈希，验证器接受微秒舍入窗口内的候选 100 纳秒时间戳并报告兼容数量；新事件先舍入到微秒再计算哈希。
 - Gateway KeyVault 通过 `IKeyVault` 选择本地文件或 Postgres `keyvault`；Postgres 适配使用 AES-GCM 信封加密、事务级 `app.tenant_id` 作用域和强制 RLS，迁移由独立角色执行。
-- ControlPlane 生产启动只校验 SchemaVersion 和租户表强制 RLS，不执行 `EnsureCreated`、SQLite 增量升级或演示数据种子；开发模式保留本地初始化。
+- ControlPlane 的 PostgreSQL 启动在 Development/Production 都只读校验 SchemaVersion 9、vector/ltree 扩展、精确列类型/可空性/默认值、全部租户表强制 RLS、精确 canonical 策略和唯一 `Memberships_user_read` SELECT/PUBLIC 策略、`SchemaVersions.Checksum` 列契约，以及 003～009 与嵌入 manifest 完全相同的 SHA-256；策略比较保留字符串字面量和带引号标识符的大小写/内容，只规范化引号外 token。启动并拒绝直接或继承的 superuser/`BYPASSRLS`/`CREATEROLE`/`CREATEDB`、任一应用表/schema Owner、schema CREATE、审计表写权或 SchemaVersions 写权。不执行 `EnsureCreated`、SQLite 增量升级、版本引导或演示数据种子。只有 SQLite/InMemory Development 保留本地初始化。迁移由独立 runner 在 DDL 前验证 checked-in checksum manifest，并在同一 psql 会话内获取基础锁及旧版逐迁移锁，完成历史校验、迁移、NULL-only checksum 恢复和精确版本集合断言；CI 重新生成并校验同一 manifest。运行角色通过最小权限脚本仅获业务 CRUD、审计表 SELECT/INSERT 和 SchemaVersions SELECT。
 - Gateway remote 模式必须配置服务凭据，生产管理端点必须配置独立管理员凭据；ControlPlane 生产 Runner 内部端点必须配置 Runner 凭据，缺失时启动失败而不是匿名开放。
 
 ## 2. 技术栈总览
 
 | 层次 | 技术 | 用途 | 约束 |
 |---|---|---|---|
-| 语言与运行时 | C#、.NET 10 LTS | 全部后端项目 | 具体 SDK 版本锁定 |
+| 语言与运行时 | C#、.NET 10 LTS | 全部后端项目 | `global.json` 锁定 SDK 10.0.404，CI 与容器基础镜像使用已验证 digest |
 | 服务宿主 | ASP.NET Core、Generic Host、BackgroundService | API、常驻调度、Worker | 四服务可独立部署 |
 | Agent 框架 | Microsoft Agent Framework 1.0 | Agent、Workflow、Skill、Hosting | 核心账本、权限、事务不依赖 MAF |
 | 并发 | `System.Threading.Channels`、`async/await` | 收件箱、队列、流式处理 | Runner 内队列不是持久真相 |
@@ -106,7 +106,7 @@
 | OwnerDelegation | 限时、限范围、不可转授权的所有者委托 |
 | OIDC Identity | 以 `issuer + sub` 标识的企业身份 |
 | SupportGrant | 运营人员访问指定租户的短时授权 |
-| Assignment Token | 单租户、单员工、单任务的短期执行身份 |
+| Assignment Token | 单租户、单员工、单任务、单任职周期的短期执行身份 |
 | Deployment Token | Runner 调用控制面的部署级身份 |
 
 ### 3.2 组织与执行
@@ -569,7 +569,9 @@ systemd
 ### 10.1 身份边界
 
 - Human、Operator、Runner、Gateway、Butler 使用不同 audience 和 scope。
-- 租户 Token 不能访问 Ops API，Operator Token 不能直接访问 Tenant API。
+- 租户 Token 不能访问 Ops API，Operator Token 不能直接访问 Tenant API；租户与 Operator 使用独立 Cookie 和 audience。
+- 整个 `/ops` 路由组（含 `/ops/auth/me`）统一应用 `OperatorReader`；所有 POST/PUT 等状态变更端点另加 `OperatorWriter`。Reader 保留 `SRE`、`Ops Viewer`、`OperationsAdmin`、`TenantAdmin`、`SecurityAuditor`、`BillingAdmin` 和 `BreakGlassOperator`，Writer 仅排除 `Ops Viewer`；因此 Ops Viewer 可读取全部 GET 与 `/ops/auth/me`，但写入返回 403。不引入新的按角色端点权限矩阵。
+- 两个应用的 demo 登录均不是生产身份方案；生产 Operator SSO、MFA/step-up 和服务端 Operator 会话撤销存储保持后置。
 - SupportGrant 必须绑定 operator、tenant、scope 和有效期。
 - 员工 Token 不包含模型管理、预算修改或审批权限。
 - 密钥轮换使用 `kid` 重叠，吊销最长传播延迟 60 秒。

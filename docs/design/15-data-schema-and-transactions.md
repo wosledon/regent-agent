@@ -1,6 +1,6 @@
 # 15 数据 Schema 与事务边界
 
-- 版本：v0.3（schema 4 已生成；本地真实 Postgres/RustFS 容器冒烟已验证）
+- 版本：v0.8（schema 9 里程碑租户隔离基线；审批决定身份、Outbox 有界重试、checksum 恢复与运行角色边界持续校验）
 - 范围：Postgres Schema、RLS、RustFS、本地工作区、事务、Outbox/Saga、分区和状态类型
 - 对应需求：FR-057、BR-050、BR-051、BR-052、BR-166
 - 对应缺口：G-05、G-06、G-07、G-09、G-16
@@ -30,6 +30,7 @@ keyvault     Gateway 加密模型密钥、包装数据密钥、版本元数据
 evaluation   评测集、密封数据、评测运行
 platform     模型目录、运营配置
 audit        审计、Outbox、Inbox、幂等记录
+memory       MemoryEmbeddings pgvector 投影（当前实体位于 public schema）
 ```
 
 Schema 是模块代码边界，不是租户隔离边界。运营数据使用独立权限和访问路径。
@@ -63,12 +64,36 @@ RLS 与复合约束必须由 Postgres 集成测试验证，SQLite 测试不能�
 ### 3.1 当前迁移基线
 
 - `deploy/sql/controlplane-003.sql` 从 EF Core Npgsql 模型生成完整业务表，并对 22 张含 `TenantId` 的表启用且强制 RLS。
-- `deploy/sql/controlplane-004.sql` 增加按 `app.user_id` 读取成员关系的策略，将当前 SchemaVersion 提升为 4，支持登录和租户列表。
-- 所有租户表策略同时约束 `USING` 与 `WITH CHECK`，只允许 `current_setting('app.tenant_id')` 匹配当前租户。
+- `deploy/sql/controlplane-004.sql` 增加按 `app.user_id` 读取成员关系的策略，将 SchemaVersion 提升为 4，支持登录和租户列表。
+- `deploy/sql/controlplane-005.sql` 将 SchemaVersion 提升为 5：创建 `MemoryEmbeddings`、pgvector HNSW 余弦索引和强制 RLS；把 `Positions.Path` 映射为 ltree，按租户递归回填并创建 GiST 索引。
+- `deploy/sql/controlplane-006.sql` 将 SchemaVersion 提升为 6，只替换 PostgreSQL 目录注释并写入版本记录；不修改业务行、列类型、默认值、约束、索引、RLS、授权或扩展版本。
+- `deploy/sql/controlplane-007.sql` 将 SchemaVersion 提升为 7，为 `Approvals` 增加七个字段：`RequesterUserId`、`TargetEmployeeId`、`TargetCandidateId`、`TargetPositionId`、`ActionHash`、`ConsumedAt`、`ConsumedBy`；旧记录默认失败关闭，不得跨目标或重复执行。
+- `deploy/sql/controlplane-008.sql` 将 SchemaVersion 提升为 8，为 `Approvals` 增加 `DecidedBy`/`DecidedAt`，为 `Outbox` 增加 `NextAttemptAt`/`LastError`，并增加可空 `SchemaVersions.Checksum` 迁移校验和列；支持有界退避、处理租约、隔离状态和迁移历史完整性校验。
+- `deploy/sql/controlplane-009.sql` 将 SchemaVersion 提升为 9：回填 `Milestones.TenantId` 并设为非空，为 `Projects(TenantId, Id)` 建立唯一索引，将里程碑项目外键改为 `(TenantId, ProjectId)` 复合外键，并启用强制 RLS 与 canonical 租户策略；`BEFORE INSERT OR UPDATE` 触发器仅在 `TenantId` 省略或随 `ProjectId` 更新而未显式改租户时从 `Projects` 派生，保证 N-1 旧插入形状兼容而不削弱 `NOT NULL`、复合外键或 RLS。
+- 所有租户表策略同时约束 `USING` 与 `WITH CHECK`，只允许 `current_setting('app.tenant_id')` 匹配当前租户；启动校验只对引号外 token 忽略大小写、空白、冗余 `text` 转换和括号，并单独精确比较字符串字面量与带引号标识符，兼容 PostgreSQL 17/18 将 `NULLIF` 反解析为大写，同时拒绝设置名大小写/空格变化、错误引号列、`OR true`、缺失 `WITH CHECK` 和弱化谓词。
+- 当前物理基线中 `Milestones` 已由 009 纳入 `TenantId`、强制 RLS 和复合外键；`Tasks` 的项目外键仍是 003 的单列外键，应用必须继续经 `Projects` 校验租户，不能把单列外键当作跨租户防护。
+- 006 的注释不虚构数据库约束：`Approvals` 没有 `Version` 列；`Memberships_user_read` 仅约束 SELECT 且与租户策略在 SELECT 上按 permissive OR 组合，应用仍须按当前租户过滤；`Artifacts.ProjectId` 没有外键或项目删除级联；`AuditRecords` 链首 `PreviousHash` 是空字符串而非 NULL。相应语义由应用状态条件、显式鉴权、清理流程和哈希链校验维护，006 不新增约束。
+- 其他物理注释边界：`Notifications.RecipientId` 当前是账户 `UserId` 而非 EmployeeId；`Projects.SpentMinor` 是用量投影累加的项目快照；`Positions.CapabilitiesJson` 不替代能力策略或执行层授权。
 - `TenantRlsConnectionInterceptor` 在已认证请求打开 Postgres 连接时设置租户上下文，连接关闭前重置；`TenantRlsScope` 为身份、后台逐租户任务等显式流程在事务内设置租户和用户上下文；无身份连接不设置租户，RLS 默认拒绝。
-- `scripts/migrate-postgres.py` 校验迁移版本、SHA-256、事务和 RLS 声明；真实执行使用 advisory lock、`ON_ERROR_STOP` 和 SchemaVersion 检查。
-- 应用启动只校验 SchemaVersion 与 RLS，不执行 DDL；迁移角色与运行角色必须分离，运行角色不得拥有表或 `BYPASSRLS`。
-- 本地已对真实 Postgres 应用 schema 4，验证非超级用户运行角色、22 表强制 RLS、API 与直接 SQL 租户隔离，并完成真实 RustFS 导出上传和校验；生产事务、并发、混沌和升级集成测试仍为明确边界。
+- `scripts/migrate-postgres.py` 校验迁移版本、SHA-256 和事务，统计 RLS 声明，并把 Npgsql 关键字连接串显式转换为 libpq 形式；Expand 执行前先读取 checked-in manifest，并要求文件/版本/SHA-256 集合精确匹配，篡改 SQL 在任何 DDL 前失败。空数据库通过 `to_regclass` 检测缺失的 `SchemaVersions` 并从 003 开始。真实执行在同一个 psql 会话中获取基础锁及旧版逐迁移锁 `6317000 + target`，重新读取并验证历史、应用全部待执行迁移、仅回填 NULL checksum、断言历史版本集合与最新版本完全匹配后按逆序释放 lock；失败时 `ON_ERROR_STOP` 结束会话并释放锁。`--dry-run`/`--check` 不连接数据库，精确 RLS/策略由 PostgreSQL 集成测试和启动只读校验执行。CI 先执行真实 psql 冒烟，再调用同一 runner。
+- Schema 8 引入 checksum 历史：runner 只回填 NULL 值，绝不覆盖非 NULL 校验和；发现非 NULL 漂移立即失败。008 已提交但回填前中断的数据库可在下一次运行自动恢复，历史版本缺失或最新迁移未写入版本行时失败关闭。`deploy/sql/controlplane-checksums.json` 是 checked-in 且嵌入 ControlPlane 程序集的权威 manifest，记录 003～009 每个文件的精确 SHA-256；CI 通过 `scripts/check-migration-checksums.py` 重新生成并校验，runner 与启动校验共享同一 manifest 解析规则并消费同一集合。
+- 所有环境下 PostgreSQL 启动均严格只读校验：SchemaVersion 必须为 9，并验证 vector/ltree 扩展、`MemoryEmbeddings.Vector vector(256) NOT NULL`、HNSW `vector_cosine_ops`、`Positions.Path ltree NOT NULL`、GiST 索引、九个审批权威字段与两个 Outbox 重试字段的精确类型/可空性/默认值、`SchemaVersions.Checksum text NULL` 且无默认值，以及 003～009 每个版本与嵌入 manifest 完全相同的 SHA-256；格式合法但值被篡改同样失败。不执行 `EnsureCreated`、本地增量升级、版本引导或演示种子。只有 SQLite/InMemory 的 Development 路径保留本地初始化。
+- `PostgresRlsValidator` 以 EF 含 `TenantId` 的实体表加 `MemoryEmbeddings` 为显式 allowlist，同时扫描当前 schema 的所有非扩展物理表，拒绝未映射的 `TenantId` 表。它要求启用且强制 RLS、精确 canonical permissive ALL 策略，并要求 `Memberships` 恰好存在一个精确的 `Memberships_user_read` permissive SELECT/PUBLIC 策略；缺失、复制、弱化、命令或角色错误均失败。运行角色不得是或继承 superuser/`BYPASSRLS`/`CREATEROLE`/`CREATEDB`，不得拥有或可继承任一应用表/schema Owner 角色，不得有 schema CREATE、审计表写权或 SchemaVersions 写权。
+- `deploy/sql/runtime-grants.sql` 先撤销运行角色和 PUBLIC 在当前 schema 的 CREATE、表/序列及列级权限，再授予业务表 CRUD；`AuditRecords`/`AuditCheckpoints` 仅 SELECT/INSERT，`SchemaVersions` 仅 SELECT。租户清除不再删除审计检查点，以保持审计表 append-only。
+- 本地未配置 PostgreSQL DSN 时，真实数据库集成测试按环境门控跳过，不把跳过表述为通过。CI 使用按 digest 固定的 pgvector PostgreSQL 17/18 矩阵，通过同一 runner 应用 003–009，再执行最小权限授权并运行迁移、RLS、权限和审批并发集成测试。
+- `MemoryEmbeddings` 的 `(TenantId, ClaimId)` 复合主键允许不同租户使用相同 claim ID；应用层每次 ADO.NET 操作都开启事务并 `SET LOCAL app.tenant_id`，RLS 同时执行 `USING`/`WITH CHECK`。租户 GUID 文本按值规范化，大小写、花括号和连字符差异不产生新租户。该表是向量投影，不表示 claim 内容已迁入 PostgreSQL。
+- `Positions.Path` 使用 `root.<position-guid>[.<child-guid>]` 规范格式，最多四级岗位（ltree `nlevel` 最多为 5）。回填会拒绝环、缺失或跨租户父节点以及超四级数据；公司启动、创建、合并和拆分均维护路径。
+- claim、Finding、图谱、纠错、影响和上下文绑定仍由 JSON 本地模块保存；PostgreSQL 全文检索和完整生产记忆权限传播尚未实现。
+
+### 3.2 Schema 6～9 目录注释与验证
+
+- 006 是按 `003 → 004 → 005 → 006` 顺序执行的可重复事务迁移，使用调用方 `search_path` 解析带引号对象；覆盖 005 的英文注释并补充业务含义、状态机、租户/RLS、审计哈希、幂等、租约/fencing、预算币种、生命周期、保留、JSON 投影、外键、pgvector 与 ltree 不变量。
+- 注释覆盖当前 `public` 物理 Schema 的 27 张业务表、56 个索引（含 27 个主键索引）、29 个基线 PostgreSQL `p`/`f`/`u`/`c` 目录约束（27 PK + 2 FK，基线 UNIQUE/CHECK 为 0；合成 UNIQUE/CHECK 测试把分母提高到 31；唯一索引只计入 `indexes`），以及 `vector`、`ltree` 两个扩展。业务用户列在 006 为 231，007 增加七个审批字段后为 238，008 增加两个审批决定字段和两个 Outbox 重试字段后为 242，009 增加 `Milestones.TenantId` 后为 243；`SchemaVersions.Checksum` 属于迁移元数据，不计入业务用户列分母，但脚本单独要求其中文注释非空。
+- `deploy/sql/verify-schema-comments.sql` 基于 `current_schema()` 和 PostgreSQL 目录统一统计表、列、约束、索引和扩展注释；脚本显式列出 `tables`/`columns`/`constraints`/`indexes`/`extensions` 五类并左连接聚合，缺失分类以 `total=0` 触发零分母异常。约束分母只包含 `contype IN ('p','f','u','c')`。PostgreSQL 18 将表 `NOT NULL` 属性额外暴露为 `contype='n'` 目录行，验证器明确排除，不进入约束分母。注释去空白后必须包含基本汉字（U+4E00–U+9FFF），NULL、空白、纯英文或纯符号均计为缺失。脚本拒绝零对象分母和任何缺失，成功时输出实际 `commented/total` 与 `100%` 覆盖率。
+- `PostgresMigrationTests` 覆盖 003–009：006 验证结构/RLS/授权目录与业务行数不变；007/008/009 在应用前种子化代表性数据，重复执行后断言行数、字段值和目录结构不变。009 验证里程碑租户回填、复合外键、强制 RLS、N-1 无 `TenantId` 插入经运行角色派生租户、跨租户读写隔离与两租户行为 canary。表、列、索引、约束和扩展注释分别被置为缺失、空白和纯英文时验证必须失败；再次应用 006 后全部恢复且版本 6 仍唯一。PostgreSQL 17/18 回归还验证 003–009 后基线约束分母为 29/29（27 PK + 2 FK，基线 UNIQUE/CHECK 为 0）、PG18 的 `n` 行存在但不影响分母、合成 UNIQUE/CHECK 把分母提高到 31（唯一索引仍只计入 `indexes`），以及真实约束注释缺失会失败。
+- `PostgresMigrationTests` 拥有 deparse 与 RLS/权限回归：PostgreSQL 17/18 验证 deparse 后 canonical 策略与 `Memberships_user_read` 仍精确匹配；RLS 负例覆盖成员策略缺失、`USING(true)`、复制、命令/角色错误以及运行角色直接或继承 `CREATEROLE`/`CREATEDB`。
+- `PostgresMigrationRunnerTests` 只拥有 runner/checksum/恢复/tamper/lock 行为：调用真实 `scripts/migrate-postgres.py` 创建空临时数据库并验证版本 003–009 的 checksum 全部匹配；重复运行验证 SKIP，篡改版本 7 checksum 后验证失败关闭，并覆盖 schema 3～7（含无 Checksum 列的 schema 7）升级到 9、008 后回填中断恢复、并发 runner、旧版逐迁移锁互斥、Tampered SQL 在任何建表前失败和最新迁移未写版本行的失败场景。该测试需要 `REGENT_TEST_POSTGRES_MIGRATION_DSN` 和 psql，未配置 DSN 时按环境门控跳过。
+- 关系权威源与投影必须区分：已迁移表由 PostgreSQL 负责持久化和 RLS；`MemoryEmbeddings` 只保存 claim 的向量投影，claim、Finding、图谱、纠错、影响和上下文绑定仍由 JSON 本地模块负责。账户会话、邀请和 OIDC 绑定等尚未关系化的模块也不得由逻辑 ERD 推断为已落地表。
 
 ## 4. 核心表族
 
@@ -85,6 +110,7 @@ RLS 与复合约束必须由 Postgres 集成测试验证，SQLite 测试不能�
 | 容量治理 | `capacity_policies`、`queue_limits`、`capacity_reports` |
 | 合规治理 | `compliance_profiles`、`compliance_controls`、`compliance_evaluations`、`compliance_violations`、`compliance_evidence_exports` |
 | 对象元数据 | `artifacts`、`workspace_snapshots`、`object_uploads` |
+| 记忆向量投影 | `MemoryEmbeddings`（pgvector，claim 正文仍在 JSON） |
 | 评测 | `benchmark_suites`、`dataset_versions`、`evaluation_runs`、`case_results`、`judge_assignments`、`judge_calibrations`、`contamination_findings`、`statistical_gates`、`evaluation_retests` |
 | 可靠性 | `outbox`、`inbox`、`audit_events` |
 
@@ -96,7 +122,7 @@ RLS 与复合约束必须由 Postgres 集成测试验证，SQLite 测试不能�
 - 时间使用 `timestamptz`，业务时间统一 UTC。
 - 金额使用 `numeric(18,8)`，Token 使用 `bigint`。
 - 可变聚合使用 `row_version` 乐观并发。
-- JSONB 只存扩展元数据，不承载核心业务约束。
+- JSON/JSONB 投影只存扩展元数据或本地模块快照，不承载核心业务约束；关系表仍是已迁移模块的权威源，MemoryEmbeddings 仅是向量投影。
 - 审计、账本、DoneEvidence 和 Ready 对象不物理删除。
 - 表名使用 snake_case 复数，列名使用 snake_case。
 
@@ -143,6 +169,8 @@ public sealed record TaskStatus
 
 ```text
 messages(tenant_id, seq) UNIQUE
+MemoryEmbeddings(Vector) USING HNSW vector_cosine_ops
+Positions(Path) USING GiST
 outbox(tenant_id, published_at) WHERE published_at IS NULL
 inbox(consumer_id, event_id) UNIQUE
 tasks(tenant_id, status, created_at)
